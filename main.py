@@ -35,6 +35,8 @@ from __future__ import annotations
 import sys
 import warnings
 import json
+import os
+import time
 from dataclasses import asdict
 from pathlib import Path
 
@@ -60,8 +62,8 @@ _WANT_PDF = False        # 由 --pdf 打开，见 main()
 _OH_OUTPUT = ""          # 由 --optionhelper quote|recommend 打开，见 main()
 _CLIENT_CONSTRAINTS = None  # 在 main() 解析为 ClientConstraints
 
-from core import (brief, event_evidence, genres, market_confirmation, overrides as ov, pipeline,
-                  thesis, topics, validator, writer)
+from core import (brief, config, event_evidence, genres, market_confirmation, model_registry,
+                  overrides as ov, pipeline, thesis, topics, validator, writer)
 from core.client_constraints import ClientConstraints, parse_cli as parse_client_constraints
 from core.provider import get_provider
 from core.run_tracker import RunTracker
@@ -375,7 +377,7 @@ def _write_interactive_review(ma, rc, report_path: str) -> tuple[str, str]:
 def _ask_picks(prepared) -> list[str] | None:
     """打印候选清单并读取分析师勾选。返回选中的 id 列表；直接回车 = 交回自动挑选。
 
-    候选含三类：数据触发、已确认事件传导与研报提炼。事件型报告必须至少保留
+    候选含三类：数据触发、已确认事件传导与研报提炼。明确外部事件报告必须至少保留
     一条事件传导主轴；编号跨三类连续，由 pipeline.candidates 统一分配。
     """
     cands = pipeline.candidates(prepared)
@@ -427,7 +429,7 @@ def _ask_picks(prepared) -> list[str] | None:
         print("  ⚠ 未识别到有效序号，改由系统自动挑选。")
         return None
     if getattr(prepared, "event_required", False) and not any(c.kind == "event" for c in chosen):
-        print("  ⚠ 事件型报告至少需要一条已确认事件传导主轴，改用包含传导链的系统建议。")
+        print("  ⚠ 明确外部事件报告至少需要一条已确认事件传导主轴，改用包含传导链的系统建议。")
         recommended = pipeline.select_candidates(cands, pipeline.recommend(cands))
         return [c.id for c in recommended]
 
@@ -445,32 +447,12 @@ def _ask_picks(prepared) -> list[str] | None:
 
 
 def generate(cand: topics.TopicCandidate, *, pick: bool = False,
-             tracker: RunTracker | None = None) -> str | None:
-    """B路径：对一个已勾选的候选主题生成一页通。"""
-    if not cand.可直接取数:
-        print(f"  ⚠ 标的未通过校验（{cand.代码校验}），跳过。请人工确认代码后重试。")
-        return None
-    print(f"\n▶ 生成：{cand.主题}〔{cand.类型}〕代表标的 {cand.建议标的} {cand.建议标的代码}")
-
-    prepared = chosen = None
-    if pick:
-        print("  摸底取数、跑触发引擎、抽取 sources/ 研报…")
-        if tracker:
-            with tracker.stage("data_collection", "拉取行情并准备论点"):
-                prepared = pipeline.prepare(cand.建议标的代码, with_docs=True)
-        else:
-            prepared = pipeline.prepare(cand.建议标的代码, with_docs=True)
-        chosen = _ask_picks(prepared)
-    if tracker:
-        with tracker.stage("market_research", "拉取市场数据并形成研究底稿") as stage:
-            ma = pipeline.run(cand.主题, cand.类型, cand.建议标的代码,
-                              prepared=prepared, chosen=chosen)
-            if not ma.ok:
-                tracker.fail_stage(stage, ma.error or "市场研究生成失败")
-    else:
-        ma = pipeline.run(cand.主题, cand.类型, cand.建议标的代码,
-                          prepared=prepared, chosen=chosen)
-    return _finish(ma, cand.主题, tracker=tracker)
+             tracker: RunTracker | None = None, confirm_market: bool = False) -> str | None:
+    """扫描选题也走统一需求解析与取数确认，系统建议不能代替人工确认。"""
+    text = (f"研究主题：{cand.主题}\n研究类型：{cand.类型}\n"
+            f"选题理由：{cand.推荐理由}\n市场信号：{cand.信号依据}\n"
+            f"系统候选证券（尚未确认为研究取数目标）：{cand.建议标的} {cand.建议标的代码}")
+    return generate_from_brief(text, pick=pick, tracker=tracker, confirm_market=confirm_market)
 
 
 def generate_from_brief(text: str, *, pick: bool = False,
@@ -500,6 +482,7 @@ def generate_from_brief(text: str, *, pick: bool = False,
         previous_type = str(b.主导类型 or "").strip()
         b.主导类型 = genres.TYPE_EVENT
         b.分析师强制事件驱动 = True
+        b.事件路径 = genres.EVENT_PATH_EXTERNAL
         if not str(b.触发事件 or "").strip():
             b.触发事件 = str(b.研究主题 or b.主题 or text).strip()
         if (previous_type and previous_type != genres.TYPE_EVENT
@@ -507,7 +490,7 @@ def generate_from_brief(text: str, *, pick: bool = False,
             b.附加类型.insert(0, previous_type)
         if tracker:
             tracker.add_metadata("报告类型覆盖", "分析师勾选：事件驱动")
-        print("  · 分析师已勾选事件驱动型：启用事件事实、产业机制与A股暴露证据硬门。")
+        print("  · 分析师已勾选明确外部事件：启用事件事实、产业机制与A股暴露证据硬门。")
     # 略去"外部事实待补"：此刻无法行动，完整清单与覆盖模板都在内部底稿里
     print(brief.render(b, 含外部事实=False))
     if not b.ok:
@@ -515,11 +498,20 @@ def generate_from_brief(text: str, *, pick: bool = False,
 
     if market_confirmation.needs_confirmation(b):
         if not confirm_market:
-            print("  ✗ 该需求需要分析师确认研究市场与取数目标；GUI 会自动弹出确认页。")
+            print("  ✗ 所有研究在取数前都需分析师确认研究市场与取数目标；GUI 会自动弹出确认页。")
             print("    命令行请加 --confirm-market，并在提示后输入一行确认 JSON。")
+            if tracker:
+                tracker.add_metadata("终止原因", "尚未完成研究取数目标确认；命令行请使用 --confirm-market。")
             return None
         provider = get_provider()
         payload = market_confirmation.proposal(b, provider=provider)
+        if tracker:
+            tracker.add_metadata("ETF候选发现", {
+                "研究主题": payload.get("proposed_theme", ""),
+                "检索词": payload.get("etf_search_terms", []),
+                "候选数量": len(payload.get("suggested_instruments", [])),
+                "检索与淘汰记录": payload.get("etf_discovery_audit", []),
+            })
         while True:
             print("MARKET_CONFIRMATION_REQUIRED=" + json.dumps(payload, ensure_ascii=False), flush=True)
             line = sys.stdin.readline()
@@ -599,6 +591,17 @@ def generate_from_brief(text: str, *, pick: bool = False,
         research_context = {
             "market": str(getattr(b, "市场范围", "") or ""),
             "research_theme": str(getattr(b, "研究主题", "") or getattr(b, "主题", "") or ""),
+            "event_path": str(getattr(b, "事件路径", "") or genres.EVENT_PATH_NONE),
+            "impact_branches": [
+                {
+                    "name": item.名称,
+                    "relation": item.传导关系,
+                    "ashare_object": item.A股对象,
+                    "evidence_needed": item.待验证证据,
+                    "quote_direction": item.可报价工具方向,
+                }
+                for item in (getattr(b, "候选影响分支", None) or [])
+            ],
             "research_mode": str(confirmed.get("research_mode") or "industry"),
             "research_scope": str(
                 confirmed.get("research_scope")
@@ -721,12 +724,102 @@ def generate_from_brief(text: str, *, pick: bool = False,
                    research_only=research_only)
 
 
+def _prepare_llm_runtime(tracker: RunTracker) -> bool:
+    """每次运行先按账号目录校验模型；降级必须由分析师明确确认。"""
+    if not config.has_llm():
+        tracker.add_metadata("LLM模型预检", "未配置 API Key；由具体调用返回明确错误")
+        return True
+    started = time.perf_counter()
+    with config.no_proxy():
+        catalog = model_registry.fetch_model_catalog(
+            api_key=config.DEEPSEEK_API_KEY,
+            base_url=config.DEEPSEEK_BASE_URL,
+            cache_path=config.DEEPSEEK_MODEL_CACHE,
+        )
+    from core.run_tracker import record_external
+    record_external(
+        "DeepSeek models",
+        status="completed" if catalog.ok else "failed",
+        duration_seconds=time.perf_counter() - started,
+        detail=(f"source={catalog.source}，models={len(catalog.models)}，"
+                f"fetched_at={catalog.fetched_at or '—'}"),
+        error=catalog.error or catalog.live_error,
+    )
+    requested = {
+        "fast": config.model_for_purpose("fast"),
+        "quality": config.model_for_purpose("quality"),
+    }
+    plan = model_registry.build_model_plan(
+        catalog=catalog,
+        requested=requested,
+        fallback=config.DEEPSEEK_FALLBACK_MODEL,
+        allow_fallback=False,
+    )
+    if not catalog.ok:
+        tracker.add_metadata("LLM模型预检", plan.error or catalog.error)
+        tracker.add_recovery("模型目录暂不可达；本次沿用明确配置，若调用失败请在 LLM 设置中刷新并测试。")
+    elif catalog.live_error:
+        tracker.add_metadata("LLM模型目录", f"缓存 {catalog.fetched_at}（实时刷新失败）")
+        tracker.add_recovery("本次使用最近成功的模型目录校验；网络恢复后请刷新模型目录。")
+        # 缓存可能早于一次供应商升级：它可证明曾经存在，不能证明现在不存在。
+        # 实时目录失败时不依据缓存中的“缺席”强制降级，让真实 chat 请求给最终结论。
+        plan = model_registry.ModelPlan(True, requested=requested, effective=dict(requested),
+                                        error="实时模型目录不可达；未按旧缓存判定模型下线")
+    else:
+        tracker.add_metadata("LLM模型目录", f"实时 {catalog.fetched_at}｜{len(catalog.models)} 个")
+
+    if not plan.ok and plan.unavailable:
+        fallback_available = config.DEEPSEEK_FALLBACK_MODEL in set(catalog.models)
+        payload = {
+            "requested": requested,
+            "unavailable": plan.unavailable,
+            "fallback": config.DEEPSEEK_FALLBACK_MODEL,
+            "fallback_available": fallback_available,
+            "available_models": catalog.models,
+            "message": plan.error,
+        }
+        if not fallback_available:
+            print("LLM_MODEL_BLOCKED=" + json.dumps(payload, ensure_ascii=False), flush=True)
+            tracker.add_metadata("终止原因", plan.error)
+            tracker.add_recovery("打开 LLM 设置，刷新账号可用模型并重新选择快速档、质量档和备用档。")
+            return False
+        print("LLM_MODEL_CONFIRMATION_REQUIRED=" + json.dumps(payload, ensure_ascii=False), flush=True)
+        line = sys.stdin.readline()
+        try:
+            answer = json.loads(line or "{}")
+        except json.JSONDecodeError:
+            answer = {}
+        if not answer.get("allow_fallback"):
+            tracker.add_metadata("终止原因", "分析师未同意用备用模型替换不可用模型")
+            return False
+        plan = model_registry.build_model_plan(
+            catalog=catalog,
+            requested=requested,
+            fallback=config.DEEPSEEK_FALLBACK_MODEL,
+            allow_fallback=True,
+        )
+    if not plan.ok:
+        tracker.add_metadata("终止原因", plan.error)
+        return False
+
+    os.environ["RESEARCH_HELPER_RUN_FAST_MODEL"] = plan.effective.get("fast", requested["fast"])
+    os.environ["RESEARCH_HELPER_RUN_QUALITY_MODEL"] = plan.effective.get("quality", requested["quality"])
+    tracker.add_metadata("LLM模型请求", json.dumps(requested, ensure_ascii=False))
+    tracker.add_metadata("LLM模型本次执行", json.dumps(plan.effective, ensure_ascii=False))
+    if plan.fallback_used:
+        tracker.add_metadata("LLM模型显式降级", json.dumps(plan.fallback_used, ensure_ascii=False))
+        print("  ⚠ 已按分析师确认，仅本次使用备用模型："
+              + "；".join(f"{slot}→{model}" for slot, model in plan.fallback_used.items()))
+    return True
+
+
 def _run_tracked(tracker: RunTracker, work) -> object:
     """统一收尾，保证提前返回和异常也留下可追踪运行摘要。"""
     result = None
     try:
         with tracker.activate():
-            result = work()
+            if _prepare_llm_runtime(tracker):
+                result = work()
         status = "completed" if result else "failed"
         delivery = str(tracker.metadata.get("一页通交付校验") or "")
         if status == "completed" and delivery and not delivery.startswith("通过"):
@@ -820,13 +913,14 @@ def main() -> None:
             return None
 
         if not picks:
-            print("→ 勾选方式：python main.py 1 4   （可选多个，数量不固定）")
+            print("→ 勾选方式：python main.py 1 4 --confirm-market   （逐个确认研究目标）")
             print("→ 想自己挑论证角度：加 --pick")
             return "候选已生成"
 
         chosen = topics.select(slate, picks)
         print(f"已勾选 {len(chosen)} 个主题，开始生成…")
-        outs = [p for c in chosen if (p := generate(c, pick=pick, tracker=tracker))]
+        outs = [p for c in chosen if (p := generate(
+            c, pick=pick, tracker=tracker, confirm_market=confirm_market))]
         print(f"\n完成 {len(outs)}/{len(chosen)} 份一页通：{outs}")
         return outs
 

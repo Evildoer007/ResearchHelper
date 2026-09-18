@@ -1,7 +1,7 @@
 """新版 OptionHelper Skill 的正式参考报价桥接层。
 
 本模块不推荐结构、不拼价格，也不解析最终 HTML。当前对话 Agent 完成
-Recommender 的 Intent/Research/Critic 后，把已验证的公开 selection 交给 Skill；
+Recommender 的 Interpreter/Selector/Reviewer 后，把已验证的公开 selection 交给 Skill；
 Skill 的受控链路完成合同冻结、取数、收益结构、定价、Reporter 与 Designer。
 本模块只读取同一次 ReportRun 的 ``designer-input.json`` 冻结报价事实。
 """

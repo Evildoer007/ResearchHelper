@@ -184,6 +184,18 @@ def _build_user_prompt(topic: str, genre: dict, vocab: list[str], ctx: dict | No
            if profile else {}),
         "可用字段词表": vocab,
     }
+    event_path = str((ctx or {}).get("事件处理路径") or "")
+    if event_path == gr.EVENT_PATH_EXTERNAL:
+        spec["明确外部事件型约束"] = (
+            "正文先确认事件及窗口，再使用分析师确认的主影响分支说明传导；至多带一个备选分支。"
+            "产品工具是独立落点，不占用研究论点；不得把未选分支或候选影响假设写成事实。"
+        )
+    elif event_path == gr.EVENT_PATH_MARKET_STATE:
+        spec["市场状态触发型约束"] = (
+            "本题由行情状态而非外部公告触发。优先组织：当前分化/状态、历史类似区间、"
+            "持续与失效条件；没有真实资金流字段时不得把价格相对表现写成资金迁移。"
+            "产品工具作为独立落点，不占用研究论点。"
+        )
     if chosen:
         picked = [f for f in fired if f["论点id"] in set(chosen)]
         for c in (doc_claims or []):

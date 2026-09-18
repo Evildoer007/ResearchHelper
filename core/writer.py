@@ -23,6 +23,39 @@ from .pipeline import MarketAnalysis
 
 # 从研报原文里挑出可引用的数字（带单位，避免把年份、序号也算进去）
 _NUMS = re.compile(r"-?\d+(?:\.\d+)?\s*(?:%|倍|万亿韩元|亿韩元|万亿元|亿元|万元|亿|元|pct|bp|个百分点)")
+_INTERNAL_ID = re.compile(
+    r"\[(?:[FMEC]\d+)(?:\s*[+＋、/,]\s*[FMEC]\d+)*\]|"
+    r"\b[FMEC]\d+(?:\s*[+＋、/,]\s*[FMEC]\d+)+\b",
+    re.I,
+)
+_CONFIDENCE_LABEL = re.compile(
+    r"[，；,;]?\s*(?:(?:该|本)?(?:证据链|传导链|结论|判断)?(?:的)?)?"
+    r"(?:可信度|置信度)\s*(?:为|是|：|:)?\s*(?:较高|较低|高|中等?|低)(?:水平)?",
+    re.I,
+)
+
+
+def _public_text(value: object) -> str:
+    """正式报告文字兜底脱敏；内部编号和证据等级只允许进入内部底稿。"""
+    text = _INTERNAL_ID.sub("", str(value or ""))
+    text = _CONFIDENCE_LABEL.sub("", text)
+    # 查询日期属于页眉/图表元信息，不在摘要或每段分析中重复播报。
+    text = re.sub(
+        r"(?:数据查询日\s*[：:]\s*|截至(?:本次)?数据查询日\s*)(?:20\d{2}[-/]\d{1,2}[-/]\d{1,2})\s*[。，；,:：]?\s*",
+        "", text,
+    )
+    text = re.sub(r"(?:事件事实|产业机制|A\s*股暴露)(?:层面|方面)\s*[：:，,]\s*", "", text)
+    text = re.sub(r"（\s*[；，,;]*\s*）", "", text)
+    text = re.sub(r"([（；，])\s*[；，]+", r"\1", text)
+    return text.strip(" ；，,;")
+
+
+def _field_payload(field, ma: MarketAnalysis) -> dict:
+    return {
+        "字段": field.field,
+        "值": field.display or str(field.value),
+        "数据日期或区间": field.as_of or getattr(ma, "数据查询日", ""),
+    }
 
 
 @dataclass
@@ -52,11 +85,14 @@ class ReportContent:
     tokens: int = 0
     ok: bool = False
     error: str = ""
+    内部审核备注: list[str] = dfield(default_factory=list)
 
 
 _SYSTEM = """你是场外衍生品投资策略研报的"撰稿器"。根据论证计划与【真实数据】，为每条逻辑撰写论述与图表规格。
 铁律：
 1. 只能使用"可用数据"里给出的真实数字；绝对不得编造、估算或引用任何未给出的数字。
+   `数据查询日`由页面统一展示，不要写入核心结论或作为分析段落前缀。字段另有报告期或日期区间时，
+   按业务需要在数字旁说明（例如“2026年中报”“近20日”），查询日不能替代财报期或统计区间。
 2. "缺失数据"的字段表示数据待补——不要为其臆造数值，**也不得把缺失字段当作论据去支撑任何结论**
    （例如资金流数据缺失时，不可写"资金逆势流入验证修复动能"）；应写明"（数据待补）"并保持中性。
 2.1 **证伪义务（重要）**：给定的"具体论点"只是**待检验的假设**，不是既定结论。
@@ -156,8 +192,16 @@ _SYSTEM = """你是场外衍生品投资策略研报的"撰稿器"。根据论�
    这个字段没给（多数板块类需求没有触发实体）时，不必强行编一个事件角度。
 3.5.1 **有“已核验事件证据链”时，事件本体与本次 A 股行业/ETF 的因果连接只能按
 该证据链写。** 不得把“同属科技/半导体”等概念相近自行扩写为供应链、竞争或受益关系；
-每次提到传导，须清楚区分“事件事实”“产业机制”“A股对象暴露依据”“受控组合结论”与“A股市场响应”。
-组合结论不是新的事实来源，只能按其列出的证据ID和边界表述；直接传导证据仍可作为兼容路径。
+内部推理须区分“事件事实”“产业机制”“A股对象暴露依据”“受控组合结论”与“A股市场响应”，但不要将这些
+分类标签作为客户正文的固定开头。自然说明变量变化、影响渠道、获益/承压环节、市场定价与投资判断。
+组合结论不是新的事实来源，只能按所附原文和适用边界表述；直接传导证据仍可作为兼容路径。
+3.5.2 **客户报告不得出现 F1、M1、E1、C1 等内部证据编号，也不得评价“可信度/置信度
+高、中、低”。** 这些属于内部审核信息，只保留在内部底稿。正文只陈述经确认的事实、
+来源、传导关系、适用边界及仍待验证之处。
+3.5.3 **客户报告是投资分析，不是证据审计报告。** 已通过审核的主传导链应落到产业变化、预期兑现、估值与
+市场方向。不要反复说“存在证据跳跃”“因果关系不可靠”“未直接对应平台”等审核措辞；这些写入`内部审核备注`。
+真正影响投资判断的限制应转成业务可观察条件（订单、出货、渗透率、盈利兑现等），不能掩盖重大不确定性，也不能
+把没有证据支持的方向写成确定受益。缺乏具体公司产品进展时，只讨论已支持的产业环节，不自行填补关系。
 4. 图表规格只描述"画什么"（图型、要展示的数据点、标题），不要自己画图或输出图片。
 4.0 **`图表规格列表` 给 1~2 项。判断标准是"这条论述用到了几组不同性质的数据"，
    而不是"至少给一张就够了"。** 论述里每摆出一组读者需要看见的数据，就该配一张图。
@@ -214,25 +258,20 @@ _SYSTEM = """你是场外衍生品投资策略研报的"撰稿器"。根据论�
      `大小`只能是非负规模，必须提供 `x轴`、`y轴`、`大小轴`。
    - `evidence_flow`：事件型研究中已核验的“事件事实 → 传导依据 → A股主题影响”链，
      每点 {标签, 说明}，只可写已给出的传导证据；它不是数值趋势图。
-4.1.1 **标题必须是一句可核对的结论，而非“XX走势/XX分析”这类栏目名。** 同时为每张图给
-   `数据截至`、`单位`、`样本口径` 与 `图表结论`；若输入没有日期、样本或单位，明确写“见底稿”，
-   不得猜测。图上只高亮一个重点，其余数据弱化；不得使用彩虹色或以颜色替代数值/标签。
-   `图表结论` 与标题同义，便于渲染器在标题被程序图覆盖时仍保留结论。
+4.1.1 **图表标题使用简洁的“对象＋指标/关系”题目，不使用带数值的结论句。** 例如“主题篮子近20日涨跌幅”
+   “DRAM市场占有率”“成分股PB与净利润增速”；平台名和“20日”这类对象/时间标签可以保留，但不要把涨幅、
+   市占率数值或“明显提升、支撑估值”等结论写进图题。分析逻辑的标题仍可是一句判断，不与图题混淆。为每张图给
+   `数据截至`、`单位`、`样本口径` 与 `图表结论`。`数据截至`必须使用输入中的明确日期；
+   缺少日期的数据不得进入客户图表，不得写“见底稿”。图上只高亮一个重点，其余数据弱化；
+   不得使用彩虹色或以颜色替代数值/标签。
+   `图表结论`另外记录分析含义，仅用于内部复核，不覆盖客户图题。
 4.2 数据点的值**只能来自给你的真实数据**（可用数据/板块全景/成分股明细/研报依据），
    一个都不许编。画不出来就不给图表规格，宁可无图也不要假数据。
-5. 核心结论最后综合全部逻辑（含推荐方向），一段话，**180~280 字**。
-   此前这里只写"一段话"、没给字数，实测产出从 65 字到 367 字相差 5.6 倍：
-   短的把三条逻辑压成一句空话，长的把正文又抄了一遍。它印在版面最上、
-   是多数读者唯一会完整读完的一段，必须**每条逻辑各占一句、并落到方向上**，
-   而不是复述正文细节——细节读者往下看就有。
-5.0.0 **有"触发实体自身数据"时，核心结论必须以它开头**：先一句话交代事件本体
-   自己的市场表现（如"SK海力士近20日股价-12.62%，波动率处近3年98.7%分位，
-   反映市场对本轮业绩的剧烈分歧"），再转到 A股板块怎么响应——即使入选的几条
-   逻辑本身跟事件本体没有直接关联也要写，这是唯一一处不随选中逻辑变化、
-   保证事件本体一定被交代的位置。**这句话只在核心结论出现一次**，
-   正文逻辑里不要再逐字或近似复述同一句开头（正文按 3.5 的从严标准，
-   只在真正相关的那一条里提，多数情况下正文可以完全不提事件本体）。
-   没有这个字段时（多数板块类需求没有触发实体）不受此约束。
+5. 核心结论综合全部逻辑，一段话，**120~180 字、3~4句**。先回答客户最关心的方向和主要机会，再说明
+   最重要的驱动、市场是否已定价及关键风险。最多引用两项带单位的关键数据，不要求一定放数字；不要罗列
+   PB、ROE、净利增速、资金流、波动率等一串指标，明细留给正文与图表。不得出现查询日期前缀或证据审计评价。
+5.0.0 事件型核心结论先概括“事件改变了什么、主要影响哪个环节、机会与兑现条件”，不强制以事件主体的股价
+   或波动率开头。只展开已经审核支持的主方向，备选方向至多一句点到，不把一页通写成多行业清单。
 5.0 每条逻辑的 `结论` **不印进成品**，它是交给下游产品选择环节（OptionHelper）的输入。
    因此不要复述正文已说过的话（正文写了"高毛利红利期或走向终结"，
    结论再写一遍"红利期或退却"等于同一句说两遍），
@@ -296,7 +335,7 @@ def _build_user_prompt(ma: MarketAnalysis) -> str:
             "方向倾向": lg.结构方向倾向,
             "惯用图类型": _chart_type(lg.逻辑id, getattr(ma, "doc_cats", None)),
             "可用数据": [
-                {"字段": f.field, "值": f.display or str(f.value)}
+                _field_payload(f, ma)
                 for f in lw.auto
                 if not f.field.startswith(DOC_FIELD_PREFIX)
                 and not f.field.startswith(EVENT_FIELD_PREFIX)
@@ -312,6 +351,7 @@ def _build_user_prompt(ma: MarketAnalysis) -> str:
             pkg["研报依据_须引用其中数字"] = [
                 {"出处": f"{f.source} {f.note}".strip(),
                  "原文": f.display,
+                 "资料日期": f.as_of or getattr(ma, "数据查询日", ""),
                  "可引用的数字": _NUMS.findall(f.display or "")}
                 for f in cites
             ]
@@ -344,7 +384,7 @@ def _build_user_prompt(ma: MarketAnalysis) -> str:
     mechanism_data: dict[str, str] = {}
     exposure_data: dict[str, str] = {}
     chain_data: dict[str, str] = {}
-    panorama: dict[str, str] = {}
+    panorama: dict[str, dict] = {}
     for name, fv in (ma.field_values or {}).items():
         if not isinstance(name, str) or name.startswith("__"):
             continue
@@ -375,7 +415,10 @@ def _build_user_prompt(ma: MarketAnalysis) -> str:
         if name.startswith("事件组合传导链"):
             chain_data[name.removeprefix("事件组合传导链")] = fv.display or str(fv.value)
             continue
-        panorama[name] = fv.display or str(fv.value)
+        panorama[name] = {
+            "值": fv.display or str(fv.value),
+            "数据日期或区间": fv.as_of or getattr(ma, "数据查询日", ""),
+        }
 
     # 分析对象必须显式告诉 writer。此前 spec 里只有"主题"，没有板块名，
     # 于是正文通篇写"板块如何如何"却从不说是哪个板块——不是模型偷懒，是它根本不知道。
@@ -387,6 +430,7 @@ def _build_user_prompt(ma: MarketAnalysis) -> str:
     trigger_code = (ma.field_values or {}).get("__trigger_code__") or ""
     spec = {
         "主题": ma.plan.主题,
+        "本次数据查询日_由页眉图表页脚展示_不要写入正文": getattr(ma, "数据查询日", ""),
         "分析对象_首次提及须写全称": {
             "板块": sector or "（未指定板块，按主题表述）",
         },
@@ -401,7 +445,7 @@ def _build_user_prompt(ma: MarketAnalysis) -> str:
            if transmission_data else {}),
         **({"已核验产业机制原文": mechanism_data} if mechanism_data else {}),
         **({"已核验A股对象暴露原文": exposure_data} if exposure_data else {}),
-        **({"分析师确认的组合传导链_只可引用其证据ID和边界": chain_data}
+        **({"分析师确认的组合传导链_只可引用所附原文和边界": chain_data}
            if chain_data else {}),
         # #73：波动率/涨跌幅分位/换手率/成交额分位这四个字段，只要这里给了 etf_code，
         # 就是这只 ETF 自己的真实价格数据，不是板块聚合出来的——写正文时必须归属给它
@@ -423,7 +467,8 @@ def _build_user_prompt(ma: MarketAnalysis) -> str:
         **({"子行业明细_本板块由这几个一级行业合并而成_须体现覆盖面": subs} if subs else {}),
         "各逻辑": packages,
         "输出格式": {
-            "核心结论": "一段话，最后综合各逻辑，含推荐方向",
+            "核心结论": "120~180字，先说投资判断，最多两项关键数据，无查询日期前缀",
+            "内部审核备注": ["证据对应、适用边界或来源缺口等审核说明；不进入客户正文"],
             "推荐方向": "看涨|震荡|看跌|中性",
             "逻辑正文": [
                 {
@@ -433,11 +478,11 @@ def _build_user_prompt(ma: MarketAnalysis) -> str:
                     "图表规格列表": [
                         {
                             "类型": "沿用惯用图类型，或按下方数据形态另选",
-                            "标题": "一句可核对的结论标题，不写‘走势/分析’等栏目名",
-                            "图表结论": "与标题同义的结论句",
-                            "数据截至": "输入给出的日期；没有则写‘见底稿’",
-                            "单位": "%，倍，亿元，或双轴单位；没有则写‘见底稿’",
-                            "样本口径": "如‘主题研究篮子（8只）’；没有则写‘见底稿’",
+                            "标题": "简洁的对象＋指标题目，例如主题篮子近20日涨跌幅，不含数据值和判断句",
+                            "图表结论": "另行记录该图的分析含义，仅供内部复核，不覆盖标题",
+                            "数据截至": "输入给出的明确日期或区间；不得写‘见底稿’",
+                            "单位": "%、倍、亿元或双轴单位；没有明确单位则不生成该图",
+                            "样本口径": "如‘主题研究篮子（8只）’；必须明确填写",
                             "数据点": [{"标签": "字段名或说明", "值": "真实值"}],
                             "说明": "可选",
                         }
@@ -454,7 +499,7 @@ def _build_user_prompt(ma: MarketAnalysis) -> str:
 # 三条逻辑加核心结论、图表规格的输出量翻了几倍，默认额度可能不够——
 # 而额度不足的表现恰恰是"漏写几条逻辑"，与模型偷懒难以区分，故显式给足。
 #
-# ⚠ **`deepseek-v4-pro` 是推理模型，思考过程也计入 max_tokens。**
+# ⚠ 部分质量档是推理模型，思考过程也可能计入 max_tokens。
 # 实测 `reasoning_tokens` 单次可占 2500~7000——#80 把正文放宽到 160~260 字、
 # 核心结论定为 180~280 字之后，10000 的额度被推理吃掉大半，剩下的写不完 JSON，
 # 稳定截断在 char 3300 附近（连撞 3 次，位置几乎不变，故一眼可知不是偶发）。
@@ -464,14 +509,22 @@ _MAX_TOKENS = 24000
 
 def _parse(d: dict, ma: MarketAnalysis, rc: ReportContent) -> list[str]:
     """把 LLM 输出灌进 rc，返回本次的空缺逻辑 id。"""
-    rc.核心结论 = str(d.get("核心结论", "")).strip() or rc.核心结论
+    rc.核心结论 = _public_text(d.get("核心结论", "")) or rc.核心结论
+    notes = d.get("内部审核备注") or []
+    if isinstance(notes, str):
+        notes = [notes]
+    if isinstance(notes, list):
+        for note in notes:
+            text = str(note or "").strip()
+            if text and text not in rc.内部审核备注:
+                rc.内部审核备注.append(text)
     rc.推荐方向 = str(d.get("推荐方向", "")).strip() or rc.推荐方向
     got = {lc.逻辑id for lc in rc.logics if lc.论述}
     for it in d.get("逻辑正文", []):
         if not isinstance(it, dict):
             continue
         lid = str(it.get("逻辑id", "")).strip()
-        body = str(it.get("论述", "")).strip()
+        body = _public_text(it.get("论述", ""))
         if lid in got:                       # 重试补回来的，不重复添加
             continue
         specs = it.get("图表规格列表")
@@ -482,8 +535,8 @@ def _parse(d: dict, ma: MarketAnalysis, rc: ReportContent) -> list[str]:
         rc.logics.append(LogicContent(
             逻辑id=lid, 论述=body,
             图表规格列表=specs,
-            结论=str(it.get("结论", "")).strip(),
-            标题=str(it.get("标题", "")).strip(),
+            结论=_public_text(it.get("结论", "")),
+            标题=_public_text(it.get("标题", "")),
         ))
         if body:
             got.add(lid)
@@ -493,18 +546,23 @@ def _parse(d: dict, ma: MarketAnalysis, rc: ReportContent) -> list[str]:
     # 核心结论也算缺口。它不在"逻辑正文"里，此前完全不受漏写检查覆盖——
     # 模型一旦没给（截断或直接省略），成品顶部就是个空的结论框，而 rc.ok 仍为 True，
     # 一路无声地渲染出去（#68 实测撞到：一份 3 条逻辑齐全的报告核心结论整段为空）。
-    head = [] if rc.核心结论 else ["核心结论"]
+    # 摘要数字过密与漏写一样触发一次重写；不机械删除数字，以免损坏原句含义。
+    head = [] if rc.核心结论 and len(_NUMS.findall(rc.核心结论)) <= 2 else ["核心结论"]
     return head + empty + sorted(missing)
 
 
 def _chart_data_as_of(ma: MarketAnalysis) -> str:
-    """从已验证字段中取可追溯的最新截止日；缺失时宁可明确留痕。"""
+    """从已验证字段中取可追溯的最新截止日，并以本次查询日兜底。"""
     dates: list[str] = []
     for value in (ma.field_values or {}).values():
         as_of = str(getattr(value, "as_of", "") or "").strip()
-        if re.search(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", as_of):
-            dates.append(as_of)
-    return sorted(dates)[-1] if dates else "见底稿"
+        match = re.search(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", as_of)
+        if match:
+            dates.append(match.group(0).replace("/", "-"))
+    query_date = str(getattr(ma, "数据查询日", "") or "").strip()
+    if query_date:
+        dates.append(query_date)
+    return sorted(dates)[-1] if dates else ""
 
 
 def _chart_sample_scope(ma: MarketAnalysis) -> str:
@@ -537,6 +595,29 @@ def _chart_unit(spec: dict) -> str:
     return next(iter(units)) if len(units) == 1 else "见坐标轴/数据卡"
 
 
+def _chart_heading(spec: dict) -> str:
+    """图题与分析结论分开；旧版数值句式仅降级为与图中真实轴名对应的题目。"""
+    title = _public_text(spec.get("标题", ""))
+    judgement = re.search(r"支撑|受益|承压|有望|显著|明显|推动|带动|处于|存在分化|升至|降至|高于|低于", title)
+    if title and not _NUMS.search(title) and len(title) <= 28 and not re.search(r"[。；！]", title) and not judgement:
+        return title
+    kind = str(spec.get("类型") or "")
+    x_axis = _public_text(spec.get("x轴") or "")
+    y_axis = _public_text(spec.get("y轴") or spec.get("柱标签") or spec.get("值名") or "")
+    if kind in {"scatter", "bubble"}:
+        return f"{x_axis or '横轴指标'}与{y_axis or '纵轴指标'}分布"
+    if kind == "evidence_flow":
+        return "事件影响传导路径"
+    if kind == "number_cards":
+        labels = [str(p.get("标签") or "") for p in spec.get("数据点") or [] if isinstance(p, dict)]
+        return "与".join(labels[:2]) if labels and len("与".join(labels[:2])) <= 24 else "核心研究指标"
+    defaults = {"gauge": "历史分位", "line": "历史走势", "hist_band": "历史走势", "histogram": "历史分布",
+                "treemap": "样本权重构成", "heatmap": "主题篮子指标分布",
+                "waterfall": "增减项拆解", "interval_band": "历史区间",
+                "dumbbell": "两期指标对比", "bar_line": "指标对比"}
+    return f"{y_axis}{defaults.get(kind, '对比')}" if y_axis else defaults.get(kind, "样本指标对比")
+
+
 def _normalise_chart_specs(ma: MarketAnalysis, rc: ReportContent) -> None:
     """为 LLM 与程序生成的图表统一补齐审计元信息。
 
@@ -549,9 +630,13 @@ def _normalise_chart_specs(ma: MarketAnalysis, rc: ReportContent) -> None:
         for spec in logic.图表规格列表 or []:
             if not isinstance(spec, dict):
                 continue
-            if spec.get("图表结论"):
-                spec["标题"] = str(spec["图表结论"])
-            spec.setdefault("数据截至", as_of)
+            original_title = str(spec.get("标题") or "")
+            spec["标题"] = _chart_heading(spec)
+            if original_title and spec["标题"] != original_title:
+                spec.setdefault("内部原始图题", original_title)
+            declared_as_of = str(spec.get("数据截至") or "").strip()
+            if not re.search(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}", declared_as_of):
+                spec["数据截至"] = as_of
             spec.setdefault("样本口径", scope)
             spec.setdefault("单位", _chart_unit(spec))
 
@@ -585,7 +670,8 @@ def write(ma: MarketAnalysis, client: DeepSeekClient | None = None) -> ReportCon
         # 补写提示必须按实际缺什么来写。此前无条件写死"核心结论也不必重写"，
         # 于是首轮就没给核心结论时，补写这一轮反而被明确告知别写，缺口永远补不回来。
         if 缺结论:
-            要求.append("『核心结论』整段缺失，请补出（一段话，综合各逻辑，含推荐方向），"
+            detail = "数据过密，请重写" if rc.核心结论 else "整段缺失，请补出"
+            要求.append(f"『核心结论』{detail}（120~180字，先回答投资判断，最多两项关键数据，无日期前缀），"
                         "并同时给出『推荐方向』字段")
         retry = (f"{user}\n\n【补写要求】上一次输出" + "；".join(要求) +
                  "。其余已写好的不必重复。" +
@@ -645,6 +731,8 @@ def write(ma: MarketAnalysis, client: DeepSeekClient | None = None) -> ReportCon
     _normalise_chart_specs(ma, rc)
 
     # 补写后仍缺的，如实标记，绝不代笔编造内容。
+    if "核心结论" in gaps and rc.核心结论:
+        rc.内部审核备注.append("核心结论重写后仍超过两项带单位数据，请压缩摘要并复核交付。")
     rc.空缺逻辑 = gaps
     rc.ok = True
     return rc

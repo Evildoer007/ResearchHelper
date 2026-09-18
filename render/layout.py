@@ -889,6 +889,7 @@ h1 .accent { color:var(--oh-brand-red); }
 .src { font-size:10px; color:var(--oh-muted); border-top:1px solid var(--oh-rule); margin-top:8px; padding-top:4px; line-height:1.45; }
 .foot { font-size:8.5px; color:var(--oh-muted-soft); border-top:1px solid var(--oh-rule); margin-top:9px; padding-top:4px; line-height:1.45; }
 .ft-line { margin-top:3px; }
+.foot a { color:inherit; text-decoration:underline; text-underline-offset:2px; }
 """
 
 _CN_NUM = ["一", "二", "三", "四", "五", "六"]
@@ -1046,6 +1047,11 @@ def _report_title(ma) -> str:
     return str(getattr(getattr(ma, "plan", None), "主题", "") or "本次投资机会分析").strip()
 
 
+def _report_subtitle(date: str) -> str:
+    """Keep the cover subtitle concise; detailed data dates live with charts and sources."""
+    return f"策略研究 · 报告生成 {date}"
+
+
 def build_html(ma, rc, *, org: str = DEFAULT_ORG, date: str = "", oh_result=None) -> str:
     """正文展开"主轴"标记的 2~3 条论点，其余（可选池/自由槽）压成一行补充观察。
 
@@ -1115,8 +1121,8 @@ def build_html(ma, rc, *, org: str = DEFAULT_ORG, date: str = "", oh_result=None
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>{_CSS}</style></head><body>
     <div class="page">
       <h1>场外衍生品投资策略 <span class="accent">—— {_esc(_report_title(ma))}</span></h1>
-      <div class="sub">策略研究 · {date}</div>
-      <div class="concl"><span class="lbl">核心结论</span>{rc.核心结论 or _MISSING_CONCL}</div>
+      <div class="sub">{_report_subtitle(date)}</div>
+      <div class="concl"><span class="lbl">核心结论</span>{_rich(rc.核心结论 or _MISSING_CONCL)}</div>
       {body_html}
       {_footer_block(ma)}
     </div>{interactive_assets}</body></html>"""
@@ -1161,6 +1167,8 @@ def _underlying_block(ma, rc, oh=None) -> str:
         rows.append(f"整体方向：{pkg.整体方向}")
     if pkg.波动率看法:
         rows.append(pkg.波动率看法)
+    if getattr(ma, "数据查询日", ""):
+        rows.append(f"数据查询日：{ma.数据查询日}")
     head = "　｜　".join(rows)
     body = (f'<div class="u-why"><b>与研究主题的关联及选取原因</b>：{_esc(理由)}</div>'
             if 理由 else "")
@@ -1188,6 +1196,8 @@ def confirmed_underlying_block(code: str, *, name: str = "", reason: str = "",
         rows.append(text)
     except (TypeError, ValueError):
         pass
+    if profile.get("as_of"):
+        rows.append(f"数据查询日：{_esc(profile['as_of'])}")
     head = "　｜　".join(rows)
     why = (str(reason or "").strip()
            or "由分析师在研究完成后确认，并已通过 OptionHelper 正式报价流程。")
@@ -1321,18 +1331,41 @@ def _footer_block(ma) -> str:
     出处不落进产出，原 PDF 一删引用就断线。
     """
     from core.planner import DOC_FIELD_PREFIX
+    from core.overrides import is_manual
 
-    srcs = ["iFinD（同花顺）"]
+    entries = [("iFinD（同花顺）", "")]
     for name, fv in (ma.field_values or {}).items():
-        if not isinstance(name, str) or not name.startswith(DOC_FIELD_PREFIX):
+        if not isinstance(name, str) or not (name.startswith(DOC_FIELD_PREFIX) or is_manual(fv)):
             continue
         if not getattr(fv, "ok", False):
             continue
         cite = f"{fv.source}".strip()
-        if cite and cite not in srcs:
-            srcs.append(cite)
+        if cite and (cite, "") not in entries:
+            entries.append((cite, ""))
+    evidence = dict(getattr(ma, "事件证据", {}) or {})
+    sources = evidence.get("引用来源")
+    if sources is None:  # 兼容旧研究快照：有真实原文出处时仍应署名。
+        sources = []
+        for key in ("事件事实", "产业机制", "A股暴露", "传导关系"):
+            for item in evidence.get(key) or []:
+                match = re.search(r"；来源：(.+?)(?:；链接：(.+))?$", str(item))
+                if match:
+                    sources.append({"来源": match.group(1), "链接": match.group(2) or ""})
+    for source in sources or []:
+        if not isinstance(source, dict):
+            continue
+        label = str(source.get("来源") or "").strip()
+        link = str(source.get("链接") or "").strip()
+        link = link if link.startswith("https://") else ""
+        if label and (label, link) not in entries:
+            entries.append((label, link))
+    source_html = "、".join(
+        f'<a href="{_esc(link)}" target="_blank" rel="noopener noreferrer">{_esc(label)}</a>'
+        if link else _esc(label) for label, link in entries
+    )
     return (f'<div class="foot">'
-            f'<div class="ft-line">数据来源：{_esc("、".join(srcs))}</div>'
+            f'<div class="ft-line">数据查询日：{_esc(getattr(ma, "数据查询日", "") or "未记录")}　｜　'
+            f'数据来源：{source_html}</div>'
             f'<div class="ft-line">风险提示与免责声明：{_DISCLAIMER}</div>'
             f'</div>')
 

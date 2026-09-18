@@ -26,6 +26,40 @@ TYPE_SECTOR = "板块机会"
 TYPE_INDUSTRY = "产业趋势"
 TYPE_EVENT = "事件驱动"
 
+# “报告体裁”和“事件处理路径”是两个维度。前者描述怎么写，后者决定是否启用
+# 外部事实证据硬门。市场回调、风格轮动等虽然有时间触发点，但不是一项需要公司
+# 公告或政策原文确认的外部事件，不能与 IPO、业绩发布、政策出台共用同一道硬门。
+EVENT_PATH_NONE = "非事件"
+EVENT_PATH_EXTERNAL = "明确外部事件"
+EVENT_PATH_MARKET_STATE = "市场状态触发"
+EVENT_PATHS = (EVENT_PATH_NONE, EVENT_PATH_EXTERNAL, EVENT_PATH_MARKET_STATE)
+
+
+def normalize_event_path(value: object, *, topic_type: str = "", has_entity: bool = False) -> str:
+    """把 LLM/旧缓存中的事件路径规整为当前协议。
+
+    旧数据没有该字段时保持兼容：只有“事件驱动 + 明确触发实体”才自动升级为
+    外部事件；单纯写成事件驱动但没有实体时不再误开证据硬门。
+    """
+    text = str(value or "").strip()
+    aliases = {
+        "外部事件": EVENT_PATH_EXTERNAL,
+        "具体事件": EVENT_PATH_EXTERNAL,
+        "公司事件": EVENT_PATH_EXTERNAL,
+        "交易事件": EVENT_PATH_EXTERNAL,
+        "市场状态": EVENT_PATH_MARKET_STATE,
+        "风格轮动": EVENT_PATH_MARKET_STATE,
+        "行情触发": EVENT_PATH_MARKET_STATE,
+        "普通研究": EVENT_PATH_NONE,
+    }
+    if text in EVENT_PATHS:
+        return text
+    if text in aliases:
+        return aliases[text]
+    if not text and topic_type == TYPE_EVENT and has_entity:
+        return EVENT_PATH_EXTERNAL
+    return EVENT_PATH_NONE
+
 # ---- 结构方向（埋线给 OptionHelper；论点库的"方向"特征也用这套取值）----
 DIR_BULL = "看涨"
 DIR_RANGE = "震荡"

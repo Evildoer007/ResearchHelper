@@ -18,7 +18,7 @@ from html import escape as _html_escape
 from dataclasses import dataclass
 from pathlib import Path
 
-from PySide6.QtCore import QProcess, QTimer, QUrl, Qt
+from PySide6.QtCore import QProcess, QProcessEnvironment, QTimer, QUrl, Qt
 from PySide6.QtGui import QDesktopServices, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QFormLayout,
@@ -264,7 +264,7 @@ class QuoteJob:
     comparison_mode: bool = False
     # 多标的报价纳入一页通时使用的、已经冻结的事实；普通报价保持为空。
     inclusion_entries: list[dict] | None = None
-    status: str = "queued"  # queued / running / completed / failed / cancelled / blocked
+    status: str = "queued"  # queued / running / finalizing / completed / failed / cancelled / blocked
     run_id: str = ""
     message: str = ""
     forced_stop_reason: str = ""
@@ -446,18 +446,23 @@ class PastedMaterialDialog(QDialog):
         self.setWindowTitle("粘贴补充材料")
         self.resize(760, 510)
         self.source = QLineEdit()
-        self.source.setPlaceholderText("必填，例如：公司公告《2026 年半年报》p4 / 机构研报名称及日期")
+        self.source.setPlaceholderText("必填，例如：公司公告《2026 年半年报》p4 / 机构研报名称")
+        self.material_date = QLineEdit()
+        self.material_date.setPlaceholderText("必填，YYYY-MM-DD；这是原材料发布日期，不是录入日期")
         self.content = QPlainTextEdit()
         self.content.setPlaceholderText("粘贴需要作为研究依据的原文。系统会读取原文提炼候选逻辑，不会把来源说明改写成事实。")
         self.content.setMinimumHeight(320)
         save, cancel = QPushButton("保存到补充材料"), QPushButton("取消")
         save.clicked.connect(self._validate_and_accept)
         cancel.clicked.connect(self.reject)
-        hint = QLabel("来源和原文均为必填。保存后会写入 sources/，与上传 PDF 一样在下一次研究中读取，并在候选及报告中保留来源。")
+        hint = QLabel(
+            "来源、资料发布日期和原文均为必填。日期未知、日期在未来或超过 90 天的材料不会进入客户报告；"
+            "文件仍保留在 sources/ 供内部复核。")
         hint.setWordWrap(True)
         form = QFormLayout(self)
         form.addRow(hint)
         form.addRow("资料来源", self.source)
+        form.addRow("资料发布日期", self.material_date)
         form.addRow("原文内容", self.content)
         form.addRow("", ResearchHelperWindow._row(save, cancel))
 
@@ -465,6 +470,13 @@ class PastedMaterialDialog(QDialog):
         if not self.source.text().strip():
             QMessageBox.information(self, "请填写资料来源", "粘贴材料必须填写可供复核的资料来源。")
             return
+        from core.docs import date_from_text, usable_document_date
+        parsed_date = date_from_text(self.material_date.text().strip())
+        usable, reason = usable_document_date(parsed_date)
+        if not usable:
+            QMessageBox.information(self, "请核对资料日期", reason)
+            return
+        self.material_date.setText(parsed_date)
         if not self.content.toPlainText().strip():
             QMessageBox.information(self, "请粘贴原文", "请粘贴需要作为研究依据的原文内容。")
             return
@@ -839,6 +851,10 @@ class EventEvidenceDialog(QDialog):
         self.mechanisms = [dict(item) for item in (evidence.get("产业机制") or []) if isinstance(item, dict)]
         self.exposures = [dict(item) for item in (evidence.get("A股暴露") or []) if isinstance(item, dict)]
         self.chains = [dict(item) for item in (evidence.get("组合传导链") or []) if isinstance(item, dict)]
+        for index, item in enumerate(self.chains):
+            item.setdefault("影响分支", "")
+            item.setdefault("分支用途", "主方向" if index == 0 else "备选方向" if index == 1 else "仅审计")
+        self._normalize_chain_roles()
         self.links = [dict(item) for item in (evidence.get("传导关系") or []) if isinstance(item, dict)]
         self.discovery_audit = [dict(item) for item in (evidence.get("检索审计") or [])
                                 if isinstance(item, dict)]
@@ -869,6 +885,9 @@ class EventEvidenceDialog(QDialog):
         add_exposure, remove_exposure = QPushButton("添加A股暴露…"), QPushButton("删除选中")
         add_link, remove_link = QPushButton("添加直接传导…"), QPushButton("删除选中")
         add_chain, remove_chain = QPushButton("添加组合传导链…"), QPushButton("删除选中")
+        set_primary = QPushButton("设为主方向")
+        set_secondary = QPushButton("设为备选")
+        set_audit = QPushButton("仅留审计")
         import_material = QPushButton("从已上传材料导入原文")
         self.auto_discover = QPushButton("自动查找候选证据")
         self.discovery_status = QLabel(
@@ -887,6 +906,9 @@ class EventEvidenceDialog(QDialog):
         add_link.clicked.connect(self.add_link); remove_link.clicked.connect(self.remove_link)
         add_chain.clicked.connect(self.add_chain)
         remove_chain.clicked.connect(self.remove_chain)
+        set_primary.clicked.connect(lambda: self._set_chain_role("主方向"))
+        set_secondary.clicked.connect(lambda: self._set_chain_role("备选方向"))
+        set_audit.clicked.connect(lambda: self._set_chain_role("仅审计"))
         import_material.clicked.connect(lambda: self.import_material(topic))
         self.auto_discover.clicked.connect(self.start_discovery)
         save, cancel = QPushButton("保存证据"), QPushButton("取消")
@@ -902,7 +924,8 @@ class EventEvidenceDialog(QDialog):
             ("1 事件事实", self.fact_list, (add_fact, remove_fact)),
             ("2 产业机制", self.mechanism_list, (add_mechanism, remove_mechanism)),
             ("3 A股暴露", self.exposure_list, (add_exposure, remove_exposure)),
-            ("4 组合传导链", self.chain_list, (add_chain, remove_chain)),
+            ("4 影响分支与组合链", self.chain_list,
+             (add_chain, remove_chain, set_primary, set_secondary, set_audit)),
             ("直接传导（兼容）", self.link_list, (add_link, remove_link)),
         ):
             page = QWidget(); page_layout = QVBoxLayout(page)
@@ -1128,6 +1151,38 @@ class EventEvidenceDialog(QDialog):
                 chain[key] = [remap.get(str(value), str(value)) for value in (chain.get(key) or [])]
             chains.append(chain)
         self._extend_unique(self.chains, chains, keys=("结论", "方向"))
+        self._normalize_chain_roles()
+
+    def _normalize_chain_roles(self) -> None:
+        """保证影响分支最多一个主方向和一个备选，其余只保留审计。"""
+        primary_seen = secondary_seen = False
+        for index, item in enumerate(self.chains):
+            role = str(item.get("分支用途") or "").strip()
+            if role not in {"主方向", "备选方向", "仅审计"}:
+                role = "主方向" if index == 0 else "备选方向" if index == 1 else "仅审计"
+            if role == "主方向":
+                if primary_seen:
+                    role = "仅审计"
+                primary_seen = True
+            elif role == "备选方向":
+                if secondary_seen:
+                    role = "仅审计"
+                secondary_seen = True
+            item["分支用途"] = role
+
+    def _set_chain_role(self, role: str) -> None:
+        row = self.chain_list.currentRow()
+        if row < 0 or row >= len(self.chains):
+            QMessageBox.information(self, "请选择影响分支", "请先选中一条组合传导链。")
+            return
+        if role in {"主方向", "备选方向"}:
+            for index, item in enumerate(self.chains):
+                if index != row and item.get("分支用途") == role:
+                    item["分支用途"] = "仅审计"
+        self.chains[row]["分支用途"] = role
+        self._normalize_chain_roles()
+        self.refresh()
+        self.chain_list.setCurrentRow(row)
 
     def import_material(self, topic: str) -> None:
         dialog = MaterialCandidateDialog(self, topic=topic)
@@ -1252,29 +1307,39 @@ class EventEvidenceDialog(QDialog):
         for combo, values in ((fact, self.facts), (mechanism, self.mechanisms), (exposure, self.exposures)):
             for item in values:
                 combo.addItem(f"{item.get('证据ID')}｜{str(item.get('内容') or '')[:60]}", item.get("证据ID"))
-        conclusion, boundary = QPlainTextEdit(), QLineEdit()
+        branch, conclusion, boundary = QLineEdit(), QPlainTextEdit(), QLineEdit()
+        branch.setPlaceholderText("例如：市场流动性、存储产业链、估值映射")
         conclusion.setPlaceholderText("只根据所选三类原文说明事件如何传导至本次A股对象，不补充新事实或新数字。")
         direction, confidence = QComboBox(), QComboBox()
         direction.addItems(["不确定", "正向", "负向", "双向", "中性"])
         confidence.addItems(["低", "中", "高"])
+        role = QComboBox(); role.addItems(["主方向", "备选方向", "仅审计"])
         confirm, cancel = QPushButton("添加"), QPushButton("取消")
         confirm.clicked.connect(dialog.accept); cancel.clicked.connect(dialog.reject)
         form = QFormLayout(dialog)
         form.addRow("事件事实", fact); form.addRow("产业机制", mechanism); form.addRow("A股暴露", exposure)
+        form.addRow("影响分支", branch); form.addRow("报告用途", role)
         form.addRow("组合结论", conclusion); form.addRow("方向", direction); form.addRow("置信度", confidence)
         form.addRow("边界/风险", boundary); form.addRow("", ResearchHelperWindow._row(confirm, cancel))
         if not dialog.exec():
             return
-        if not conclusion.toPlainText().strip():
-            QMessageBox.information(self, "缺少组合结论", "请填写只基于所选原文的组合结论。")
+        if not branch.text().strip() or not conclusion.toPlainText().strip():
+            QMessageBox.information(self, "缺少分支或结论", "请填写影响分支名称及只基于所选原文的组合结论。")
             return
+        selected_role = role.currentText()
+        if selected_role in {"主方向", "备选方向"}:
+            for item in self.chains:
+                if item.get("分支用途") == selected_role:
+                    item["分支用途"] = "仅审计"
         self.chains.append({
             "事实证据ID": [str(fact.currentData())],
             "机制证据ID": [str(mechanism.currentData())],
             "暴露证据ID": [str(exposure.currentData())],
             "结论": conclusion.toPlainText().strip(), "方向": direction.currentText(),
             "置信度": confidence.currentText(), "边界": boundary.text().strip(),
+            "影响分支": branch.text().strip(), "分支用途": selected_role,
         })
+        self._normalize_chain_roles()
         self.refresh()
 
     def _ensure_evidence_ids(self) -> None:
@@ -1310,6 +1375,7 @@ class EventEvidenceDialog(QDialog):
             refs = "+".join([*(item.get("事实证据ID") or []), *(item.get("机制证据ID") or []),
                              *(item.get("暴露证据ID") or [])])
             self.chain_list.addItem(
+                f"{item.get('分支用途', '仅审计')}｜{item.get('影响分支') or '未命名分支'}｜"
                 f"{refs}｜方向 {item.get('方向', '不确定')}｜置信度 {item.get('置信度', '低')}\n"
                 f"{item.get('结论', '')}\n边界：{item.get('边界', '—')}")
 
@@ -1338,7 +1404,7 @@ class LogicPickDialog(QDialog):
             "请选择 2–3 条作为报告正文主轴。数据触发项来自已核验行情；材料提炼项仅在您核对原文后才应勾选。"
             "“采用系统建议”只按证据质量和结构组合，不替代专业判断。")
         if self.require_event_chain:
-            hint_text += " 本次是事件型报告，至少必须选择一条“已确认事件传导”。"
+            hint_text += " 本次是明确外部事件报告，至少必须选择一条“已确认事件传导”。"
         hint = QLabel(hint_text)
         hint.setWordWrap(True)
         self.list = QListWidget()
@@ -1406,7 +1472,7 @@ class LogicPickDialog(QDialog):
             if not has_event:
                 QMessageBox.information(
                     self, "缺少事件传导主轴",
-                    "事件型报告至少需要勾选一条“已确认事件传导”，否则正文无法回答事件如何影响A股对象。",
+                    "明确外部事件报告至少需要勾选一条“已确认事件传导”，否则正文无法回答事件如何影响A股对象。",
                 )
                 return
         self.accept()
@@ -1736,32 +1802,181 @@ class QuoteUnderlyingPoolDialog(QDialog):
 
 
 class LlmSettingsDialog(QDialog):
-    """只允许更新本地、被 git 忽略的分析模型设置；绝不回显既有 API key。"""
+    """动态管理账号模型目录与三个逻辑档位；绝不回显既有 API key。"""
+
+    RESULT_PREFIX = "MODEL_CATALOG_RESULT="
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("LLM 设置（仅本机）")
-        config = _load_json(LOCAL_CONFIG)
-        self.model = QComboBox()
-        self.model.addItems(["deepseek-v4-flash", "deepseek-v4-pro"])
-        current = str(config.get("DEEPSEEK_MODEL") or "deepseek-v4-flash")
-        self.model.setCurrentText(current if current in [self.model.itemText(i) for i in range(self.model.count())] else "deepseek-v4-flash")
+        self.resize(650, 360)
+        self.config = _load_json(LOCAL_CONFIG)
+        self.process: QProcess | None = None
+        self.output = ""
+        self.last_result: dict = {}
+
+        legacy = str(self.config.get("DEEPSEEK_MODEL") or "").strip()
+        fast = str(self.config.get("DEEPSEEK_FAST_MODEL") or legacy or "deepseek-flash")
+        quality = str(self.config.get("DEEPSEEK_QUALITY_MODEL") or legacy or "deepseek-flash")
+        fallback = str(self.config.get("DEEPSEEK_FALLBACK_MODEL") or "deepseek-flash")
+        models = ["deepseek-flash", fast, quality, fallback]
+        try:
+            from core.model_registry import load_cached_catalog
+            from core import config as runtime_config
+            cached = load_cached_catalog(runtime_config.DEEPSEEK_MODEL_CACHE)
+            if cached.ok:
+                models += cached.models
+        except Exception:  # 设置窗口不能因旧缓存异常而打不开
+            pass
+        models = list(dict.fromkeys(item for item in models if item))
+
+        self.fast = self._model_combo(models, fast)
+        self.quality = self._model_combo(models, quality)
+        self.fallback = self._model_combo(models, fallback)
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         self.key.setPlaceholderText("已配置；留空则不修改")
-        hint = QLabel("API key 仅写入本机 config.local.json（Git 已忽略），保存后下一次运行生效。")
+        self.status = QLabel(self._initial_status())
+        self.status.setWordWrap(True)
+        self.status.setProperty("kind", "callout")
+        refresh = QPushButton("刷新账号模型目录")
+        test = QPushButton("测试质量档模型")
+        refresh.clicked.connect(lambda: self._run_worker("list"))
+        test.clicked.connect(lambda: self._run_worker("test"))
+        self.worker_buttons = (refresh, test)
+        hint = QLabel(
+            "快速档用于需求解析、材料抽取和证据分类；质量档用于规划、正文与产品结构推荐；"
+            "备用档只会在运行前发现所选模型不可用、且分析师明确同意后用于本次运行。\n"
+            "列表来自当前账号的 GET /models；也可手动输入模型 ID，但保存不代表接口一定可用。"
+        )
         hint.setWordWrap(True)
         save, cancel = QPushButton("保存设置"), QPushButton("取消")
         save.clicked.connect(self.save)
         cancel.clicked.connect(self.reject)
         form = QFormLayout(self)
-        form.addRow("分析模型", self.model)
+        form.addRow("快速档模型", self.fast)
+        form.addRow("质量档模型", self.quality)
+        form.addRow("备用模型", self.fallback)
         form.addRow("DeepSeek API key", self.key)
+        form.addRow("", ResearchHelperWindow._row(refresh, test))
+        form.addRow("模型目录状态", self.status)
         form.addRow("", hint)
         form.addRow("", ResearchHelperWindow._row(save, cancel))
 
+    @staticmethod
+    def _model_combo(models: list[str], current: str) -> QComboBox:
+        combo = QComboBox()
+        combo.setEditable(True)
+        combo.addItems(models)
+        combo.setCurrentText(current)
+        return combo
+
+    def _initial_status(self) -> str:
+        when = str(self.config.get("DEEPSEEK_MODELS_VALIDATED_AT") or "").strip()
+        return f"最近一次真实调用验证：{when}" if when else "尚未在设置页完成真实调用验证。"
+
+    def _run_worker(self, action: str) -> None:
+        if self.process is not None:
+            return
+        model = self.quality.currentText().strip()
+        if action == "test" and not model:
+            QMessageBox.information(self, "缺少模型", "请先选择或输入质量档模型。")
+            return
+        for button in self.worker_buttons:
+            button.setEnabled(False)
+        self.status.setText("正在刷新账号模型目录…" if action == "list" else f"正在测试 {model}…")
+        self.output = ""
+        process = QProcess(self)
+        process.setWorkingDirectory(str(ROOT))
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        process.readyReadStandardOutput.connect(self._read_worker)
+        process.finished.connect(self._worker_finished)
+        self.process = process
+        process.start(sys.executable, [str(ROOT / "core" / "model_catalog_worker.py")])
+        payload = {"action": action, "model": model}
+        if self.key.text().strip():
+            payload["api_key"] = self.key.text().strip()
+        process.write(json.dumps(payload, ensure_ascii=True).encode("ascii"))
+        process.closeWriteChannel()
+
+    def _read_worker(self) -> None:
+        if self.process is not None:
+            self.output += bytes(self.process.readAllStandardOutput()).decode("utf-8", errors="replace")
+
+    def _worker_finished(self, *_args) -> None:
+        self._read_worker()
+        result: dict = {}
+        for line in self.output.splitlines():
+            if line.startswith(self.RESULT_PREFIX):
+                try:
+                    result = json.loads(line.split("=", 1)[1])
+                except json.JSONDecodeError:
+                    result = {}
+        self.process = None
+        for button in self.worker_buttons:
+            button.setEnabled(True)
+        self.last_result = result
+        if not result.get("ok"):
+            self.status.setText("模型目录刷新失败：" + str(result.get("error") or "未收到有效响应"))
+            return
+        models = [str(item) for item in result.get("models", []) if str(item).strip()]
+        from core.model_registry import suggest_model_configuration
+        choices, replaced = suggest_model_configuration(
+            models,
+            fast=self.fast.currentText().strip(),
+            quality=self.quality.currentText().strip(),
+            fallback=self.fallback.currentText().strip(),
+        )
+        for slot, combo in (("fast", self.fast), ("quality", self.quality),
+                            ("fallback", self.fallback)):
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(models)
+            combo.setCurrentText(choices[slot])
+            combo.blockSignals(False)
+        source = "实时接口" if result.get("source") == "live" else "最近缓存"
+        message = f"{source}：{len(models)} 个模型｜{result.get('fetched_at') or '时间未知'}"
+        if result.get("live_error"):
+            message += f"；实时刷新失败：{result['live_error']}"
+        if replaced and result.get("source") == "live":
+            message += ("\n已在表单中替换下线模型：" + "；".join(replaced.values())
+                        + "。点击“保存设置”后长期生效。")
+        tested = result.get("test") if isinstance(result.get("test"), dict) else None
+        if tested:
+            if tested.get("ok"):
+                message += (f"\n真实调用通过：请求 {tested.get('requested_model')}，"
+                            f"实际 {tested.get('effective_model')}")
+                self.config["DEEPSEEK_MODELS_VALIDATED_AT"] = tested.get("validated_at")
+            else:
+                message += f"\n真实调用失败：{tested.get('error')}"
+        self.status.setText(message)
+
     def save(self) -> None:
         config = _load_json(LOCAL_CONFIG)
-        config["DEEPSEEK_MODEL"] = self.model.currentText()
+        fast = self.fast.currentText().strip()
+        quality = self.quality.currentText().strip()
+        fallback = self.fallback.currentText().strip()
+        if not fast or not quality or not fallback:
+            QMessageBox.information(self, "模型配置不完整", "快速档、质量档和备用模型均不能为空。")
+            return
+        live_models = ([str(item) for item in self.last_result.get("models", [])]
+                       if self.last_result.get("source") == "live" else [])
+        invalid = [model for model in (fast, quality, fallback)
+                   if live_models and model not in live_models]
+        if invalid:
+            QMessageBox.information(
+                self, "模型不在实时目录",
+                "以下模型已不在当前账号的实时目录中：" + "、".join(dict.fromkeys(invalid))
+                + "。请从刷新后的列表重新选择。",
+            )
+            return
+        config["DEEPSEEK_FAST_MODEL"] = fast
+        config["DEEPSEEK_QUALITY_MODEL"] = quality
+        config["DEEPSEEK_FALLBACK_MODEL"] = fallback
+        # 旧版 worker/OptionHelper 继续读取该键；含义统一为质量档。
+        config["DEEPSEEK_MODEL"] = quality
+        if self.config.get("DEEPSEEK_MODELS_VALIDATED_AT"):
+            config["DEEPSEEK_MODELS_VALIDATED_AT"] = self.config["DEEPSEEK_MODELS_VALIDATED_AT"]
         if self.key.text().strip():
             config["DEEPSEEK_API_KEY"] = self.key.text().strip()
         try:
@@ -2034,7 +2249,7 @@ class IFindCredentialsDialog(QDialog):
 
 
 class MarketConfirmationDialog(QDialog):
-    """高风险市场/行业映射确认；结果由后端再次做数据源校验。"""
+    """所有研究取数前的目标确认；结果由后端再次做数据源校验。"""
 
     def __init__(self, payload: dict, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -2047,6 +2262,24 @@ class MarketConfirmationDialog(QDialog):
 
         self.topic = QLabel(str(payload.get("topic") or "—"))
         self.topic.setWordWrap(True)
+        event_path = str(payload.get("event_path") or "非事件")
+        branch_lines = []
+        for index, item in enumerate(payload.get("impact_branches") or [], 1):
+            if not isinstance(item, dict):
+                continue
+            detail = "；".join(value for value in (
+                str(item.get("relation") or "").strip(),
+                ("A股对象=" + str(item.get("ashare_object") or "").strip())
+                if str(item.get("ashare_object") or "").strip() else "",
+                ("待验证=" + str(item.get("evidence_needed") or "").strip())
+                if str(item.get("evidence_needed") or "").strip() else "",
+            ) if value)
+            branch_lines.append(f"{index}. {item.get('name') or '未命名分支'}" + (f"｜{detail}" if detail else ""))
+        self.event_path_label = QLabel(
+            event_path + (("\n候选影响分支（仅作待验证假设）：\n" + "\n".join(branch_lines))
+                          if branch_lines else "")
+        )
+        self.event_path_label.setWordWrap(True)
         self.original = str(payload.get("original_market") or "A股")
         self.mode = QComboBox()
         self.mode.addItem("明确映射到 A 股研究口径并继续", "map_a")
@@ -2088,8 +2321,8 @@ class MarketConfirmationDialog(QDialog):
                 f"{theme_scope}（主题 ETF 路径：按所选 ETF 真实成分研究）",
                 {"scope": theme_scope, "mode": "theme_etf"},
             )
-        if not scope_options and not (theme_route and theme_scope):
-            self.scope.addItem("未形成可用研究路径，请改为仅研究或取消本次运行",
+        if self.scope.count() == 0:
+            self.scope.addItem("尚未形成取数目标，请调整需求或取消本次运行",
                                {"scope": "", "mode": "industry"})
         previous_scope = str(previous.get("research_scope") or "").strip()
         previous_research_mode = str(previous.get("research_mode") or "").strip()
@@ -2202,6 +2435,10 @@ class MarketConfirmationDialog(QDialog):
             ("上次校验未通过：\n• " + "\n• ".join(errors)) if errors
             else (notice + ("\n" + discovery_notice if discovery_notice else "")))
         self.message.setWordWrap(True)
+        # 完整逐候选准入记录放在悬停提示与运行日志中，不把确认框撑成检索日志。
+        self.message.setToolTip("\n".join(
+            f"{row.get('code') or row.get('term') or row.get('stage', '')}：{row.get('reason', '')}"
+            for row in (payload.get("etf_discovery_audit") or [])))
         self.message.setStyleSheet("color:#a61b29;" if errors else "color:#666;")
         confirm, cancel = QPushButton("校验并继续"), QPushButton("取消本次运行")
         confirm.setProperty("role", "primary")
@@ -2226,6 +2463,7 @@ class MarketConfirmationDialog(QDialog):
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.addRow(_purpose_label("解析主题", "系统对客户原始需求的摘要；只用于核对是否理解正确。"), self.topic)
+        form.addRow(_purpose_label("事件处理路径", "明确外部事件走事实证据硬门；市场状态触发使用行情与历史区间，不要求公司公告式证据。"), self.event_path_label)
         form.addRow(_purpose_label("处理方式", "决定映射到哪个市场研究，以及研究后是否允许进入产品报价流程。"), self.mode)
         form.addRow(_purpose_label("确认市场", "限定行情、行业和证券校验所使用的市场范围。"), self.market)
         form.addRow(_purpose_label("研究主题", "用于材料检索、论点生成和报告标题；不直接指定成分股。"), self.theme)
@@ -2409,8 +2647,9 @@ class MarketConfirmationDialog(QDialog):
         if not value["research_scope"]:
             QMessageBox.information(
                 self, "未形成可用研究路径",
-                "系统既没有形成可校验标准行业，也没有形成可用的主题 ETF 路径。\n\n"
-                "请改选可用的标准行业路径，或选择主题 ETF 取数路径并填写 ETF 代码。",
+                "尚未确定本次研究的取数目标；仅研究不报价也需要明确数据来源。\n\n"
+                "请选择可用的标准行业、人工主题篮子，或主题 ETF 路径并填写 ETF 代码；"
+                "没有可选路径时，请调整需求后重新解析。",
             )
             return
         if value.get("research_mode") == "theme_etf" and not value["underlying_code"]:
@@ -2487,7 +2726,11 @@ class ResearchHelperWindow(QMainWindow):
         # 同一批报价只自动提示一次；分析师可随时通过队列旁的按钮重新打开选择框。
         self._last_quote_inclusion_signature = ""
         self._quote_pdf_exporting = False
+        self._quote_delivery_timer: QTimer | None = None
         self._run_cancelled = False
+        # 研究运行中经分析师明确同意的模型降级要延续到同一次研究的 OptionHelper
+        # 推荐/报价子进程；开始下一次研究时清空，绝不写回长期设置。
+        self._run_model_overrides: dict[str, str] = {}
         self.quote_slow_timer = QTimer(self)
         self.quote_slow_timer.setSingleShot(True)
         self.quote_slow_timer.timeout.connect(self._quote_is_slow)
@@ -2513,10 +2756,11 @@ class ResearchHelperWindow(QMainWindow):
         self.preference.setPlaceholderText("例如：更偏上涨参与（可选）")
         self.quote = QCheckBox("研究完成后准备正式报价审核")
         self.quote.setChecked(True)
-        self.force_event = QCheckBox("按事件驱动型处理（启用事件证据硬门）")
+        self.force_event = QCheckBox("按明确外部事件处理（启用事件证据硬门）")
         self.force_event.setToolTip(
-            "勾选后不再依赖 LLM 判断报告类型；本次运行必须确认事件事实、产业机制、"
-            "A股暴露及组合传导链，或提供可直接证明传导的原文。"
+            "适用于 IPO、业绩/指引、政策、产品发布、事故或并购等明确外部事件。"
+            "勾选后本次运行必须确认事件事实、产业机制、A股暴露及组合传导链。"
+            "科技回调、风格轮动等市场状态型问题不要勾选，它们使用行情和历史区间验证。"
         )
         self.pdf = QCheckBox("导出 PDF 并校验一页（正式交付必需）")
         self.pdf.setChecked(True)
@@ -2792,9 +3036,26 @@ class ResearchHelperWindow(QMainWindow):
         failed: list[str] = []
         for raw in paths:
             source = Path(raw)
-            target = destination / source.name
+            from core.docs import date_from_text, usable_document_date
+            detected_date = date_from_text(source.stem)
+            date_text, accepted = QInputDialog.getText(
+                self, "确认资料发布日期",
+                f"{source.name}\n请输入原材料发布日期（YYYY-MM-DD）：",
+                text=detected_date,
+            )
+            if not accepted:
+                failed.append(f"{source.name}：未确认资料发布日期，未上传")
+                continue
+            parsed_date = date_from_text(date_text.strip())
+            usable, reason = usable_document_date(parsed_date)
+            if not usable:
+                failed.append(f"{source.name}：{reason}，未上传")
+                continue
+            filename = source.name if source.stem.startswith(parsed_date.replace("-", "")) else (
+                f"{parsed_date.replace('-', '')}-{source.name}")
+            target = destination / filename
             if target.exists():
-                target = destination / f"{source.stem}-{uuid.uuid4().hex[:6]}{source.suffix.lower()}"
+                target = destination / f"{target.stem}-{uuid.uuid4().hex[:6]}{source.suffix.lower()}"
             try:
                 shutil.copy2(source, target)
                 saved.append(target.name)
@@ -2816,6 +3077,7 @@ class ResearchHelperWindow(QMainWindow):
         target = destination / f"补充文字-{stamp}-{uuid.uuid4().hex[:6]}.txt"
         text = (
             f"来源：{dialog.source.text().strip()}\n"
+            f"资料日期：{dialog.material_date.text().strip()}\n"
             f"录入时间：{datetime.now().astimezone().isoformat(timespec='seconds')}\n"
             "---\n"
             f"{dialog.content.toPlainText().strip()}\n"
@@ -2838,6 +3100,21 @@ class ResearchHelperWindow(QMainWindow):
                  if root.is_dir() else [])
         pdf_count = sum(path.suffix.lower() == ".pdf" for path in files)
         text_count = len(files) - pdf_count
+        excluded = 0
+        if files:
+            from core.docs import (_read_pasted_material, date_from_text, parse_filename,
+                                   usable_document_date)
+            for path in files:
+                _, material_date = parse_filename(path)
+                if path.suffix.lower() in {".txt", ".md"}:
+                    try:
+                        _, header_date, _ = _read_pasted_material(path)
+                    except OSError:
+                        header_date = ""
+                    material_date = header_date or material_date
+                else:
+                    material_date = material_date or date_from_text(path.stem)
+                excluded += int(not usable_document_date(material_date)[0])
         if last_uploaded:
             listed = "、".join(last_uploaded[:3]) + ("等" if len(last_uploaded) > 3 else "")
             text = f"刚添加 {len(last_uploaded)} 份：{listed}。下次研究会自动读取。"
@@ -2847,7 +3124,9 @@ class ResearchHelperWindow(QMainWindow):
                 parts.append(f"PDF {pdf_count} 份")
             if text_count:
                 parts.append(f"文字材料 {text_count} 份")
-            text = f"sources 文件夹已有 {'、'.join(parts)}；下次研究会自动读取。"
+            text = f"sources 文件夹已有 {'、'.join(parts)}；下次研究会读取其中日期合格的材料。"
+            if excluded:
+                text += f" {excluded} 份因日期缺失、在未来或超过 90 天已排除，仅供内部复核。"
         else:
             text = "未添加补充材料（可选；支持 PDF 上传或粘贴文字）。"
         self.source_label.setText(text)
@@ -2905,14 +3184,14 @@ class ResearchHelperWindow(QMainWindow):
                 missing.append("组合传导链")
             if forced:
                 self.evidence_label.setText(
-                    "已启用事件驱动型，本次运行将强制进入事件证据流程。当前待确认："
+                    "已启用明确外部事件路径，本次运行将强制进入事件证据流程。当前待确认："
                     + "、".join(missing) + "。可以先管理证据，也可在运行中自动查找候选。"
                 )
                 self.evidence_label.setStyleSheet("color:#9a4f00; font-weight:600;")
             else:
                 self.evidence_label.setText(
-                    "仅事件型需求需要确认：" + "、".join(missing)
-                    + "。可自动查找候选；普通板块/ETF研究无需处理。"
+                    "只有 IPO、业绩/指引、政策、产品发布等明确外部事件需要确认：" + "、".join(missing)
+                    + "。科技回调、风格轮动等市场状态型研究无需填写公司公告式证据包。"
                 )
                 self.evidence_label.setStyleSheet("color:#8a5b14;")
 
@@ -3667,6 +3946,7 @@ class ResearchHelperWindow(QMainWindow):
         self._option_output = ""
         self._option_error_output = ""
         process = QProcess(self)
+        self._apply_run_model_environment(process)
         process.setWorkingDirectory(str(ROOT))
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         process.readyReadStandardOutput.connect(self._read_option_output)
@@ -3878,9 +4158,14 @@ class ResearchHelperWindow(QMainWindow):
             "constraints": job.selection_payload.get("constraints") or {},
             "selection": job.selection_payload.get("selection") or {},
         }
+        # 保留当前任务已确认的报价参数，不读取旧任务的日期或合同覆盖。
+        for key in ("term_overrides", "pricing_config", "backtest_config", "quote_variants"):
+            if key in job.selection_payload:
+                payload[key] = job.selection_payload[key]
         self._option_output = ""
         self._option_error_output = ""
         process = QProcess(self)
+        self._apply_run_model_environment(process)
         process.setWorkingDirectory(str(ROOT))
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         process.readyReadStandardOutput.connect(self._read_option_output)
@@ -4042,8 +4327,22 @@ class ResearchHelperWindow(QMainWindow):
         gap_file = Path(self._gap_artifact(self.last_summary))
         artifacts = self.last_summary.setdefault("artifacts", {})
         metadata = self.last_summary.setdefault("metadata", {})
+        job.status = "finalizing"
+        job.message = "OptionHelper 报价已返回，正在同步报告、底稿与最终 PDF"
+        self._sync_quote_runtime_to_summary(job)
+        self._refresh_quote_queue()
+        self.status.setText(f"{job.job_id}：{job.message}…")
+        delivery_finished = False
 
         def finish(pdf: str = "", export_error: str = "") -> None:
+            nonlocal delivery_finished
+            if delivery_finished:
+                return
+            delivery_finished = True
+            if self._quote_delivery_timer is not None:
+                self._quote_delivery_timer.stop()
+                self._quote_delivery_timer.deleteLater()
+                self._quote_delivery_timer = None
             pages = None
             if pdf:
                 try:
@@ -4101,7 +4400,18 @@ class ResearchHelperWindow(QMainWindow):
                 on_done=lambda path: finish(path or "", "printToPdf 返回空数据" if not path else ""),
             )
 
+        def delivery_timed_out() -> None:
+            try:
+                self.report_preview.loadFinished.disconnect(after_load)
+            except (RuntimeError, TypeError):
+                pass
+            finish(export_error="报价已写入 HTML，但最终 PDF 同步超过45秒；已结束等待并标记为未校验")
+
         self.report_preview.loadFinished.connect(after_load)
+        self._quote_delivery_timer = QTimer(self)
+        self._quote_delivery_timer.setSingleShot(True)
+        self._quote_delivery_timer.timeout.connect(delivery_timed_out)
+        self._quote_delivery_timer.start(45_000)
         self.report_preview.load(QUrl.fromLocalFile(str(report_file.resolve())))
 
     def _finish_direct_quote(self, job: QuoteJob) -> None:
@@ -4196,6 +4506,15 @@ class ResearchHelperWindow(QMainWindow):
         if dialog.exec():
             QMessageBox.information(self, "LLM 设置已保存", "新设置会在下一次分析任务启动时生效。")
 
+    def _apply_run_model_environment(self, process: QProcess) -> None:
+        """把分析师确认的本次模型覆盖传给后续产品子进程。"""
+        if not self._run_model_overrides:
+            return
+        environment = QProcessEnvironment.systemEnvironment()
+        for key, value in self._run_model_overrides.items():
+            environment.insert(key, value)
+        process.setProcessEnvironment(environment)
+
     def edit_search_settings(self) -> None:
         dialog = SearchSettingsDialog(self)
         if dialog.exec():
@@ -4283,6 +4602,7 @@ class ResearchHelperWindow(QMainWindow):
         if effective_override:
             args += ["--overrides", effective_override]
         self.run_id = ""
+        self._run_model_overrides = {}
         self._run_cancelled = False
         self.last_summary = {}
         self._output_buffer = ""
@@ -4319,7 +4639,44 @@ class ResearchHelperWindow(QMainWindow):
         for line in lines:
             if "运行编号：" in line:
                 self.run_id = line.split("运行编号：", 1)[1].split("（", 1)[0].strip()
-            if line.startswith("MARKET_CONFIRMATION_REQUIRED="):
+            if line.startswith("LLM_MODEL_CONFIRMATION_REQUIRED="):
+                try:
+                    payload = json.loads(line.split("=", 1)[1])
+                except json.JSONDecodeError:
+                    payload = {}
+                unavailable = payload.get("unavailable") or {}
+                detail = "\n".join(f"• {slot}：{model}" for slot, model in unavailable.items())
+                fallback = str(payload.get("fallback") or "—")
+                answer = QMessageBox.question(
+                    self,
+                    "当前模型已不可用",
+                    "运行前校验发现以下模型已不在当前账号的可用目录中：\n"
+                    f"{detail}\n\n是否仅在本次运行中改用备用模型 {fallback}？\n"
+                    "选择“否”会停止运行，不会静默更换模型；可在 LLM 设置中重新选择长期配置。",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                allow = answer == QMessageBox.StandardButton.Yes
+                if allow:
+                    for slot in unavailable:
+                        env_key = ("RESEARCH_HELPER_RUN_FAST_MODEL" if slot == "fast"
+                                   else "RESEARCH_HELPER_RUN_QUALITY_MODEL")
+                        self._run_model_overrides[env_key] = fallback
+                response = json.dumps({"allow_fallback": allow}, ensure_ascii=True) + "\n"
+                self.process.write(response.encode("ascii"))
+                self.status.setText("已确认备用模型，继续运行…" if allow else "已停止：未同意模型降级")
+            elif line.startswith("LLM_MODEL_BLOCKED="):
+                try:
+                    payload = json.loads(line.split("=", 1)[1])
+                except json.JSONDecodeError:
+                    payload = {}
+                QMessageBox.warning(
+                    self, "没有可用的分析模型",
+                    str(payload.get("message") or "当前模型与备用模型均不可用。")
+                    + "\n\n请打开 LLM 设置，刷新账号模型目录后重新选择。",
+                )
+                self.status.setText("已停止：没有可用的分析模型")
+            elif line.startswith("MARKET_CONFIRMATION_REQUIRED="):
                 try:
                     payload = json.loads(line.split("=", 1)[1])
                 except json.JSONDecodeError:

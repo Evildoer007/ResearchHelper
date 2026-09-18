@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from render.layout import (
     CHART_FALLBACKS, _chart_block, _chart_for, _chart_layout_mode, _chart_meta_html,
     _echarts_assets, _one_chart, _ordered_time_labels,
-    _report_title, _underlying_block, confirmed_underlying_block, multi_quote_block,
+    _report_subtitle, _report_title, _underlying_block, confirmed_underlying_block, multi_quote_block,
 )
 
 
@@ -53,6 +53,11 @@ class ChartAxisTests(unittest.TestCase):
             plan=SimpleNamespace(主题="汽车电子"),
         )
         self.assertEqual(_report_title(analysis), "基于A股汽车电子产业智能化加速的投资机会")
+
+    def test_cover_subtitle_does_not_repeat_data_query_date(self) -> None:
+        subtitle = _report_subtitle("2026年9月17日")
+        self.assertEqual(subtitle, "策略研究 · 报告生成 2026年9月17日")
+        self.assertNotIn("数据查询", subtitle)
 
     def test_metric_names_are_not_treated_as_a_trend_axis(self) -> None:
         self.assertFalse(_ordered_time_labels(["PB历史分位", "归母净利同比", "板块区间涨跌幅"]))

@@ -51,15 +51,26 @@ class TargetRef:
 
 
 @dataclass
+class ImpactBranch:
+    """需求解析阶段形成的影响假设，只用于分支筛选，不作为事实证据。"""
+
+    名称: str
+    传导关系: str = ""
+    A股对象: str = ""
+    待验证证据: str = ""
+    可报价工具方向: str = ""
+
+
+@dataclass
 class Brief:
     原始需求: str
     市场范围: str = "A股"  # A股 / 港股 / 跨市场；用于阻止跨市场静默映射
-    市场确认: dict | None = None       # 高风险口径经分析师确认后的本次运行契约
+    市场确认: dict | None = None       # 所有研究取数前经分析师确认的本次运行契约
     # 兼容字段名：当前仅存“主题 ETF 路径”的已验证研究取数代码。正式挂钩标的
     # 在研究完成后的报价审核中另行确认，不会写回 Brief。
     确认挂钩标的: str = ""
     确认挂钩标的类型: str = ""
-    # 高风险主题由分析师确认后，研究主题、研究篮子和报价候选是三个明确角色。
+    # 所有研究由分析师确认后，研究主题、研究篮子和报价候选是三个明确角色。
     # 不能再把“通信、电子”等宽行业名同时拿来当全部三者的名称。
     研究主题: str = ""
     研究篮子口径: str = ""
@@ -75,6 +86,14 @@ class Brief:
     # GUI 中由分析师显式勾选。它把本次运行固定为事件驱动，并启用事件证据硬门；
     # 不能因 LLM 分类不同或境外触发实体代码暂未校验就悄悄退化为普通行业研究。
     分析师强制事件驱动: bool = False
+    # 与报告体裁分离：明确外部事件才启用 F/M/E/C 证据硬门；市场状态触发
+    # 依靠行情、资金、估值和历史区间验证，不要求公司公告式事件原文。
+    # 空值专供旧 Brief/测试对象：required_for 会按“事件驱动 + 明确实体”兼容推断；
+    # 新解析结果始终写入三个规范枚举之一，因此显式“非事件”不会再被兼容逻辑覆盖。
+    事件路径: str = ""
+    # 分支只是待验证假设。完整研究前先比较证据、A股暴露与可报价性，最终只保留
+    # 一个主方向和至多一个备选方向；不能把这里的 LLM 文本直接写成报告事实。
+    候选影响分支: list[ImpactBranch] = dfield(default_factory=list)
     触发事件: str = ""
     关注点: str = ""
     # 客户点名的结构/报价诉求：保留作 OptionHelper 的独立输入与审计留痕，
@@ -146,6 +165,15 @@ _SYSTEM = """你是券商研究部的"需求解析器"。用户（老板/销售/
    若该板块未出现在今日信号中，写"待取数验证"（而非"数据不足"）——取数阶段会精确获取；
    不要附和也不要否定。
 3. 需求常同时涉及事件与板块机会：选一个**主导类型**，其余相关的放"附加类型"（可为空）。
+3.1 **事件路径必须与体裁分开判断**：
+   - `明确外部事件`：IPO、业绩/指引发布、政策出台、产品发布、事故、并购等已经发生或有明确窗口的外部事件；
+     后续必须核验事件事实、产业/市场机制及 A 股暴露。
+   - `市场状态触发`：科技回调、消费轮动、估值切换、成交降温、资金风格变化等由行情本身定义的状态；
+     后续使用当前市场数据、历史类似区间与失效条件验证，不要求公司公告式事件证据。
+   - `非事件`：普通行业展望、板块配置价值或长期产业趋势。
+   不得因为问题中出现“近期、回调、机会、影响”等泛词，就把市场状态误判成明确外部事件。
+3.2 明确外部事件应给出 1~4 个`候选影响分支`，分别说明传导关系、可能的 A 股对象、待验证证据和可报价工具方向。
+   这些只是检索和人工筛选假设，不是结论；不要同时把所有分支写成完整报告。
 4. "涉及板块"必须是**A股口径**的板块名，优先直接取自给定信号中出现的板块名称。
 4.1 **按业务对口映射，不按概念联想。** 需求由海外公司或事件引发时，
    取**主营业务重叠最直接**的那个 A 股板块，不要跳到下游或配套环节。
@@ -208,6 +236,14 @@ def _build_prompt(text: str, bundle: sg.SignalBundle) -> str:
             "研究主题": "研报标题，简洁专业，只体现事件与板块，不得出现产品/结构词",
             "主导类型": "板块机会|产业趋势|事件驱动",
             "附加类型": ["可为空；需求同时涉及的其它类型"],
+            "事件路径": "明确外部事件|市场状态触发|非事件",
+            "候选影响分支": [{
+                "名称": "影响维度，例如市场流动性/存储产业链/估值映射",
+                "传导关系": "事件到该分支的待验证关系，不得写成既成事实",
+                "A股对象": "可能受影响的行业、主题篮子或指数；不确定可留空",
+                "待验证证据": "需要哪类原文或数据才能确认",
+                "可报价工具方向": "可能对应的ETF/指数类型，不得编造代码",
+            }],
             "触发事件": "需求中的引发事件，一句话",
             "研究关注点": "用户真正想知道的市场问题，不得出现产品/结构词",
             "客户产品诉求原文摘录": "仅摘录用户原文中与结构、报价、期限、损失或收益偏好有关的片段；无则留空，不得改写或补充",
@@ -350,7 +386,7 @@ def parse(
                          or any(marker in raw for marker in overseas_markers))
              else ("港股" if "港股" in raw else "A股"))
     b = Brief(原始需求=raw, 市场范围=scope)
-    client = client or DeepSeekClient()
+    client = client or DeepSeekClient(purpose="fast")
     if not client.available():
         b.error = "未配置 DeepSeek key，无法解析需求"
         return b
@@ -368,6 +404,25 @@ def parse(
     pt = str(d.get("主导类型", "")).strip()
     b.主导类型 = pt if pt in gr.list_types() else gr.TYPE_SECTOR
     b.附加类型 = [t for t in (d.get("附加类型") or []) if t in gr.list_types() and t != b.主导类型]
+    b.事件路径 = gr.normalize_event_path(
+        d.get("事件路径"), topic_type=b.主导类型,
+        has_entity=isinstance(d.get("触发实体"), dict) and bool(str((d.get("触发实体") or {}).get("名称") or "").strip()),
+    )
+    raw_branches = d.get("候选影响分支") or []
+    if b.事件路径 == gr.EVENT_PATH_EXTERNAL and isinstance(raw_branches, list):
+        for raw_branch in raw_branches[:4]:
+            if not isinstance(raw_branch, dict):
+                continue
+            name = str(raw_branch.get("名称") or "").strip()
+            if not name:
+                continue
+            b.候选影响分支.append(ImpactBranch(
+                名称=name,
+                传导关系=str(raw_branch.get("传导关系") or "").strip(),
+                A股对象=str(raw_branch.get("A股对象") or "").strip(),
+                待验证证据=str(raw_branch.get("待验证证据") or "").strip(),
+                可报价工具方向=str(raw_branch.get("可报价工具方向") or "").strip(),
+            ))
     b.触发事件 = _research_only(str(d.get("触发事件", "")).strip())
     b.关注点 = _research_only(str(d.get("研究关注点") or d.get("关注点") or "").strip())
     b.涉及板块 = [str(x).strip() for x in (d.get("涉及板块") or []) if str(x).strip()]
@@ -458,11 +513,22 @@ def render(b: Brief, *, 含外部事实: bool = True) -> str:
         f"【需求解析】{b.主题}",
         f"  市场范围：{b.市场范围}",
         f"  类型：{types}（主导：{b.主导类型}）",
+        f"  事件处理路径：{b.事件路径 or gr.EVENT_PATH_NONE}",
         f"  触发事件：{b.触发事件}",
         f"  关注点：{b.关注点}",
         f"  涉及板块：{'、'.join(b.涉及板块) or '—'}"
         + (f"（{b.板块理由}）" if b.板块理由 else ""),
     ]
+    if b.候选影响分支:
+        lines.append("  候选影响分支（仅作待验证假设）：")
+        for index, branch in enumerate(b.候选影响分支, 1):
+            detail = "；".join(value for value in (
+                branch.传导关系,
+                f"A股对象={branch.A股对象}" if branch.A股对象 else "",
+                f"待验证={branch.待验证证据}" if branch.待验证证据 else "",
+                f"工具方向={branch.可报价工具方向}" if branch.可报价工具方向 else "",
+            ) if value)
+            lines.append(f"    {index}. {branch.名称}" + (f"｜{detail}" if detail else ""))
     if b.客户产品诉求:
         lines.append(f"  客户产品诉求（不进入研究）：{b.客户产品诉求}")
     # 宽口径必须把成分行业摊开给人看——口径是这份报告最容易被质疑的地方，

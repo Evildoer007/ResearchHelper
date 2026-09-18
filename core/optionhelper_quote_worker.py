@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import contextlib
 import os
 import sys
 import traceback
@@ -35,6 +36,28 @@ def _configure_utf8_stdio() -> None:
             reconfigure(encoding="utf-8", errors="replace")
 
 
+def build_project_request(body: Mapping) -> dict:
+    """Preserve this quote's explicit overrides; never derive dates from research data."""
+    request = {
+        "prompt": str(body.get("prompt") or ""),
+        "constraints": dict(body.get("constraints") or {}),
+        "selection": dict(body.get("selection") or {}),
+        "output_type": "quote", "format": "html",
+    }
+    for key in ("term_overrides", "pricing_config", "backtest_config"):
+        value = body.get(key)
+        if value is not None:
+            if not isinstance(value, Mapping):
+                raise ValueError(f"{key} 必须为 JSON 对象")
+            request[key] = dict(value)
+    variants = body.get("quote_variants")
+    if variants is not None:
+        if not isinstance(variants, list):
+            raise ValueError("quote_variants 必须为 JSON 数组")
+        request["quote_variants"] = variants
+    return _utf8_safe(request)
+
+
 def main() -> None:
     _configure_utf8_stdio()
     try:
@@ -60,15 +83,11 @@ def main() -> None:
             message = _utf8_safe(str(event.get("message") or ""))
             print(f"[OptionHelper/{stage}/{status}] {message}", file=sys.stderr, flush=True)
 
-        result = tool_entry.run_project_request({
-            # 交接包、人工理由或外部模块文本可能带不完整 Unicode；在
-            # OptionHelper 计算请求哈希前清洗，避免报价尚未开始就崩溃。
-            "prompt": _utf8_safe(str(body.get("prompt") or "")),
-            "constraints": _utf8_safe(dict(body.get("constraints") or {})),
-            "selection": _utf8_safe(dict(body.get("selection") or {})),
-            "output_type": "quote",
-            "format": "html",
-        }, project_root=project_root, progress=emit_progress)
+        # 内部输出只能进入 stderr，不得污染 GUI 的单 JSON 结果协议。
+        with contextlib.redirect_stdout(sys.stderr):
+            result = tool_entry.run_project_request(
+                build_project_request(body), project_root=project_root, progress=emit_progress,
+            )
         print(json.dumps(_utf8_safe({"ok": True, "result": result}), ensure_ascii=False))
     except Exception as error:
         # 失败信息也必须保持合法 UTF-8，否则 GUI 只能看到“未返回有效报价”。

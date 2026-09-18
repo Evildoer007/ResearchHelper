@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import re
 from collections import Counter
 from dataclasses import dataclass, field as dfield
@@ -104,6 +105,53 @@ class DocExtract:
 
 # ---------------- PDF 读取 ----------------
 
+def date_from_text(text: str) -> str:
+    """从来源说明或文件名读取明确日期，统一为 YYYY-MM-DD；读不到就留空。"""
+    text = str(text or "")
+    patterns = (
+        r"(?<!\d)(20\d{2})\s*[-/.年]\s*(0?[1-9]|1[0-2])\s*[-/.月]\s*(0?[1-9]|[12]\d|3[01])\s*(?:日)?(?!\d)",
+        r"(?<!\d)(20\d{2})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        try:
+            return dt.date(*(int(x) for x in match.groups())).isoformat()
+        except ValueError:
+            continue
+    return ""
+
+
+def _read_pasted_material(path: Path) -> tuple[str, str, str]:
+    """读取 GUI 文字材料，返回 ``(来源, 资料日期, 正文)``。"""
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    lines = raw.splitlines()
+    source = ""
+    material_date = ""
+    body_start = 0
+    for idx, line in enumerate(lines[:5]):
+        source_match = re.match(r"^\s*(?:来源|source)\s*[：:]\s*(.+?)\s*$", line, re.I)
+        date_match = re.match(
+            r"^\s*(?:资料日期|发布日期|document date|published)\s*[：:]\s*(.+?)\s*$",
+            line, re.I,
+        )
+        if source_match:
+            source = source_match.group(1).strip()
+            body_start = max(body_start, idx + 1)
+        elif date_match:
+            material_date = date_from_text(date_match.group(1))
+            body_start = max(body_start, idx + 1)
+        elif re.match(r"^\s*(?:录入时间|created)\s*[：:]", line, re.I):
+            body_start = max(body_start, idx + 1)
+        elif re.fullmatch(r"\s*-{3,}\s*", line) and body_start:
+            body_start = idx + 1
+            break
+        elif idx >= body_start:
+            break
+    return source, material_date, "\n".join(lines[body_start:]).strip()
+
+
 def _read_pasted_text(path: Path) -> tuple[str, str]:
     """读取 GUI 写入的文字材料，返回 ``(来源, 正文)``。
 
@@ -111,21 +159,8 @@ def _read_pasted_text(path: Path) -> tuple[str, str]:
     LLM 抽取，后者只作为候选和最终报告的可追溯标签。未按这个格式保存的 TXT/MD
     仍可读取，只是回退为文件名来源，方便分析师手工放入 sources/ 的旧材料。
     """
-    raw = path.read_text(encoding="utf-8", errors="replace")
-    lines = raw.splitlines()
-    source = ""
-    body_start = 0
-    if lines:
-        match = re.match(r"^\s*(?:来源|source)\s*[：:]\s*(.+?)\s*$", lines[0], re.I)
-        if match:
-            source = match.group(1).strip()
-            body_start = 1
-            # GUI 会额外写入录入时间与分隔线；这两行不是可引用原文。
-            if body_start < len(lines) and re.match(r"^\s*(?:录入时间|created)\s*[：:]", lines[body_start], re.I):
-                body_start += 1
-            if body_start < len(lines) and re.fullmatch(r"\s*-{3,}\s*", lines[body_start]):
-                body_start += 1
-    return source, "\n".join(lines[body_start:]).strip()
+    source, _, body = _read_pasted_material(path)
+    return source, body
 
 
 def read_pages(path: Path) -> list[str]:
@@ -259,12 +294,26 @@ def source_label(path: Path) -> str:
 STALE_DAYS = 90
 
 
+def usable_document_date(doc_date: str) -> tuple[bool, str]:
+    """客户报告材料的日期硬门：日期必须明确、不得在未来、不得超过 90 天。"""
+    if not doc_date:
+        return False, "缺少资料发布日期，不能进入客户报告"
+    try:
+        date_value = dt.date.fromisoformat(doc_date)
+    except ValueError:
+        return False, "资料日期格式无效，应为 YYYY-MM-DD"
+    age = (dt.date.today() - date_value).days
+    if age < 0:
+        return False, "资料日期在未来，请核对"
+    if age > STALE_DAYS:
+        return False, f"资料已过期（{age} 天，客户报告上限 {STALE_DAYS} 天）"
+    return True, ""
+
+
 def freshness(doc_date: str) -> str:
     """把文档日期换算成人能一眼看懂的时效标签。"""
     if not doc_date:
         return "日期未知（文件名不含 YYYYMMDD）"
-    import datetime as dt
-
     try:
         d = dt.date.fromisoformat(doc_date)
     except ValueError:
@@ -581,8 +630,17 @@ def extract(path: Path, client: DeepSeekClient | None = None,
     """
     label, doc_date = parse_filename(path)
     label = source_label(path)
+    if path.suffix.lower() in {".txt", ".md"}:
+        _, header_date, _ = _read_pasted_material(path)
+        doc_date = header_date or doc_date
+    else:
+        doc_date = doc_date or date_from_text(path.stem)
     out = DocExtract(文件=path.name, 来源=label, 文档日期=doc_date,
                      时效=freshness(doc_date))
+    usable, date_error = usable_document_date(doc_date)
+    if not usable:
+        out.error = date_error
+        return out
     pages = read_pages(path)
     out.页数 = len(pages)
     if not any(p.strip() for p in pages):
@@ -603,7 +661,7 @@ def extract(path: Path, client: DeepSeekClient | None = None,
     from . import thesis as th
     categories = sorted({t.类别 for t in th.load_library().values()})
 
-    client = client or DeepSeekClient()
+    client = client or DeepSeekClient(purpose="fast")
     if not client.available():
         out.error = "未配置 DeepSeek key"
         return out
@@ -719,7 +777,7 @@ def extract_all(directory: Path | None = None,
                 topic: str = "") -> list[DocExtract]:
     """抽取 sources/ 下全部 PDF 与文字材料（含子目录）。"""
     d = directory or SOURCES_DIR
-    client = client or DeepSeekClient()
+    client = client or DeepSeekClient(purpose="fast")
     files = sorted(
         [*d.rglob("*.pdf"), *d.rglob("*.txt"), *d.rglob("*.md")],
         key=lambda path: str(path).lower(),

@@ -197,11 +197,33 @@ class EvidenceDiscoveryTests(unittest.TestCase):
                 progress=lambda value, message: progress.append((value, message)),
             )
 
-        self.assertEqual(set(result.query_groups), {"事件事实", "产业机制", "产业机制补检"})
+        self.assertEqual(set(result.query_groups), {
+            "事件事实", "产业机制", "事件事实补检", "产业机制补检"})
         self.assertTrue(searched)
         self.assertFalse(any("ETF 跟踪指数" in query or "A股 公司" in query for query in searched))
         self.assertEqual(progress[-1][0], 100)
         self.assertEqual([value for value, _ in progress], sorted(value for value, _ in progress))
+
+    def test_web_document_quota_is_spread_across_query_intents(self) -> None:
+        calls: list[str] = []
+
+        def searcher(query: str) -> list[SearchHit]:
+            calls.append(query)
+            return [SearchHit(f"{query}-{index}", f"https://example.com/{query}/{index}")
+                    for index in range(6)]
+
+        result = DiscoveryResult()
+        documents = _collect_web_documents(
+            ["official", "exchange", "media"], channel="事件事实", limit=6,
+            searcher=searcher,
+            fetcher=lambda hit: EvidenceDocument(
+                "", hit.title, hit.title, hit.url, "有效原文" * 40, "测试正文"),
+            seen_urls=set(), result=result,
+        )
+        self.assertEqual(len(documents), 6)
+        self.assertEqual(calls, ["official", "exchange"])
+        self.assertEqual(sum(item.source.startswith("official") for item in documents), 3)
+        self.assertEqual(sum(item.source.startswith("exchange") for item in documents), 3)
 
     def test_complete_mode_uses_confirmed_target_and_keeps_existing_foundation(self) -> None:
         searched: list[str] = []

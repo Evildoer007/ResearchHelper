@@ -608,16 +608,17 @@ def _source_table(ma) -> list[str]:
         if not getattr(fv, "ok", False):
             continue
         src = str(getattr(fv, "source", "") or "—")
+        as_of = str(getattr(fv, "as_of", "") or getattr(ma, "数据查询日", "") or "未记录")
         mark = " 🖉" if ov.is_manual(fv) else ""
         disp = str(getattr(fv, "display", "") or getattr(fv, "value", ""))
-        rows.append(f"| {name}{mark} | {disp[:46]} | {src} |")
+        rows.append(f"| {name}{mark} | {disp[:46]} | {as_of} | {src} |")
     if not rows:
         return []
     return [
         "### 本次各字段的实际来源",
         "",
-        "| 字段 | 值 | 来源（口径）|",
-        "|---|---|---|",
+        "| 字段 | 值 | 数据日期/区间 | 来源（口径）|",
+        "|---|---|---|---|",
         *rows,
         "",
         "> 🖉 = 分析师人工填写，非数据源自动取得。",
@@ -1132,7 +1133,7 @@ def refresh_optionhelper_multi_result(gap_path: str | Path, entries: list[dict],
 
 
 def _event_evidence_section(ma) -> list[str]:
-    """记录事件事实与传导的来源，便于复核“为什么这件事会影响该 ETF”。"""
+    """完整记录内部证据编号、组合边界与置信度；这些信息不进入客户报告。"""
     evidence = dict(getattr(ma, "事件证据", {}) or {})
     if not evidence:
         return []
@@ -1141,9 +1142,22 @@ def _event_evidence_section(ma) -> list[str]:
     lines.append(f"- **事件主体**：{entity}")
     for item in evidence.get("事件事实") or []:
         lines.append(f"- **事件事实**：{item}")
+    for item in evidence.get("产业机制") or []:
+        lines.append(f"- **产业机制**：{item}")
+    for item in evidence.get("A股暴露") or []:
+        lines.append(f"- **A股暴露**：{item}")
+    for item in evidence.get("组合传导链") or []:
+        lines.append(f"- **组合传导链**：{item}")
+    for item in evidence.get("正文采用分支") or []:
+        lines.append(f"- **正文采用分支**：{item}")
     for item in evidence.get("传导关系") or []:
         lines.append(f"- **传导关系**：{item}")
-    lines += ["", "> 事件事实、传导依据与 A 股行情数据分别记录；不得把三者互相替代或补写。", ""]
+    lines += [
+        "",
+        "> F/M/E/C 编号、证据组合、分支角色和置信度均为内部审核字段；客户报告只展示经确认的事实、来源、传导关系及边界。",
+        "> 事件事实、传导依据与 A 股行情数据分别记录；不得把三者互相替代或补写。",
+        "",
+    ]
     return lines
 
 
@@ -1168,6 +1182,11 @@ def build_markdown(ma, rc, vr, *, title: str, html_path: str, oh_result=None) ->
     lines += _scope_section(ma, sector)
     lines += _event_evidence_section(ma)
     lines += _source_table(ma)
+    notes = list(getattr(rc, "内部审核备注", []) or [])
+    if notes:
+        lines += ["### 写作内部审核备注（不进入客户正文）", ""]
+        lines += [f"- {note}" for note in notes]
+        lines.append("")
     lines += ["---", "", "## 二、给 OptionHelper 的观点包", ""]
     lines += _viewpoint_section(ma, rc)
     lines += ["---", "", "## 三、OptionHelper 产品流程与正式报价结果", ""]

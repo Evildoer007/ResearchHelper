@@ -74,10 +74,30 @@ def _setting_bool(key: str, default: bool) -> bool:
 # ---- DeepSeek / LLM 配置 ----
 DEEPSEEK_API_KEY = _cred("DEEPSEEK_API_KEY")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-# ⚠ 别写回 "deepseek-chat"：实测那是旧别名，会落到 **deepseek-v4-flash**（低档模型）。
-# 项目此前一直在用 flash 跑，而 writer 那些"正文太薄、漏写逻辑"的毛病正出在这一环。
-# 账号可用模型可随时复查：GET {BASE_URL}/models
-DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", _LOCAL.get("DEEPSEEK_MODEL", "deepseek-v4-flash"))
+# 模型 ID 会随供应商升级而变化。配置只保存分析师明确选择的逻辑档位；账号当前
+# 可用目录由 GET /models 动态取得。DEEPSEEK_MODEL 继续作为旧版配置兼容入口。
+_LEGACY_DEEPSEEK_MODEL = str(_LOCAL.get("DEEPSEEK_MODEL") or "").strip()
+DEEPSEEK_FAST_MODEL = str(
+    os.environ.get("RESEARCH_HELPER_RUN_FAST_MODEL")
+    or os.environ.get("DEEPSEEK_FAST_MODEL")
+    or _LOCAL.get("DEEPSEEK_FAST_MODEL")
+    or _LEGACY_DEEPSEEK_MODEL
+    or "deepseek-flash"
+).strip()
+DEEPSEEK_QUALITY_MODEL = str(
+    os.environ.get("RESEARCH_HELPER_RUN_QUALITY_MODEL")
+    or os.environ.get("DEEPSEEK_QUALITY_MODEL")
+    or _LOCAL.get("DEEPSEEK_QUALITY_MODEL")
+    or _LEGACY_DEEPSEEK_MODEL
+    or "deepseek-flash"
+).strip()
+DEEPSEEK_FALLBACK_MODEL = str(
+    os.environ.get("DEEPSEEK_FALLBACK_MODEL")
+    or _LOCAL.get("DEEPSEEK_FALLBACK_MODEL")
+    or "deepseek-flash"
+).strip()
+# OptionHelper 等尚未区分逻辑档位的旧调用默认使用质量档。
+DEEPSEEK_MODEL = DEEPSEEK_QUALITY_MODEL
 
 # ---- iFinD（同花顺 quant API）配置 ----
 # 数据源主力。注意：账户有周度取数上限，静态/慢变数据须缓存到本地（见 data_cache/）。
@@ -96,6 +116,15 @@ SEARCH_BING_FALLBACK = _setting_bool("SEARCH_BING_FALLBACK", True)
 
 # 本地数据缓存目录（静态数据取一次存这里，规避配额）
 DATA_CACHE_DIR = _PROJECT_ROOT / "data_cache"
+DEEPSEEK_MODEL_CACHE = DATA_CACHE_DIR / "deepseek_models.json"
+
+
+def model_for_purpose(purpose: str = "quality") -> str:
+    """按任务逻辑选择模型；运行级覆盖在每次调用时读取，支持显式降级。"""
+    slot = "fast" if str(purpose).strip().lower() == "fast" else "quality"
+    if slot == "fast":
+        return str(os.environ.get("RESEARCH_HELPER_RUN_FAST_MODEL") or DEEPSEEK_FAST_MODEL)
+    return str(os.environ.get("RESEARCH_HELPER_RUN_QUALITY_MODEL") or DEEPSEEK_QUALITY_MODEL)
 
 
 def has_llm() -> bool:
@@ -111,8 +140,9 @@ def has_ifind() -> bool:
 
 # ---- OptionHelper Skill（正式参考报价）集成配置 ----
 # 新版是只读 Skill 安装目录，项目数据固定写入本仓库下的 data/result/.optionhelper。
-# 用户当前指定的开发安装作为自动发现候选；换机时显式配置
-# OPTIONHELPER_SKILL_ROOT。旧 OPTIONHELPER_ROOT 不再读取，避免误连旧版工程。
+# 本地升级由 tools/optionhelper_install.py 显式配置已验证的独立 Skill 与解释器。
+# 未配置时仍兼容旧桌面安装；源码 pull 不会自动改变已激活 Skill。
+# 旧 OPTIONHELPER_ROOT 不再读取，避免误连旧版工程。
 _DESKTOP_OPTIONHELPER_SKILL = Path.home() / "Desktop" / "option-helper_3" / "option-helper"
 OPTIONHELPER_SKILL_ROOT = _cred(
     "OPTIONHELPER_SKILL_ROOT",

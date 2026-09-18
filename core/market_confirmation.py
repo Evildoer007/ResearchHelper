@@ -1,19 +1,20 @@
-"""高风险研究口径的分析师确认与临时标的校验。
+"""所有研究取数目标的分析师确认与临时标的校验。
 
 确认结果只在本次进程生效。自由文本不能绕过行业、证券真实性和流动性校验，
 也不会自动写回人工维护的行业/ETF 库。
 """
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import asdict, dataclass, field
+from types import SimpleNamespace
 
 from . import instruments, universe
 from .provider import DataProvider, get_provider
 
 MARKETS = ("A股", "港股", "跨市场")
 _SPLIT_RE = re.compile(r"[、,，;/；]+")
-_HIGH_RISK_RE = re.compile(r"产业链|智能化|AI\s*算力|人工智能|港股|跨市场", re.I)
 _INVALID_SCOPE_RE = re.compile(r"^[\d\W_]+$")
 # 不能用 ``\b``：Python 把中文也视为 word character，故“512690.SH的”在
 # SH 与“的”之间没有词边界，用户最常见的自然语言写法会漏掉明确 ETF 代码。
@@ -35,6 +36,8 @@ _THEME_BASKET_MAX = 20
 # 这是检索语言，不是“主题→基金代码”白名单。它只补充行业中常见、且业务暴露
 # 直接相关的表达；证券事实仍必须由 iFinD 官方简称、跟踪指数和流动性校验。
 _ETF_SEARCH_ALIASES: dict[str, tuple[str, ...]] = {
+    "机器人": ("机器人",),
+    "人形机器人": ("人形机器人", "机器人"),
     "消费电子": ("消费电子", "智能终端", "电子"),
     "汽车电子": ("汽车电子", "智能驾驶", "智能汽车", "车联网", "汽车智能化"),
     "智能驾驶": ("智能驾驶", "智能汽车", "汽车电子", "车联网"),
@@ -158,32 +161,12 @@ def validate(value: Confirmation) -> list[str]:
 
 
 def needs_confirmation(brief) -> bool:
-    """高风险主题及未点明代码的 ETF 研究必须由分析师确认研究对象。"""
-    if getattr(brief, "市场范围", "A股") != "A股":
-        return True
-    # 客户点名 ETF 只说明它至少应进入研究完成后的报价候选，并不自动回答
-    # “研究用标准行业、人工公司篮子还是 ETF 真实成分”。因此即使 ETF 已在
-    # 受控目录，也要展示研究确认页；若分析师选择主题 ETF 路径，它才成为
-    # 本轮研究取数目标。这样不会把产品意图偷偷改成研究口径。
-    if _explicit_catalogued_etf(brief) and not _explicit_stock_codes(brief):
-        return True
-    # 客户点名个股时，必须展示并确认研究篮子；不能由系统静默决定哪些公司
-    # 参与整体法聚合，即使该需求本身不是传统的“高风险主题”。
-    if _explicit_stock_codes(brief):
-        return True
-    sectors = list(getattr(brief, "涉及板块", []) or [])
-    parts = list(getattr(brief, "宽口径成分行业", []) or [])
-    if len(sectors) > 1 or len(parts) > 1:
-        return True
-    raw = str(getattr(brief, "原始需求", "") or "")
-    # “黄金 ETF”“机器人 ETF”这类泛称不应被解析器挑出的一只个股或 54 只常用池
-    # 静默替代；有明确代码的 ETF 已由代码核验链覆盖，无需重复打断用户。
-    generic_etf = "ETF" in raw.upper() and not _ETF_CODE_RE.search(raw)
-    # 只要系统需要替客户“选一只 ETF”进入产品路径，就必须让分析师看到候选、理由并确认。
-    # 只有用户已在原文中给出明确 ETF 代码时，才允许跳过这一步的选择动作。
-    product_route_needs_underlying = bool(getattr(brief, "客户产品诉求", "")) and not _ETF_CODE_RE.search(raw)
-    return bool(_HIGH_RISK_RE.search(raw) or _COMMODITY_RE.search(raw) or generic_etf
-                or product_route_needs_underlying)
+    """统一确认政策；普通单行业、明确证券及仅研究需求均不豁免。
+
+    保留函数接口供 GUI/CLI 共用。确认是否已完成由本次 Brief 的市场确认契约
+    判断，不再使用需求关键词、行业数量或产品诉求决定是否展示确认页。
+    """
+    return True
 
 
 def _explicit_catalogued_etf(brief) -> str:
@@ -234,16 +217,16 @@ def _pick_col(table: dict, *starts: str) -> list | None:
 
 
 def _discovery_query(brief) -> str:
-    """从需求抽取检索词，而非维护“主题→代码”的第二张白名单。"""
-    text = " ".join([str(getattr(brief, "原始需求", "") or ""),
-                     str(getattr(brief, "主题", "") or ""),
-                     *(getattr(brief, "涉及板块", []) or [])])
-    for word in ("汽车电子", "智能驾驶", "智能汽车", "光模块", "光通信", "黄金",
-                 "白银", "原油", "贵金属", "机器人", "券商", "证券", "创新药",
-                 "医药", "互联网", "半导体", "人工智能", "算力", "白酒", "酒"):
-        if word in text:
-            return word
-    return (getattr(brief, "涉及板块", []) or [str(getattr(brief, "主题", "") or "ETF")])[0]
+    """检索与暴露校验共用短研究主题，不使用完整问题或宽行业代替主题。"""
+    return _proposed_theme(brief)
+
+
+def _is_short_theme(value: str) -> bool:
+    return bool(value and len(value) <= 20 and value.upper() not in {
+        "ETF", "A股", "行业", "板块", "主题", "市场",
+    } and not _ETF_CODE_RE.search(value) and not _INVALID_SCOPE_RE.fullmatch(value)
+        and not re.fullmatch(r"[一二三四五六七八九十百0-9半]+(?:个)?(?:月|周|季度|年)(?:内)?", value)
+        and not re.search(r"分析|投资机会|市场走势|推荐|未来|怎么样|展望|[，,。；;！？?]", value))
 
 
 def _discovery_terms(brief) -> tuple[str, ...]:
@@ -252,26 +235,36 @@ def _discovery_terms(brief) -> tuple[str, ...]:
     顺序为：需求解析器给出的短主题词 → 确定性同义词 → 原始主题兜底。
     最多执行有限次问财检索，避免确认页因全市场扫描长时间无反馈。
     """
-    seeds = [str(x or "").strip() for x in (getattr(brief, "ETF检索词", []) or [])]
-    seeds.append(_discovery_query(brief))
-    text = " ".join([str(getattr(brief, "原始需求", "") or ""),
-                     str(getattr(brief, "主题", "") or ""), *seeds])
-    expanded: list[str] = []
-    for key, aliases in _ETF_SEARCH_ALIASES.items():
-        if key.lower() in text.lower():
+    theme = _discovery_query(brief)
+    if not theme:
+        return ()
+    components = re.split(r"与|和|及", theme)
+    seeds = [theme, *components,
+             *(str(x or "").strip() for x in (getattr(brief, "ETF检索词", []) or []))]
+    expanded: list[str] = [theme]
+    for key in sorted(_ETF_SEARCH_ALIASES, key=len, reverse=True):
+        aliases = _ETF_SEARCH_ALIASES[key]
+        if key.lower() in theme.lower():
             expanded.extend(aliases)
     expanded.extend(seeds)
+    source_text = " ".join([str(getattr(brief, "原始需求", "") or ""),
+                            str(getattr(brief, "主题", "") or "")]).lower()
+    aliases = {alias.lower() for key, values in _ETF_SEARCH_ALIASES.items()
+               if key.lower() in theme.lower() for alias in values}
     out: list[str] = []
     for term in expanded:
         term = str(term or "").strip()
-        if not term or len(term) > 20 or _ETF_CODE_RE.search(term):
+        if not _is_short_theme(term):
             continue
+        if term != theme and term.lower() not in aliases and term not in components:
+            if term.lower() not in source_text or term.lower() in theme.lower():
+                continue
         # 允许“AI”等英文主题，但不接受整段需求作为检索词。
         if term not in out:
             out.append(term)
         if len(out) >= _DISCOVERY_TERM_LIMIT:
             break
-    return tuple(out or ("ETF",))
+    return tuple(out)
 
 
 def _proposed_theme(brief) -> str:
@@ -282,15 +275,43 @@ def _proposed_theme(brief) -> str:
     """
     text = " ".join([str(getattr(brief, "原始需求", "") or ""),
                      str(getattr(brief, "主题", "") or "")])
+    parsed_theme = str(getattr(brief, "研究主题", "") or "").strip()
     # 先处理由两个细分环节共同构成的主题，避免在确认页只留下其中一个关键词。
     if "固态电池" in text and "锂电池" in text:
         return "锂电池与固态电池"
     for word in ("固态电池", "锂电池", "电池", "汽车电子", "消费电子", "智能驾驶", "智能汽车", "光模块", "光通信", "黄金",
-                 "白银", "原油", "创新药", "券商", "证券", "白酒", "酒", "消费",
-                 "半导体", "人工智能", "算力"):
+                 "白银", "原油", "贵金属", "人形机器人", "机器人", "创新药", "券商", "证券", "白酒", "酒", "消费",
+                 "半导体", "人工智能", "算力", "医药", "互联网"):
         if word.lower() in text.lower():
+            if (_is_short_theme(parsed_theme) and parsed_theme.lower() in text.lower()
+                    and word.lower() in parsed_theme.lower()):
+                return parsed_theme
             return word
+    # 新主题不能只依赖上面的常见词。优先使用解析器提供且能在原需求中定位的
+    # 短检索词，再使用短行业名；完整研报标题和证券代码不能用于概念股检索。
+    seeds = [parsed_theme, *(getattr(brief, "ETF检索词", []) or []),
+             *(getattr(brief, "涉及板块", []) or [])]
+    for value in seeds:
+        term = str(value or "").strip()
+        if _is_short_theme(term) and term.lower() in text.lower():
+            return term
+    # 未收录的新主题也支持简单自然语言问法；复杂问题不强行截出一个主题。
+    raw = str(getattr(brief, "原始需求", "") or "").strip()
+    raw = re.sub(r"^(?:请问|请|帮我|分析一下|分析|看看)\s*", "", raw)
+    raw = re.sub(r"^(?:未来|近|最近|今后)[一二三四五六七八九十百0-9半]+(?:个)?(?:月|周|季度|年)(?:内)?\s*", "", raw)
+    raw = re.sub(r"(?:行业|板块)?(?:的)?(?:投资机会|投资价值|市场走势|怎么样|展望)(?:分析)?[？?。！!]*$", "", raw)
+    raw = re.sub(r"(?:行业|板块)$", "", raw).strip()
+    if _is_short_theme(raw):
+        return raw
     return ""
+
+
+def _discovery_audit(brief, stage: str, status: str, reason: str, *, code: str = "", term: str = "") -> None:
+    """只记录公开检索词、代码及准入原因，不记录账号、凭证或请求正文。"""
+    if not hasattr(brief, "_etf_discovery_audit"):
+        brief._etf_discovery_audit = []
+    brief._etf_discovery_audit.append({"stage": stage, "status": status,
+                                       "reason": reason, "code": code, "term": term})
 
 
 def _discovery_keywords(brief) -> tuple[str, ...]:
@@ -343,32 +364,42 @@ def discover_etfs(brief, *, provider: DataProvider | None = None, limit: int = 8
 
     provider = provider or get_provider()
     if not isinstance(provider, iFinDProvider) or not provider.available():
+        _discovery_audit(brief, "provider", "failed", "iFinD 基金动态检索不可用；请检查研究数据配置")
         return []
     merged_rows: list[tuple[str, str]] = []
     seen_rows: set[str] = set()
     search_terms = _discovery_terms(brief)
+    if not search_terms:
+        _discovery_audit(brief, "theme", "failed", "未识别出短研究主题；请确认研究主题后重试")
+        return []
     try:
         provider._ensure_login()
         import iFinDPy as ths
     except Exception:
+        _discovery_audit(brief, "provider", "failed", "iFinD 登录或接口加载失败")
         return []
     for term in search_terms:
         try:
             query = f"{term} ETF 基金代码 基金简称 基金全称 跟踪指数"
             data = ths.THS_iwencai(query, "fund")
             if data.get("errorcode", -1) != 0:
+                _discovery_audit(brief, "search", "failed", "基金检索接口未成功返回", term=term)
                 continue
             provider.total_data_vol += int(data.get("dataVol", 0) or 0)
             tables = data.get("tables") or []
             table = (tables[0].get("table") or {}) if tables else {}
             codes = _pick_col(table, "基金代码", "证券代码", "代码") or []
             names = _pick_col(table, "基金简称", "证券简称", "基金全称", "简称") or []
-            for code, name in _discovery_rows(codes, names, brief):
+            selected_rows = _discovery_rows(codes, names, brief)
+            _discovery_audit(brief, "search", "completed",
+                             f"基金检索返回 {len(codes)} 行，名称相关性预筛保留 {len(selected_rows)} 行（非最终主题判定）", term=term)
+            for code, name in selected_rows:
                 if code not in seen_rows:
                     merged_rows.append((code, name))
                     seen_rows.add(code)
         except Exception:
             # 一个同义词查询失败不能抹掉此前已取得的候选；继续尝试其余受控词。
+            _discovery_audit(brief, "search", "failed", "基金检索或结果读取失败", term=term)
             continue
     # 检索结果不是候选即真相：先以数据源简称、主题词和近 20 日成交额做轻量预检。
     # 正式选择时 ``verify`` 仍会再跑一遍完整核验（因此不会信任界面传回的标签）。
@@ -380,13 +411,17 @@ def discover_etfs(brief, *, provider: DataProvider | None = None, limit: int = 8
     tracking_codes: dict[str, str] = {}
     for offset in range(0, len(rows), _DISCOVERY_BATCH_SIZE):
         batch = [code for code, _name in rows[offset:offset + _DISCOVERY_BATCH_SIZE]]
-        basic = provider.get_basic(batch, ["ths_stock_short_name_stock", "ths_tracking_index_code_fund"])
-        if not getattr(basic, "ok", False):
-            # 部分账号可能没有跟踪指数批量字段权限；证券真实性校验仍可先完成，
-            # 正式提交时会再次单只查询跟踪指数并校验主题暴露。
-            basic = provider.get_basic(batch, ["ths_stock_short_name_stock"])
+        try:
+            basic = provider.get_basic(batch, ["ths_stock_short_name_stock", "ths_tracking_index_code_fund"])
             if not getattr(basic, "ok", False):
-                continue
+                # 部分账号缺少跟踪指数字段权限，先尝试单独核验简称。
+                basic = provider.get_basic(batch, ["ths_stock_short_name_stock"])
+        except Exception:
+            _discovery_audit(brief, "identity", "failed", "官方基金信息批量读取失败")
+            continue
+        if not getattr(basic, "ok", False):
+            _discovery_audit(brief, "identity", "failed", "官方基金简称核验接口未返回可用数据")
+            continue
         for code in batch:
             actual = str(_first_value(basic, code, "ths_stock_short_name_stock") or "").strip()
             tracking = str(_first_value(basic, code, "ths_tracking_index_code_fund") or "").strip()
@@ -399,7 +434,11 @@ def discover_etfs(brief, *, provider: DataProvider | None = None, limit: int = 8
     unique_tracking = list(dict.fromkeys(tracking_codes.values()))
     for offset in range(0, len(unique_tracking), _DISCOVERY_BATCH_SIZE):
         batch = unique_tracking[offset:offset + _DISCOVERY_BATCH_SIZE]
-        basic = provider.get_basic(batch, ["ths_stock_short_name_stock"])
+        try:
+            basic = provider.get_basic(batch, ["ths_stock_short_name_stock"])
+        except Exception:
+            _discovery_audit(brief, "index", "failed", "跟踪指数名称读取失败；最终提交仍须核验真实指数")
+            continue
         if not getattr(basic, "ok", False):
             continue
         for code in batch:
@@ -408,14 +447,13 @@ def discover_etfs(brief, *, provider: DataProvider | None = None, limit: int = 8
                 tracking_names[code] = name
 
     out: list[dict] = []
-    exposure_scope = " ".join([
-        str(getattr(brief, "主题", "") or ""),
-        "、".join(getattr(brief, "涉及板块", []) or []),
-        str(getattr(brief, "原始需求", "") or ""),
-    ])
+    exposure_scope = _proposed_theme(brief)
+    if not rows:
+        _discovery_audit(brief, "search", "rejected", "未返回可核验的基金代码与名称")
     for code, _searched_name in rows:
         actual_name = actual_names.get(code, "")
         if "ETF" not in actual_name.upper():
+            _discovery_audit(brief, "identity", "rejected", "未取得官方 ETF 名称或证券不是 ETF", code=code)
             continue
         tracking_code = tracking_codes.get(code, "")
         tracking_name = tracking_names.get(tracking_code, "")
@@ -430,18 +468,24 @@ def discover_etfs(brief, *, provider: DataProvider | None = None, limit: int = 8
             tracking_index=tracking_name or tracking_code,
         )
         if assessment.level == "unrelated":
+            _discovery_audit(brief, "exposure", "rejected", assessment.reason, code=code)
             continue
         try:
             values = history.series(code, "ths_amt_stock", years=1, provider=provider,
                                     drop_nonpositive=False)
-            recent = [float(x) for x in values[-20:] if isinstance(x, (int, float))]
+            recent = [float(x) for x in values[-20:] if isinstance(x, (int, float)) and math.isfinite(x)]
         except Exception:
+            _discovery_audit(brief, "liquidity", "rejected", "成交额历史读取失败，无法核验流动性", code=code)
             continue
         if len(recent) < 10:
+            _discovery_audit(brief, "liquidity", "rejected", "成交额有效样本不足 10 日", code=code)
             continue
         amount = sum(recent) / len(recent)
         if amount < _THEME_ETF_MIN_DAILY_AMOUNT:
+            _discovery_audit(brief, "liquidity", "rejected",
+                             f"近20日日均成交额 {amount / 1e8:.3f} 亿元，低于0.1亿元门槛", code=code)
             continue
+        _discovery_audit(brief, "candidate", "completed", "官方主题关联及基础流动性预检通过", code=code)
         evidence_text = " ".join([actual_name, tracking_name, tracking_code])
         matched = [term for term in search_terms
                    if term.lower() in evidence_text.lower()]
@@ -465,12 +509,17 @@ def discover_etfs(brief, *, provider: DataProvider | None = None, limit: int = 8
 
 
 def _suggestions(brief, *, provider: DataProvider | None = None) -> list[dict]:
+    brief._etf_discovery_audit = []
     text = " ".join([
         str(getattr(brief, "原始需求", "") or ""),
         str(getattr(brief, "主题", "") or ""),
         *(getattr(brief, "涉及板块", []) or []),
     ]).lower()
     codes: list[str] = []
+    # 复用已维护的工具目录，而不是为每个新主题增加代码分支。
+    # 目录匹配只生成待核验候选；最终提交仍须取得官方事实与历史成交额。
+    for term in _discovery_terms(brief):
+        codes.extend(item.代码 for item in instruments.find(term) if "ETF" in item.类型.upper())
     if "互联网" in text:
         codes += ["513050.SH", "513130.SH"]
     if ("创新药" in text or "医药" in text) and getattr(brief, "市场范围", "A股") == "A股":
@@ -484,7 +533,7 @@ def _suggestions(brief, *, provider: DataProvider | None = None) -> list[dict]:
         code = str(getattr(target, "代码", "") or "").upper()
         if code and getattr(target, "可用", False) and instruments.get(code):
             codes.append(code)
-    exposure_scope = _proposed_theme(brief) or str(getattr(brief, "主题", "") or "")
+    exposure_scope = _proposed_theme(brief)
     out = []
     for code in dict.fromkeys(codes):
         item = instruments.get(code)
@@ -495,20 +544,29 @@ def _suggestions(brief, *, provider: DataProvider | None = None) -> list[dict]:
             )
             # 常用池只是发现入口；不能把已知不相关 ETF 呈现为可选主题工具。
             if assessment.level == "unrelated":
+                _discovery_audit(brief, "exposure", "rejected", assessment.reason, code=code)
                 continue
             out.append({"code": item.代码, "name": item.简称, "type": item.类型,
                         "note": item.说明 + "；" + assessment.display(), "origin": "常用池",
                         "exposure": asdict(assessment), "exposure_level": assessment.level,
                         "tracking_index": assessment.tracking_index})
-    known = {item["code"] for item in out}
+            _discovery_audit(brief, "catalog", "completed", "常用池主题匹配；提交时仍须核验官方事实与流动性", code=code)
+    known = {item["code"]: item for item in out}
     # 常用池只作起点，候选不足时再从 iFinD 动态扩展；不再每次无差别扫描全量基金。
     remaining = max(0, 8 - len(out))
     if remaining:
         for item in discover_etfs(brief, provider=provider, limit=remaining):
-            if item["code"] not in known:
+            code = item["code"]
+            if code not in known:
                 out.append(item)
-                known.add(item["code"])
-    return out
+                known[code] = item
+            else:
+                # 动态官方信息更完整时覆盖展示事实，保留两路来源，不重复展示代码。
+                existing = known[code]
+                origins = list(dict.fromkeys([existing.get("origin", ""), item.get("origin", "")]))
+                existing.update(item)
+                existing["origins"] = origins
+    return out[:8]
 
 
 def discover_theme_companies(brief, *, provider: DataProvider | None = None,
@@ -614,8 +672,8 @@ def _scope_options(brief, theme: str) -> list[str]:
     等于要求分析师知道哪一个词是数据源认可的行业名；随后又把同一串文本送
     给严格校验，必然造成“系统自己填、系统自己拒绝”的循环。
 
-    这里的选项只承担“主题暴露/ETF 校验”角色；真正的研究对象仍由
-    ``research_theme`` 和主题公司篮子决定。
+    这些候选经数据源核验后可供标准行业路径取数。是否采用行业成分、人工
+    公司篮子或 ETF 真实成分，仍由分析师在确认页明确选择。
     """
     from .signals import _THEME_TO_SECTOR
 
@@ -634,8 +692,8 @@ def _scope_options(brief, theme: str) -> list[str]:
             continue
         # 细分主题本身不能当“标准行业”再次展示；有已知映射时改成映射结果。
         resolved = _THEME_TO_SECTOR.get(candidate, candidate)
-        if candidate == normalized_theme and resolved == candidate:
-            continue
+        # 主题也可能恰好是标准行业（如消费电子）。不要在数据源核验之前
+        # 因名称相同就排除；细分主题由下面的行业真实性校验过滤。
         if resolved and resolved not in options:
             options.append(resolved)
     return options
@@ -657,13 +715,22 @@ def proposal(brief, *, provider: DataProvider | None = None) -> dict:
         TargetRef(str(item.get("name") or ""), str(item.get("code") or ""), "ok:本次主题候选")
         for item in basket_candidates
     ]
-    dynamic_needed = bool(("ETF" in raw.upper() or getattr(brief, "客户产品诉求", ""))
-                          and not _ETF_CODE_RE.search(raw))
+    audit = list(getattr(brief, "_etf_discovery_audit", []) or [])
+    reasons = list(dict.fromkeys(row["reason"] for row in audit if row["status"] in {"failed", "rejected"}))
     discovery_note = ""
-    if dynamic_needed and not any(x.get("origin") == "动态发现" for x in suggested):
-        discovery_note = ("iFinD 动态基金检索暂未返回候选；可直接输入 ETF 代码，系统会继续核验"
-                          "证券真实性、主题暴露和流动性。请同时检查 iFinD 凭证。")
+    if not suggested:
+        discovery_note = "未形成 ETF 候选：" + "；".join(reasons[:4] or ["未发现与研究主题相关的可核验工具"])
+        discovery_note += "。可检查数据配置、确认研究主题或输入已核实的 ETF 代码继续校验。"
+    elif any(row["status"] == "failed" for row in audit):
+        discovery_note = "已显示可核验候选，但动态检索存在缺口：" + "；".join(
+            dict.fromkeys(row["reason"] for row in audit if row["status"] == "failed"))
     proposed_theme = _proposed_theme(brief)
+    # 展示路径不等于采纳 ETF。即使短主题识别遗漏，已有候选也应允许分析师
+    # 按原始研究描述选择 ETF；这个兜底只用于确认页，不能回灌概念股检索。
+    etf_scope = proposed_theme or (
+        str(getattr(brief, "研究主题", "") or getattr(brief, "主题", "") or raw).strip()
+        if suggested else ""
+    )
     scope_options = _scope_options(brief, proposed_theme)
     # 确认页的“系统建议”不能先展示一个数据源不承认的口径，再让分析师替系统
     # 承担校验失败。除商品主题外，在弹窗出现前先用同一数据源过滤；保留的才是
@@ -678,15 +745,23 @@ def proposal(brief, *, provider: DataProvider | None = None) -> dict:
     return {
         "original_market": getattr(brief, "市场范围", "A股"),
         "topic": getattr(brief, "主题", ""),
-        "proposed_theme": proposed_theme,
+        "event_path": getattr(brief, "事件路径", "非事件"),
+        "impact_branches": [
+            {
+                "name": item.名称, "relation": item.传导关系, "ashare_object": item.A股对象,
+                "evidence_needed": item.待验证证据, "quote_direction": item.可报价工具方向,
+            }
+            for item in (getattr(brief, "候选影响分支", []) or [])
+        ],
+        "proposed_theme": proposed_theme or etf_scope,
         # 兼容 CLI/旧调用方；新 GUI 使用 ``verified_scope_options`` 的 data 值，
         # 而不是让分析师辨认和编辑一串行业/主题混合文本。
         "proposed_scope": "、".join(scope_options),
         "verified_scope_options": scope_options,
         # 细分主题找到了可验证 ETF 时，不再要求分析师先猜一个标准行业。提交后
         # 会以 ETF 官方跟踪指数及真实成分完成研究口径校验与取数。
-        "theme_etf_route": bool(proposed_theme),
-        "theme_etf_scope": proposed_theme,
+        "theme_etf_route": bool(etf_scope),
+        "theme_etf_scope": etf_scope,
         "proposed_sectors": sectors,
         "proposed_industries": parts,
         "theme_basket_candidates": basket_candidates,
@@ -696,10 +771,12 @@ def proposal(brief, *, provider: DataProvider | None = None) -> dict:
         # 数据源已验证行业时直接走行业成分；只有没有可用行业/篮子时才建议 ETF。
         "recommended_research_mode": (
             "theme_basket" if basket_candidates
-            else ("industry" if scope_options else ("theme_etf" if proposed_theme else "industry"))
+            else ("industry" if scope_options else ("theme_etf" if etf_scope else "industry"))
         ),
         "reason": getattr(brief, "板块理由", ""),
         "suggested_instruments": suggested,
+        "etf_search_terms": list(_discovery_terms(brief)),
+        "etf_discovery_audit": audit,
         "discovery_notice": discovery_note,
         "notice": "候选包含常用池与 iFinD 动态发现结果；选择或输入代码后，系统才会校验真实性、主题暴露和近20日流动性。未确认不进入研究。",
     }
@@ -760,6 +837,8 @@ _EXPOSURE_RULES: dict[str, dict[str, tuple[str, ...]]] = {
         "direct": ("消费电子", "智能终端"),
         "partial": ("电子", "智能硬件"),
     },
+    "人形机器人": {"direct": ("人形机器人",), "partial": ("机器人", "智能制造", "自动化设备")},
+    "机器人": {"direct": ("机器人",), "partial": ("智能制造", "自动化设备", "机械设备")},
     "互联网": {"direct": ("互联网", "中概互联"), "partial": ("恒生科技", "科技")},
     "创新药": {"direct": ("创新药",), "partial": ("医药", "医疗")},
     "医药": {"direct": ("医药", "医疗"), "partial": ("创新药",)},
@@ -778,6 +857,9 @@ def assess_exposure(scope: str, item: instruments.Instrument, *, official_name: 
                     tracking_index: str = "", major_constituents: list[str] | None = None) -> ExposureAssessment:
     """按官方基金/指数事实和同一套主题规则，判定直接、部分或不相关暴露。"""
     scope = str(scope or "").strip()
+    # 兼容旧交接件中的完整问题。短主题（含分析师更细的自定义主题）原样保留。
+    if not _is_short_theme(scope):
+        scope = _proposed_theme(SimpleNamespace(原始需求=scope, 主题="")) or scope
     facts = [official_name, item.官方名, item.简称, tracking_index, *item.标签, item.说明]
     facts.extend(major_constituents or [])
     text = " ".join(str(value or "") for value in facts).lower()
@@ -930,8 +1012,12 @@ def verify(value: Confirmation, brief=None, *, provider: DataProvider | None = N
     ) if brief is not None else None)
     # 多行业产业链和主题路径可由客户原始主题补足行业词差异；单一标准行业仍要
     # 与自身口径直接对齐，避免把较宽 ETF 偷换成行业研究对象。
-    original_allowed = (value.research_mode in {"theme_basket", "theme_etf"}
+    original_allowed = ((value.research_mode in {"theme_basket", "theme_etf"}
+                         and not value.research_theme.strip())
                         or len(industries) > 1 or value.market != "A股")
+    if value.research_mode == "theme_etf" and value.research_theme.strip():
+        # 分析师已确认细分主题时，不能用原需求中的宽主题把部分暴露升级为直接暴露。
+        original_allowed = False
     assessment = primary_exposure
     if original_allowed and original_exposure is not None:
         rank = {"unrelated": 0, "partial": 1, "direct": 2}
@@ -962,7 +1048,7 @@ def verify(value: Confirmation, brief=None, *, provider: DataProvider | None = N
         from . import history
         values = history.series(code, "ths_amt_stock", years=1, provider=provider,
                                 drop_nonpositive=False)
-        recent = [float(x) for x in values[-20:] if isinstance(x, (int, float))]
+        recent = [float(x) for x in values[-20:] if isinstance(x, (int, float)) and math.isfinite(x)]
         if len(recent) < 10:
             result.errors.append(f"{code} 成交额样本不足，无法确认流动性")
         else:

@@ -67,13 +67,18 @@ class ChatResult:
     # 但成因相反——空响应是瞬时抖动、重试即好；被掐断是额度不够、
     # 重试多少次都一样掐在同一处，只会白烧几倍 token（实测连撞 3 次）。
     finish_reason: str = ""
+    # 应用提交的模型与供应商实际执行的模型分开记录；别名路由不能静默略过。
+    requested_model: str = ""
+    effective_model: str = ""
 
 
 class DeepSeekClient:
-    def __init__(self, model: str | None = None, timeout: int = 120) -> None:
+    def __init__(self, model: str | None = None, timeout: int = 120,
+                 purpose: str = "quality") -> None:
         self.api_key = config.DEEPSEEK_API_KEY
         self.base_url = config.DEEPSEEK_BASE_URL.rstrip("/")
-        self.model = model or config.DEEPSEEK_MODEL
+        self.purpose = "fast" if str(purpose).lower() == "fast" else "quality"
+        self.model = model or config.model_for_purpose(self.purpose)
         self.timeout = timeout
         self.total_tokens = 0   # 累计 token，成本监控（同 iFinD 的 dataVol 记账）
 
@@ -90,7 +95,8 @@ class DeepSeekClient:
         _attempt: int = 1,
     ) -> ChatResult:
         if not self.available():
-            return ChatResult(False, error="未配置 DEEPSEEK_API_KEY")
+            return ChatResult(False, error="未配置 DEEPSEEK_API_KEY",
+                              requested_model=self.model)
 
         payload: dict = {
             "model": self.model,
@@ -111,7 +117,8 @@ class DeepSeekClient:
         # 先记录“运行中”，供终端和 GUI 在 requests.post 阻塞期间显示真实状态；
         # 每个现有的完成/失败 record_external 会原位收束该条记录。
         record_external("DeepSeek chat/completions", status="running", duration_seconds=0,
-                        attempt=_attempt, detail=f"model={self.model}，等待响应")
+                        attempt=_attempt,
+                        detail=f"slot={self.purpose}，requested_model={self.model}，等待响应")
         from core.run_tracker import current
         heartbeat = _WaitHeartbeat(label="DeepSeek", started=started, enabled=current() is not None)
         heartbeat.start()
@@ -130,13 +137,15 @@ class DeepSeekClient:
                 error = f"HTTP {r.status_code}: {r.text[:200]}"
                 record_external("DeepSeek chat/completions", status="failed",
                                 duration_seconds=time.perf_counter() - started, attempt=_attempt,
-                                detail=f"HTTP {r.status_code}", error=error)
-                return ChatResult(False, error=error)
+                                detail=(f"slot={self.purpose}，requested_model={self.model}，"
+                                        f"HTTP {r.status_code}"), error=error)
+                return ChatResult(False, error=error, requested_model=self.model)
             d = r.json()
             choice = d["choices"][0]
             content = choice["message"]["content"]
             fr = str(choice.get("finish_reason") or "")
             usage = d.get("usage", {}) or {}
+            effective_model = str(d.get("model") or self.model)
             self.total_tokens += int(usage.get("total_tokens", 0) or 0)
 
             data = None
@@ -146,7 +155,7 @@ class DeepSeekClient:
                 except json.JSONDecodeError as e:
                     if fr == "length":
                         # 额度不够，不是坏运气。把推理 token 一并报出来——
-                        # 推理模型（deepseek-v4-pro）的思考过程也计入 max_tokens，
+                        # 部分质量档的思考过程也计入 max_tokens，
                         # 实测 reasoning 能占掉 2500~7000，正文再长就写不完了。
                         rt = (usage.get("completion_tokens_details") or {}).get(
                             "reasoning_tokens", 0)
@@ -155,27 +164,35 @@ class DeepSeekClient:
                                  f"——需加大额度或压缩输出要求，重试无效")
                         record_external("DeepSeek chat/completions", status="failed",
                                         duration_seconds=time.perf_counter() - started, attempt=_attempt,
-                                        detail="finish_reason=length", error=error)
+                                        detail=(f"slot={self.purpose}，requested_model={self.model}，"
+                                                "finish_reason=length"), error=error)
                         return ChatResult(
                             False, content=content, usage=usage, finish_reason=fr,
-                            error=error)
+                            error=error, requested_model=self.model,
+                            effective_model=effective_model)
                     error = f"JSON 解析失败: {e}"
                     record_external("DeepSeek chat/completions", status="failed",
                                     duration_seconds=time.perf_counter() - started, attempt=_attempt,
-                                    detail=f"finish_reason={fr or 'unknown'}", error=error)
+                                    detail=(f"slot={self.purpose}，requested_model={self.model}，"
+                                            f"finish_reason={fr or 'unknown'}"), error=error)
                     return ChatResult(False, content=content, usage=usage,
-                                      finish_reason=fr, error=error)
+                                      finish_reason=fr, error=error,
+                                      requested_model=self.model,
+                                      effective_model=effective_model)
             record_external("DeepSeek chat/completions", status="completed",
                             duration_seconds=time.perf_counter() - started, attempt=_attempt,
-                            detail=f"tokens={usage.get('total_tokens', 0)}")
+                            detail=(f"slot={self.purpose}，requested_model={self.model}，"
+                                    f"effective_model={effective_model}，"
+                                    f"tokens={usage.get('total_tokens', 0)}"))
             return ChatResult(True, content=content, data=data, usage=usage,
-                              finish_reason=fr)
+                              finish_reason=fr, requested_model=self.model,
+                              effective_model=effective_model)
         except Exception as e:  # noqa: BLE001
             error = f"{type(e).__name__}: {str(e)[:200]}"
             record_external("DeepSeek chat/completions", status="failed",
                             duration_seconds=time.perf_counter() - started, attempt=_attempt,
                             error=error)
-            return ChatResult(False, error=error)
+            return ChatResult(False, error=error, requested_model=self.model)
         finally:
             heartbeat.close()
 

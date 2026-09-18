@@ -13,6 +13,7 @@ import json
 import os
 import sys
 import traceback
+import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -52,6 +53,8 @@ class DeepSeekAgentPort:
     def __init__(self, model_id: str) -> None:
         self.model_id = model_id
         self.last_error = ""
+        # 单模型宿主会话，不宣称有独立 Child Session 或并行 Agent。
+        self.session_id = "research-helper-single-" + uuid.uuid4().hex
 
     def capability(self):
         from modules.recommender.models import ModelCapability
@@ -68,8 +71,8 @@ class DeepSeekAgentPort:
         system = (
             "你是 OptionHelper Recommender 的受控单Agent步骤。严格遵守 role_rule，"
             "仅输出 required_output 指定的 JSON 对象，字段名不得增删。"
-            "Research 只能从 evidence 中选择产品并引用已有 evidence_id；"
-            "Critic 只能审阅 Research 已提出的 product_id，不能新增产品。"
+            "选品角色只能从 input.evidence 中选择产品并引用已有 evidence_id；"
+            "复核角色只能审阅选品角色已提出的 product_id，不能新增产品。"
             "不得编造市场价格、产品条款、目录资料或未给出的客户事实。"
         )
         result = client.chat_json(
@@ -80,7 +83,18 @@ class DeepSeekAgentPort:
         if not result.ok or not isinstance(result.data, Mapping):
             self.last_error = result.error or "LLM 未返回合法的 Recommender 步骤结果。"
             raise RuntimeError(self.last_error)
-        return _utf8_safe(dict(result.data))
+        return self.completed_step(role, payload, _utf8_safe(dict(result.data)))
+
+    def completed_step(self, role: str, payload: Mapping[str, Any], result: Mapping[str, Any]):
+        """Host issues a receipt only after an actual model call has completed."""
+        from modules.recommender import ports
+
+        complete = getattr(ports, "completed_agent_step", None)
+        if not callable(complete):
+            return dict(result)  # 旧 Skill 的单模型协议，供安全回退使用。
+        return complete(role, payload, result,
+                        agent_run_id="research-helper-step-" + uuid.uuid4().hex,
+                        child_session_id=self.session_id)
 
 
 def main() -> None:

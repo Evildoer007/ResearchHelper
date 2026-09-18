@@ -49,6 +49,9 @@ class LogicWithData:
 class MarketAnalysis:
     plan: ArgumentPlan
     rep_code: str
+    # 客户报告统一展示的本次数据查询日。单项数据仍保留自身报告期/区间；查询日用于
+    # 防止“当前、近期”等文字在报告离开系统后失去时间锚点。
+    数据查询日: str = ""
     logics: list[LogicWithData] = dfield(default_factory=list)
     field_values: dict[str, FieldValue] = dfield(default_factory=dict)
     外部事实待补: list[str] = dfield(default_factory=list)  # 我方数据源查不到，且尚未人工填
@@ -492,7 +495,7 @@ def _structure_charts(sector: str, rep_code: str,
                          if r.get("代码") == rep_code), "")
         if len(pts) >= 8:
             out["成分股明细"] = {
-                "类型": "scatter", "标题": f"{sector}板块成分股：估值与盈利存在分化",
+                "类型": "scatter", "标题": f"{sector}成分股PB与净利润增速",
                 "图表结论": f"{sector}板块成分股：估值与盈利存在分化",
                 "x轴": "PB(倍)", "y轴": "净利同比(%)", "高亮": rep_name or "",
                 "数据点": pts,
@@ -560,7 +563,7 @@ def _structure_charts(sector: str, rep_code: str,
             # 挤在一根轴上柱高的相对关系没有意义，却看着像有意义——
             # 与"数字卡升级须同量纲"是同一条原则，这里是我方自拟的规格，同样要守。
             out["子行业明细"] = {
-                "类型": "bar_line", "标题": f"{sector}板块各子行业：盈利与估值存在分化",
+                "类型": "bar_line", "标题": f"{sector}子行业ROE与PB对比",
                 "图表结论": f"{sector}板块各子行业：盈利与估值存在分化",
                 "自动生成": True,
                 "柱标签": "ROE(%)", "线标签": "PB(倍)",
@@ -577,7 +580,7 @@ def _structure_charts(sector: str, rep_code: str,
         v = None
     if v is not None and v.ok and getattr(v, "序列", None):
         out["年化波动率"] = {
-            "类型": "histogram", "标题": f"{sector}板块年化波动率处于历史分布中的当前位置",
+            "类型": "histogram", "标题": f"{sector}年化波动率历史分布",
             "图表结论": f"{sector}板块年化波动率处于历史分布中的当前位置",
             "x轴": "年化波动率(%)",
             "数据点": [{"值": x} for x in v.序列],
@@ -706,8 +709,11 @@ def candidates(prepared: Prepared) -> list[Candidate]:
             依据=t.说明, trigger=t,
         ))
     for c in prepared.event_claims:
+        branch_label = " · ".join(value for value in (
+            getattr(c, "branch_role", ""), getattr(c, "branch_name", "")) if value)
         out.append(Candidate(
-            kind="event", id=c.id, 名称=c.viewpoint, 类别=c.category,
+            kind="event", id=c.id,
+            名称=(f"[{branch_label}] {c.viewpoint}" if branch_label else c.viewpoint), 类别=c.category,
             方向=c.direction, 依据=c.source_text, 出处=c.source,
             证据范围=c.evidence_scope, 证据主体=c.evidence_subject,
             event_claim=c,
@@ -1031,6 +1037,7 @@ def run(
 
     ma = MarketAnalysis(
         plan=plan, rep_code=rep_code, logics=logics, field_values=fv_map,
+        数据查询日=fetcher.latest_trade_date(),
         doc_charts={c.id: c.图表 for c in doc_chosen if c.图表},
         doc_cats={c.id: c.类别 for c in doc_chosen if c.类别},
         doc_claims=list(doc_chosen),
@@ -1131,6 +1138,9 @@ def _theme_basket_required(b) -> bool:
 def prepare_from_brief(b, *, provider: DataProvider | None = None,
                        with_docs: bool = False, overrides=None) -> Prepared | None:
     """从需求解析结果做摸底+触发，供人工勾选。代表标的不可用时返回 None。"""
+    # 摸底本身就会拉取研究数据；不能等 run_from_brief 才拦截未确认的需求。
+    if not getattr(b, "市场确认", None):
+        return None
     explicit_etf = _explicit_etf_from_brief(b)
     t = b.代表标的
     # 分析师确认的 ETF 是本次研究对象与定价标的；不再暗中换回一只行业龙头作“数据锚点”。
@@ -1179,10 +1189,9 @@ def run_from_brief(
             市场确认=confirmation,
             error=(f"已确认按{b.市场范围}研究，但当前研究层尚无该市场的行业基本面数据链。"
                    "系统已停止，不会静默映射为 A 股行业；如需继续，请在确认页明确选择 A 股研究口径。"))
-    from . import market_confirmation
-    if confirmation is None and market_confirmation.needs_confirmation(b):
+    if not confirmation:
         return MarketAnalysis(plan=None, rep_code="", ok=False,
-            error="该需求属于高风险口径，必须先完成分析师确认，不能直接进入研究链。")
+            error="所有研究必须先完成分析师对研究市场与取数目标的确认，不能直接进入研究链。")
 
     # 事件影响报告不能只拿“事件名称 + A 股板块行情”拼接。此处再做一次后端硬校验，
     # 即使未来 GUI/脚本绕过 main.py，也无法生成一份没有事件本体与传导依据的成品。
@@ -1243,7 +1252,7 @@ def run_from_brief(
         elif not event_ids.intersection(chosen):
             return MarketAnalysis(
                 plan=None, rep_code=target.代码, ok=False,
-                error="事件型报告至少必须选择一条已确认事件传导主轴。",
+                error="明确外部事件报告至少必须选择一条已确认事件传导主轴。",
             )
     ctx = {
         # 禁止把原始口语整段送入研究链：其中可能包含客户点名的产品结构。
@@ -1253,6 +1262,14 @@ def run_from_brief(
         "研究篮子构成": "、".join(f"{item.简称}（{item.代码}）" for item in theme_basket) or "—",
         "研究篮子使用限制": basket_state,
         "触发事件": b.触发事件,
+        "事件处理路径": getattr(b, "事件路径", "非事件"),
+        "候选影响分支_仅作筛选假设不可当作事实": [
+            {
+                "名称": item.名称, "传导关系": item.传导关系, "A股对象": item.A股对象,
+                "待验证证据": item.待验证证据, "可报价工具方向": item.可报价工具方向,
+            }
+            for item in (getattr(b, "候选影响分支", []) or [])
+        ],
         "用户关注点": b.关注点,
         "涉及板块": b.涉及板块,
         "市场判断查证": [

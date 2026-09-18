@@ -166,7 +166,7 @@ def propose(
     bundle = bundle or sg.collect_signals(with_news=False)
     slate = TopicSlate(date=bundle.date, signal_summary=bundle.summary())
 
-    client = client or DeepSeekClient()
+    client = client or DeepSeekClient(purpose="fast")
     if not client.available():
         slate.error = "未配置 DeepSeek key，无法选题"
         return slate

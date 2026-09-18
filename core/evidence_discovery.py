@@ -33,9 +33,9 @@ TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 MAX_DOCUMENT_BYTES = 8 * 1024 * 1024
 MAX_DOCUMENT_CHARS = 6_000
 MAX_LOCAL_DOCUMENTS = 4
-MAX_FACT_WEB_DOCUMENTS = 4
-MAX_MECHANISM_WEB_DOCUMENTS = 4
-MAX_EXPOSURE_WEB_DOCUMENTS = 4
+MAX_FACT_WEB_DOCUMENTS = 6
+MAX_MECHANISM_WEB_DOCUMENTS = 6
+MAX_EXPOSURE_WEB_DOCUMENTS = 6
 MAX_CHANNEL_RETRY_DOCUMENTS = 4
 SUPPORTED_LOCAL_SUFFIXES = {".pdf", ".txt", ".md", ".docx"}
 RELATIONS = {"直接竞争", "供应链", "客户需求", "技术替代", "估值情绪映射", "其他"}
@@ -338,7 +338,7 @@ def _fallback_queries(topic: str) -> list[str]:
 def plan_query_groups(topic: str, client: DeepSeekClient | None = None, *,
                       research_context: dict | None = None) -> tuple[dict[str, list[str]], list[str]]:
     """分别规划事实、产业机制和 A 股暴露检索词。"""
-    client = client or DeepSeekClient()
+    client = client or DeepSeekClient(purpose="fast")
     fallback = _fallback_query_groups(topic, research_context)
     if not client.available():
         return fallback, ["未配置 DeepSeek，已使用规则生成三路检索词；候选仍需分析师核对。"]
@@ -694,6 +694,8 @@ def fetch_document(hit: SearchHit, *, session=requests) -> EvidenceDocument | No
 
 def local_documents(root: Path, *, topic: str, limit: int = MAX_LOCAL_DOCUMENTS) -> list[EvidenceDocument]:
     """把 sources/ 里的相关逐字片段加入同一候选池，无需再次选择单个文件。"""
+    from .docs import (_read_pasted_material, date_from_text, parse_filename,
+                       usable_document_date)
     from .material_evidence import extract_candidates
 
     if not root.is_dir():
@@ -701,6 +703,17 @@ def local_documents(root: Path, *, topic: str, limit: int = MAX_LOCAL_DOCUMENTS)
     paths = [path for path in root.rglob("*") if path.suffix.lower() in SUPPORTED_LOCAL_SUFFIXES]
     documents: list[EvidenceDocument] = []
     for path in sorted(paths, key=lambda item: item.stat().st_mtime, reverse=True)[:12]:
+        _, document_date = parse_filename(path)
+        if path.suffix.lower() in {".txt", ".md"}:
+            try:
+                _, header_date, _ = _read_pasted_material(path)
+            except OSError:
+                continue
+            document_date = header_date or document_date
+        else:
+            document_date = document_date or date_from_text(path.stem)
+        if not usable_document_date(document_date)[0]:
+            continue
         try:
             candidates = extract_candidates(path, query=topic, limit=3, reference=str(path.resolve()))
         except (OSError, RuntimeError, ValueError):
@@ -737,7 +750,7 @@ def classify_documents(topic: str, documents: list[EvidenceDocument],
     """LLM 分类后做逐字校验；被改写、无来源或越界的结果一律不返回。"""
     if not documents:
         return [], []
-    client = client or DeepSeekClient()
+    client = client or DeepSeekClient(purpose="fast")
     if not client.available():
         return [], ["已找到原文，但未配置 DeepSeek，无法自动区分事实、产业机制与 A 股暴露。"]
     target_rule = (
@@ -886,6 +899,13 @@ def _collect_web_documents(queries: Iterable[str], *, channel: str, limit: int,
     hits_before = result.search_hits_by_channel.get(channel, 0)
     failures_before = result.fetch_failures_by_channel.get(channel, 0)
     required_entity_aliases = tuple(required_entity_aliases)
+    # A channel commonly has three deliberately different queries. Letting the
+    # first query fill the whole quota made later official/source-specific
+    # queries look as if they had run even though they never did. Read from at
+    # least two query intents when available, while retaining a hard total cap.
+    diversified_queries = min(2, len(queries))
+    per_query_cap = max(1, (limit + max(1, diversified_queries) - 1)
+                        // max(1, diversified_queries))
     span = max(0, progress_end - progress_start)
     for query_index, query in enumerate(queries):
         if span:
@@ -911,6 +931,7 @@ def _collect_web_documents(queries: Iterable[str], *, channel: str, limit: int,
             )
         query_start = progress_start + round(span * query_index / max(1, len(queries)))
         query_end = progress_start + round(span * (query_index + 1) / max(1, len(queries)))
+        query_documents = 0
         for hit_index, hit in enumerate(hits):
             if span:
                 value = query_start + round(
@@ -957,6 +978,7 @@ def _collect_web_documents(queries: Iterable[str], *, channel: str, limit: int,
                 fetch_error = ""
             if document is not None:
                 documents.append(document)
+                query_documents += 1
                 result.search_audit.append({
                     "channel": channel, "provider": hit.provider or "未知入口",
                     "query": query, "url": hit.url, "fetch_status": "成功",
@@ -971,7 +993,7 @@ def _collect_web_documents(queries: Iterable[str], *, channel: str, limit: int,
                     "query": query, "url": hit.url, "fetch_status": "失败",
                     "reason": fetch_error or "正文为空、格式不支持或质量不足",
                 })
-            if len(documents) >= limit:
+            if len(documents) >= limit or query_documents >= per_query_cap:
                 break
         if len(documents) >= limit:
             break
@@ -1004,6 +1026,16 @@ def _mechanism_retry_queries(topic: str) -> list[str]:
     return [
         f"{compact} 行业影响机制 供需 价格 产能 供应链",
         f"{compact} 竞争格局 客户需求 技术替代 产业链",
+    ]
+
+
+def _fact_retry_queries(topic: str) -> list[str]:
+    """Second-pass fact queries anchored to the event entity and disclosure."""
+    aliases, _exclusions = _event_entity_profile(topic)
+    entity = aliases[0] if aliases else _compact(topic)[:60]
+    return [
+        f'"{entity}" 官方公告 新闻稿 事件 日期',
+        f'"{entity}" 交易所 披露 财报 指引 产品发布',
     ]
 
 
@@ -1048,7 +1080,7 @@ def assemble_inference_chains(topic: str, candidates: list[DiscoveredEvidence],
     exposures = [item for item in candidates if item.evidence_type == "A股暴露"]
     if not (facts and mechanisms and exposures):
         return [], []
-    client = client or DeepSeekClient()
+    client = client or DeepSeekClient(purpose="fast")
     if not client.available():
         return [], ["三类原文已找到，但未配置 DeepSeek，无法自动组合传导链；可手工补充直接传导证据。"]
     payload = {
@@ -1165,7 +1197,7 @@ def discover(topic: str, *, sources_dir: Path | None = None,
         result.warnings.append("客户需求为空，无法生成事件证据检索词。")
         _notify_progress(progress, 100, "客户需求为空，自动查找已停止。")
         return result
-    client = client or DeepSeekClient()
+    client = client or DeepSeekClient(purpose="fast")
     all_query_groups, planning_warnings = plan_query_groups(
         topic, client, research_context=research_context)
     wanted = ({"事件事实", "产业机制"} if mode == "foundation" else
@@ -1247,6 +1279,24 @@ def discover(topic: str, *, sources_dir: Path | None = None,
         *local_warnings, *fact_warnings, *mechanism_warnings, *exposure_warnings,
     ])
 
+    if ("事件事实" in wanted
+            and not any(item.evidence_type == "事件事实" for item in [*local_candidates, *fact_candidates])):
+        retry_queries = _fact_retry_queries(topic)
+        result.query_groups["事件事实补检"] = retry_queries
+        result.queries = _unique_queries([*result.queries, *retry_queries], limit=12)
+        retry_docs = _assign_ids(_collect_web_documents(
+            retry_queries, channel="事件事实补检", limit=MAX_CHANNEL_RETRY_DOCUMENTS,
+            searcher=searcher, fetcher=fetcher, seen_urls=seen_urls["事件事实"], result=result,
+            filtered_urls=filtered_urls, progress=progress,
+            progress_start=82, progress_end=84,
+            required_entity_aliases=_event_entity_profile(topic)[0],
+        ))
+        retry_candidates, retry_warnings = classify_documents(
+            topic, retry_docs, client, expected_type="事件事实", limit=4,
+            rejections=result.classification_rejections)
+        fact_candidates.extend(retry_candidates)
+        result.warnings.extend(retry_warnings)
+
     if ("产业机制" in wanted
             and not any(item.evidence_type == "产业机制" for item in [*local_candidates, *mechanism_candidates])):
         retry_queries = _mechanism_retry_queries(topic)
@@ -1256,7 +1306,7 @@ def discover(topic: str, *, sources_dir: Path | None = None,
             retry_queries, channel="产业机制补检", limit=MAX_CHANNEL_RETRY_DOCUMENTS,
             searcher=searcher, fetcher=fetcher, seen_urls=seen_urls["产业机制"], result=result,
             filtered_urls=filtered_urls, progress=progress,
-            progress_start=82, progress_end=85,
+            progress_start=84, progress_end=86,
         ))
         retry_candidates, retry_warnings = classify_documents(
             topic, retry_docs, client, expected_type="产业机制", limit=4,
@@ -1273,7 +1323,7 @@ def discover(topic: str, *, sources_dir: Path | None = None,
             retry_queries, channel="A股暴露补检", limit=MAX_CHANNEL_RETRY_DOCUMENTS,
             searcher=searcher, fetcher=fetcher, seen_urls=seen_urls["A股暴露"], result=result,
             filtered_urls=filtered_urls, progress=progress,
-            progress_start=85, progress_end=88,
+            progress_start=86, progress_end=88,
         ))
         retry_candidates, retry_warnings = classify_documents(
             topic, retry_docs, client, expected_type="A股暴露", limit=4,

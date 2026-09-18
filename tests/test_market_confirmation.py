@@ -41,6 +41,130 @@ def brief(raw: str, market: str, sectors: list[str], parts: list[str] | None = N
 
 
 class MarketConfirmationTests(unittest.TestCase):
+    def test_robot_theme_has_etf_path_when_industry_cannot_be_verified(self) -> None:
+        b = brief("未来一个月机器人行业的投资机会", "A股", ["自动化设备"])
+        robot = {"code": "562500.SH", "name": "机器人ETF", "origin": "常用池"}
+        with patch("core.market_confirmation._suggestions", return_value=[robot]), \
+                patch("core.market_confirmation._theme_basket_candidates", return_value=[]), \
+                patch("core.universe.validate_industries", return_value=([], ["自动化设备"])):
+            payload = proposal(b, provider=self.provider)
+        self.assertEqual(payload["proposed_theme"], "机器人")
+        self.assertEqual(payload["verified_scope_options"], [])
+        self.assertTrue(payload["theme_etf_route"])
+        self.assertEqual(payload["theme_etf_scope"], "机器人")
+        self.assertEqual(payload["recommended_research_mode"], "theme_etf")
+        self.assertEqual(payload["suggested_instruments"][0]["code"], "562500.SH")
+
+    def test_specific_robot_theme_is_not_replaced_by_broad_robot_theme(self) -> None:
+        from core.market_confirmation import _proposed_theme
+
+        self.assertEqual(_proposed_theme(brief("人形机器人未来机会", "A股", [])), "人形机器人")
+
+    def test_short_parser_keyword_supports_new_theme_without_title_query(self) -> None:
+        from core.market_confirmation import _proposed_theme
+
+        b = brief("未来一个月低空经济行业的投资机会", "A股", [])
+        b.ETF检索词 = ["低空经济"]
+        self.assertEqual(_proposed_theme(b), "低空经济")
+        b.ETF检索词 = [b.原始需求, "562500.SH", "无关主题"]
+        # 解析器给出整句/代码/无关词时，简单问法仍可从原文提取新主题。
+        self.assertEqual(_proposed_theme(b), "低空经济")
+
+    def test_existing_etf_candidate_keeps_path_even_when_short_theme_is_missing(self) -> None:
+        b = brief("分析某新主题的投资机会", "A股", [])
+        robot = {"code": "562500.SH", "name": "机器人ETF", "origin": "动态发现"}
+        with patch("core.market_confirmation._proposed_theme", return_value=""), \
+                patch("core.market_confirmation._suggestions", return_value=[robot]), \
+                patch("core.market_confirmation._theme_basket_candidates", return_value=[]):
+            payload = proposal(b, provider=self.provider)
+        self.assertTrue(payload["theme_etf_route"])
+        self.assertEqual(payload["proposed_theme"], b.主题)
+        self.assertEqual(payload["recommended_research_mode"], "theme_etf")
+        # 确认页的展示兜底不是已确认研究契约，也不是主题暴露通过结果。
+        self.assertIsNone(b.市场确认)
+        checked = verify(Confirmation("A股", "某新主题", "516520.SH",
+                                      research_theme="某新主题", research_mode="theme_etf"),
+                         b, provider=self.provider)
+        self.assertFalse(checked.ok)
+        self.assertTrue(any("不相关" in error for error in checked.errors), checked.errors)
+
+    def test_standard_industry_equal_to_theme_is_still_available(self) -> None:
+        b = brief("消费电子行业投资机会", "A股", ["消费电子"])
+        with patch("core.market_confirmation._suggestions", return_value=[]), \
+                patch("core.market_confirmation._theme_basket_candidates", return_value=[]):
+            payload = proposal(b, provider=self.provider)
+        self.assertEqual(payload["verified_scope_options"], ["消费电子"])
+        self.assertEqual(payload["recommended_research_mode"], "industry")
+
+    def test_all_research_requires_confirmation_regardless_of_risk(self) -> None:
+        for raw, market, sectors in [
+            ("机器人行业怎么样", "A股", ["自动化设备"]),
+            ("消费电子行业怎么样，仅研究不报价", "A股", ["消费电子"]),
+            ("分析白酒行业", "A股", ["白酒"]),
+            ("分析512690.SH", "A股", ["白酒"]),
+            ("分析宁德时代300750.SZ", "A股", []),
+            ("光模块需求上修", "A股", ["通信设备"]),
+            ("港股互联网机会", "港股", ["互联网"]),
+            ("市场回调有什么影响", "A股", []),
+        ]:
+            with self.subTest(raw=raw):
+                self.assertTrue(needs_confirmation(brief(raw, market, sectors)))
+
+    def test_unconfirmed_industry_cannot_fetch_or_run_even_with_prepared_data(self) -> None:
+        from core import pipeline
+
+        for confirmation in (None, {}):
+            with self.subTest(confirmation=confirmation):
+                b = brief("机器人行业怎么样", "A股", ["自动化设备"])
+                b.市场确认 = confirmation
+                b.候选标的 = [TargetRef("机器人", "300024.SZ", "ok:机器人")]
+                with patch("core.pipeline.prepare") as prepare, \
+                        patch("core.pipeline.run") as run:
+                    self.assertIsNone(pipeline.prepare_from_brief(b, provider=self.provider))
+                    result = pipeline.run_from_brief(b, prepared=object())
+                self.assertFalse(result.ok)
+                self.assertIn("研究市场与取数目标的确认", result.error)
+                prepare.assert_not_called()
+                run.assert_not_called()
+
+    def test_confirmed_standard_industry_can_prepare_without_quote_etf(self) -> None:
+        from core import pipeline
+
+        b = brief("消费电子行业怎么样，仅研究不报价", "A股", ["消费电子"])
+        b.市场确认 = {"market": "A股", "research_scope": "消费电子",
+                    "research_mode": "industry", "research_only": True}
+        b.候选标的 = [TargetRef("立讯精密", "002475.SZ", "ok:立讯精密")]
+        prepared = SimpleNamespace(event_claims=[])
+        with patch("core.pipeline.prepare", return_value=prepared) as prepare:
+            self.assertIs(pipeline.prepare_from_brief(b, provider=self.provider), prepared)
+        prepare.assert_called_once()
+        self.assertEqual(prepare.call_args.args[:2], ("002475.SZ", "消费电子"))
+        self.assertEqual(prepare.call_args.kwargs["analysis_etf"], "")
+
+    def test_cli_cannot_silently_fetch_unconfirmed_ordinary_industry(self) -> None:
+        import main
+
+        b = brief("机器人行业怎么样", "A股", ["自动化设备"])
+        with patch("main.brief.parse", return_value=b), \
+                patch("main.brief.render", return_value="机器人行业"), \
+                patch("main.pipeline.prepare_from_brief") as prepare, \
+                patch("main.pipeline.run_from_brief") as run:
+            self.assertIsNone(main.generate_from_brief(b.原始需求, confirm_market=False))
+        prepare.assert_not_called()
+        run.assert_not_called()
+
+    def test_scan_candidate_uses_same_confirmation_flow(self) -> None:
+        import main
+        from core.topics import TopicCandidate
+
+        candidate = TopicCandidate("机器人行业机会", "板块机会", "资金流入", "近20日数据",
+                                   "机器人", "300024.SZ", "ok:机器人")
+        with patch("main.generate_from_brief", return_value="report.html") as generate:
+            self.assertEqual(main.generate(candidate, pick=True, confirm_market=True), "report.html")
+        self.assertIn("尚未确认为研究取数目标", generate.call_args.args[0])
+        self.assertTrue(generate.call_args.kwargs["confirm_market"])
+        self.assertTrue(generate.call_args.kwargs["pick"])
+
     def setUp(self) -> None:
         instruments.clear_temporary()
         self.provider = FakeProvider({
@@ -546,9 +670,10 @@ class MarketConfirmationTests(unittest.TestCase):
         self.assertEqual(len(claims), 1)
         self.assertEqual(claims[0].id, "event_chain_1")
         self.assertEqual(claims[0].direction, "看涨")
-        self.assertIn("[F1]", claims[0].source_text)
-        self.assertIn("[M1]", claims[0].source_text)
-        self.assertIn("[E1]", claims[0].source_text)
+        self.assertNotIn("[F1]", claims[0].source_text)
+        self.assertNotIn("置信度", claims[0].source_text)
+        self.assertNotIn("[M1]", claims[0].source_text)
+        self.assertNotIn("[E1]", claims[0].source_text)
 
         prepared = pipeline.Prepared(
             profile={}, fired=[], rep_code="159995.SZ",
