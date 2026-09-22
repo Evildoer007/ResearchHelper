@@ -68,11 +68,8 @@ class EvidenceChain:
         return f"[{refs}] {self.conclusion}（{suffix}）"
 
     def public_display(self) -> str:
-        """客户报告写作输入：不暴露内部编号、分支角色及置信度标签。"""
-        suffix = f"方向：{self.direction}"
-        if self.reason:
-            suffix += f"；适用边界：{self.reason}"
-        return f"{self.conclusion}（{suffix}）"
+        """客户报告写作输入：只给经确认的业务结论；审核边界留在内部底稿。"""
+        return f"{self.conclusion}（方向：{self.direction}）"
 
 
 @dataclass(frozen=True)

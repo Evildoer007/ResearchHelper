@@ -18,7 +18,9 @@ from dataclasses import dataclass, field as dfield
 from pathlib import Path
 from typing import Callable
 
-_LIB_PATH = Path(__file__).resolve().parent.parent / "THESIS_LIBRARY.md"
+from .app_paths import RESOURCE_ROOT
+
+_LIB_PATH = RESOURCE_ROOT / "THESIS_LIBRARY.md"
 
 # 可得性标记
 AVAIL_OK = "✅"       # 数据已可取

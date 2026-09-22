@@ -98,7 +98,33 @@ ETF 候选发现、主题筛选和提交校验统一使用短研究主题，期�
 - Qt WebEngine/PySide6（桌面界面和 PDF 导出）
 - OptionHelper Skill 与独立 Python 环境（仅正式报价需要）
 
-## 安装
+## 安装发布版（推荐）
+
+面向研究员分发时使用 `ResearchHelper-Setup-<版本>.exe`；没有安装器时也可解压
+`ResearchHelper-<版本>-win64.zip`，双击 `ResearchHelper.exe`。最终用户无需安装项目 Python
+依赖，也不需要克隆仓库。首次启动会打开设置向导：
+
+1. 填写本人的 DeepSeek API Key；Tavily、iFinD 与 OptionHelper 可按实际权限选填。
+2. iFinD 由研究员先安装官方终端/Quant SDK；发布包不转售或复制专有 SDK。
+3. 正式报价用户填写已验收的 OptionHelper Skill 路径和其独立 Python 环境。
+4. 进入主界面后点击“运行环境检查”，确认研究、搜索、行情和报价能力的状态。
+
+程序文件与用户数据相互分离。安装目录只读，每位 Windows 用户的配置与运行数据位于：
+
+```text
+%LOCALAPPDATA%\ResearchHelper\
+├─ config.local.json       # 本机凭证与设置，不进入安装包
+├─ sources\                # 用户上传/粘贴的补充材料
+├─ data_cache\             # 可复用缓存
+├─ history_titles.json      # 历史任务自定义标题；不改运行原文
+├─ output\                 # HTML、PDF、底稿与运行记录
+├─ data\ / result\         # OptionHelper 受控运行数据
+└─ .optionhelper\          # 一次性 selection 与本机状态
+```
+
+卸载程序默认不删除该目录，便于保留研究记录；需要彻底清除时由用户确认后手动删除。
+
+## 源码安装（开发与维护）
 
 在项目根目录创建并启用 Python 环境：
 
@@ -117,7 +143,8 @@ python -c "import iFinDPy; print(iFinDPy.__file__)"
 
 ## 配置
 
-在项目根目录创建 `config.local.json`。该文件已加入 `.gitignore`，不得提交到版本库。
+发布版由首次启动向导在 `%LOCALAPPDATA%\ResearchHelper\config.local.json` 创建配置；
+源码开发态仍在项目根目录创建 `config.local.json`。该文件已加入 `.gitignore`，不得提交到版本库。
 
 ```json
 {
@@ -133,6 +160,7 @@ python -c "import iFinDPy; print(iFinDPy.__file__)"
   "SEARCH_BING_FALLBACK": true,
   "IFIND_ACCOUNT": "your-ifind-account",
   "IFIND_PASSWORD": "your-ifind-password",
+  "IFIND_SDK_PATH": "C:/path/to/official/ifind/sdk",
   "OPTIONHELPER_SKILL_ROOT": "C:/path/to/option-helper",
   "OPTIONHELPER_PYTHON": "C:/path/to/optionhelper/python.exe",
   "OPTIONHELPER_DEFAULT_CONSTRAINTS": {
@@ -159,6 +187,7 @@ python -c "import iFinDPy; print(iFinDPy.__file__)"
 | `SEARCH_COUNTRY` / `SEARCH_LANGUAGE` | 否 | 搜索结果的国家与语言排序偏好 |
 | `SEARCH_BING_FALLBACK` | 否 | Tavily 不可用、额度不足或无结果时是否使用 Bing RSS |
 | `IFIND_ACCOUNT` / `IFIND_PASSWORD` | 建议 | Research Helper 研究取数 |
+| `IFIND_SDK_PATH` | 发布版建议 | 官方 `iFinDPy` 所在目录；应用也会检查常见 Anaconda/Python 安装 |
 | `RESEARCH_HELPER_GUI_PYTHON` | 否 | 指定安装了 PySide6 的桌面端解释器 |
 | `OPTIONHELPER_SKILL_ROOT` | 报价时 | OptionHelper Skill 根目录 |
 | `OPTIONHELPER_PYTHON` | 报价时 | OptionHelper 独立解释器 |
@@ -176,6 +205,23 @@ OptionHelper 使用的 iFinD Refresh Token 由其就绪检查流程保存至本�
 最近一次成功模型目录缓存在被 Git 忽略的
 `data_cache/deepseek_models.json`，只在目录接口短暂不可达时用于提示和预检。
 
+## 构建 Windows 发布包
+
+维护者在干净的 Windows 构建环境执行：
+
+```powershell
+python -m pip install -r requirements-release.txt
+python tools/build_release.py --installer
+```
+
+构建脚本会先运行 `tests/`，再生成 PyInstaller `onedir` 程序、SHA-256 文件清单和 ZIP；
+如果检测到 Inno Setup 6，还会生成安装器。输出位于 `dist/`。构建器会检查发布目录，拒绝把
+`config.local.json`、`sources/`、`output/` 或 `.optionhelper/` 混入发布包。
+
+发布前还应在一台没有源码环境的 Windows 机器完成最小验收：首次设置、普通行业研究、事件检索、
+HTML/PDF 导出，以及（有权限时）一只标的的 OptionHelper 正式报价。代码测试通过不等于外部账号、
+SDK 授权和网络条件已经通过。
+
 ## 快速开始
 
 ### 桌面应用
@@ -187,9 +233,18 @@ python gui/start.py
 ```
 
 桌面端提供客户需求与约束输入、补充材料上传/粘贴、研究口径确认、主题篮子勾选、事件证据自动查找与管理、候选逻辑审核、
-运行进度、交付预览、历史运行以及正式报价队列。客户需求框支持完整多行输入、自动换行和滚动；研究确认页会在每个
+运行进度、交付预览、结构化报告编辑、历史运行以及正式报价队列。报告完成后可点击“编辑报告”修改标题、核心结论、
+策略逻辑标题/正文、图表标题和挂钩说明，并调整论点顺序、隐藏论点或删除单张图表；正式报价、图表数据、来源、日期和免责声明保持锁定。
+编辑窗口顶部固定“保存修订版 HTML”“保存并导出 PDF”和“打开文件夹”；保存/导出会显示完整文件路径。删除两图中的一张后，若剩余图适合半栏展示，正文与图自动改为左右排版；宽图继续整行展示。人工修订不会覆盖自动生成稿，导出 PDF 后仍重新执行真实一页校验。客户需求框支持完整多行输入、自动换行和滚动；研究确认页会在每个
 字段旁说明其用途及影响的流程，避免把研究取数目标误解为正式挂钩标的。“搜索设置”可由每位研究员在本机填写
 Tavily API Key、选择基础/高级搜索、国家/语言偏好、测试连接并控制 Bing RSS 兜底；Key 不会回显或写入仓库。
+
+启动后直接进入“研究输入”，右侧页面通过顶部“研究输入 / 报告交付 / 内部复核”切换，不再把表单和报告
+压在同一个分屏。左侧历史任务栏可收起，按客户问题合并同题重跑、支持搜索；选中任务后点“重命名”或右键可
+修改侧栏标题。自定义标题单独保存在本机，不改客户原文、运行摘要和报告；搜索仍能匹配原始需求。点击任务优先
+打开最近一次可用报告及其内部底稿。历史视图默认只读；如要修改旧报告，可主动点击“编辑此报告”，修订层和
+运行记录归于该次历史任务，不切换当前研究或报价队列。需要重做研究时须主动把旧需求带回输入框。
+研究、报价、PDF 校验仍由原有桌面流程执行。
 
 ### 命令行
 
@@ -255,7 +310,7 @@ python main.py 1 4 --confirm-market
 确认页中的“研究取数路径”提供三个互斥选项：
 
 1. **标准行业**：系统使用数据源认可的行业节点及其成分股。无需人工勾选公司，也不要求填写 ETF。
-2. **人工主题篮子**：系统只使用分析师勾选并已核验的公司。适合光模块、汽车电子等细分或跨行业主题。
+2. **人工主题篮子**：系统只使用分析师勾选的公司。客户点名公司单独标注；系统建议与 iFinD 概念股仅作为待核实候选，不会因代码、简称真实就自动勾选。确认页展示可取得的业务关联原文及来源；没有可核实原文的公司须由分析师填写具体关联理由和资料来源后才能选入。适合光模块、汽车电子等细分或跨行业主题。
 3. **主题 ETF**：系统读取 ETF 的真实跟踪指数成分。ETF 成分无法核验时不会回退到宽行业或单只代表股。
 
 需求解析确认页只决定研究数据从哪里来，不提前确定正式挂钩标的。在标准行业和人工主题篮子路径中，客户点名或
@@ -441,6 +496,9 @@ OptionHelper 推荐门槛。相同代码的多条记录会合并，并保留正�
 |---|---|
 | `onepager_<主题>.html` | 一页通 HTML；屏幕查看时支持本地交互图 |
 | `onepager_<主题>.pdf` | 正式 PDF；仅实测一页时通过交付校验 |
+| `onepager_<主题>_人工修订.json` | 人工修改字段、论点顺序、逻辑与单图显隐状态和修订时间；不保存整份自由 HTML |
+| `onepager_<主题>_人工修订.html` | 自动稿应用人工覆盖层后的客户版 HTML |
+| `onepager_<主题>_人工修订.pdf` | 修订后重新导出的 PDF；仍须实测一页才可正式交付 |
 | `onepager_<主题>_内部底稿.md` | 研究口径、数据缺口、证据出处和产品调用记录 |
 | `*_内部交互复核.html` | 主题篮子、历史序列和 ETF 候选的内部交互复核页 |
 | `output/runs/<run_id>.json` | 运行摘要、阶段状态、产物和恢复建议 |
@@ -460,7 +518,7 @@ OptionHelper 推荐门槛。相同代码的多条记录会合并，并保留正�
   数据关系不成立时不会为视觉效果强行出图。
 - 每张图保留明确的数据截至日、单位、样本口径及“对象＋指标”式简洁图题；图表分析结论单独保留在内部规格，
   不覆盖图题。没有明确日期的数据不会进入客户图表。
-- 报告标题下只显示报告生成日，不再显示统一“数据查询日”。各张图、采用来源及页脚继续保存实际数据日期；
+- 报告标题下显示“研究策略·YYYY年M月D日”的出具日期，不显示“报告生成时间”或统一的“数据查询日”；各张图、采用来源及页脚继续保存实际数据日期；
   正文按需要说明财报期或统计区间，内部底稿逐字段保留实际日期。
 - 核心结论以投资判断为主，建议 120–180 字、最多两项关键数据；事件分析自然说明驱动、产业影响、市场定价和
   兑现条件，不固定套用“事件事实层面/产业机制层面/A股暴露层面”。证据对应问题单独进入内部审核备注，重大业务风险仍应披露。

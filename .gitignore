@@ -36,6 +36,8 @@ sources/
 __pycache__/
 *.pyc
 .venv/
+.release-venv/
+.release-venv310/
 venv/
 
 # ==== OptionHelper Skill 本地运行状态 ====
@@ -51,3 +53,4 @@ venv/
 build/
 dist/
 *.spec
+!ResearchHelper.spec

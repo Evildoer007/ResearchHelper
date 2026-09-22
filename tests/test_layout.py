@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from render.layout import (
     CHART_FALLBACKS, _chart_block, _chart_for, _chart_layout_mode, _chart_meta_html,
-    _echarts_assets, _one_chart, _ordered_time_labels,
+    _echarts_assets, _html_evidence_flow, _one_chart, _ordered_time_labels,
     _report_subtitle, _report_title, _underlying_block, confirmed_underlying_block, multi_quote_block,
 )
 
@@ -54,10 +54,35 @@ class ChartAxisTests(unittest.TestCase):
         )
         self.assertEqual(_report_title(analysis), "基于A股汽车电子产业智能化加速的投资机会")
 
-    def test_cover_subtitle_does_not_repeat_data_query_date(self) -> None:
+    def test_cover_subtitle_shows_issue_date_not_data_query_label(self) -> None:
         subtitle = _report_subtitle("2026年9月17日")
-        self.assertEqual(subtitle, "策略研究 · 报告生成 2026年9月17日")
+        self.assertEqual(subtitle, "研究策略·2026年9月17日")
+        self.assertNotIn("报告生成", subtitle)
         self.assertNotIn("数据查询", subtitle)
+
+    def test_chart_has_individual_revision_section(self) -> None:
+        html = _one_chart(
+            {"类型": "number_cards", "标题": "核心研究指标", "数据点": [{"标签": "规模", "值": "10亿元"}]},
+            "T0", "logic_1", 1,
+        )
+        self.assertIn("RH_SECTION_START:logic_1_chart_1", html)
+
+    def test_evidence_flow_uses_readable_full_width_steps_without_changing_evidence(self) -> None:
+        original = [
+            {"标签": "事件事实", "说明": "特斯拉在宁波启动量产审厂并下达订单"},
+            {"标签": "产业机制", "说明": "供应商转向一体化模块方案"},
+            {"标签": "A股暴露", "说明": "中证机器人指数包含相关供应商"},
+        ]
+        html = _html_evidence_flow({"标题": "量产审厂影响路径"}, original)
+        self.assertIn('class="htmlchart htmlchart--flow"', html)
+        self.assertEqual(html.count('class="ef-step"'), 3)
+        self.assertIn("发生了什么", html)
+        self.assertIn("如何影响产业", html)
+        self.assertIn("对应研究标的", html)
+        self.assertEqual(html.count('class="ef-link"'), 2)
+        for point in original:
+            self.assertIn(point["说明"], html)
+        self.assertNotIn("A股暴露</b>", html)
 
     def test_metric_names_are_not_treated_as_a_trend_axis(self) -> None:
         self.assertFalse(_ordered_time_labels(["PB历史分位", "归母净利同比", "板块区间涨跌幅"]))
@@ -142,6 +167,14 @@ class ChartAxisTests(unittest.TestCase):
         }, "T1")
         self.assertIn('data-rh-echarts=', html)
         self.assertIn('class="chart-print"', html)
+        self.assertIn("主题篮子收益分化", html)
+
+        editable = _one_chart({
+            "类型": "bar", "标题": "可编辑图题",
+            "数据点": [{"标签": "甲", "值": "2%"}, {"标签": "乙", "值": "1%"}],
+        }, "T1", "logic_1", 1)
+        self.assertIn("RH_EDIT_START:logic_1_chart_1_title", editable)
+        self.assertIn("可编辑图题", editable)
 
     def test_mixed_unit_data_never_gets_interactive_axis_chart(self) -> None:
         html = _one_chart({
@@ -294,6 +327,20 @@ class ChartAxisTests(unittest.TestCase):
             self.assertIn("旧版共同观点快照", text)
             self.assertNotIn("**① 实际发送给 OptionHelper 的内容**", text)
 
+            # Windows 路径含反斜杠；底稿重复刷新也不能把它当作 re.sub 转义。
+            result.report_path = r"C:\Users\87055\quotes\final.html"
+            result.designer_input_path = r"C:\Users\87055\quotes\frozen.json"
+            record["market_prompt"] = r"行情文件：C:\Users\87055\quotes\market.json"
+            self.assertTrue(refresh_optionhelper_result(
+                path, result, html_path=r"C:\Users\87055\output\onepager.html",
+                pdf_path=r"C:\Users\87055\output\onepager.pdf", pdf_pages=1,
+                input_record=record,
+            ))
+            refreshed = path.read_text(encoding="utf-8")
+            self.assertIn(record["market_prompt"], refreshed)
+            self.assertIn(result.report_path, refreshed)
+            self.assertIn(r"C:\Users\87055\output\onepager.pdf", refreshed)
+
     def test_selected_multi_underlying_quotes_keep_each_identity_and_frozen_columns(self) -> None:
         html = multi_quote_block([
             {
@@ -336,3 +383,11 @@ class ChartAxisTests(unittest.TestCase):
             self.assertIn("分析师选择 2 份写入一页通", text)
             self.assertIn("515880.SH", text)
             self.assertIn("300750.SZ", text)
+            entries[0]["report_path"] = r"C:\Users\87055\quotes\a.html"
+            self.assertTrue(refresh_optionhelper_multi_result(
+                path, entries, html_path=r"C:\Users\87055\output\onepager.html",
+                pdf_path=r"C:\Users\87055\output\onepager.pdf", pdf_pages=1,
+            ))
+            refreshed = path.read_text(encoding="utf-8")
+            self.assertIn(entries[0]["report_path"], refreshed)
+            self.assertIn(r"C:\Users\87055\output\onepager.pdf", refreshed)

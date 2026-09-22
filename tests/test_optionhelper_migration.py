@@ -2,6 +2,10 @@ from copy import deepcopy
 import json
 from hashlib import sha256
 from core.optionhelper_quote_worker import build_project_request
+from core.optionhelper_pricing import (
+    FORMAL_QUOTE_MONTE_CARLO_PATH_COUNT,
+    apply_formal_quote_pricing_defaults,
+)
 from tools.optionhelper_install import ensure_skill_read_access, verify_contents, activate, rollback
 from core.optionhelper_bridge import _quote_facts
 
@@ -18,6 +22,7 @@ def test_explicit_quote_dates_are_preserved_without_mutating_inputs():
     request = build_project_request(body)
     assert request["pricing_config"]["valuation_date"] == "2026-09-15"
     assert request["quote_variants"][0]["pricing_config"]["valuation_date"] == "2026-09-14"
+    assert request["quote_variants"][0]["pricing_config"]["path_count"] == 100_000
     assert request["term_overrides"] == {"T": 0.25}
     assert body == original
 
@@ -27,8 +32,34 @@ def test_each_underlying_has_independent_request_and_no_invented_date():
                                   "pricing_config": {"valuation_date": "2026-09-15"}})
     second = build_project_request({"selection": {"underlyings": ["561910.SH"]}})
     assert second["selection"]["underlyings"] == ["561910.SH"]
-    assert "pricing_config" not in second
+    assert second["pricing_config"] == {"path_count": 100_000}
     assert first["pricing_config"]["valuation_date"] == "2026-09-15"
+
+
+def test_formal_quote_path_count_preserves_explicit_value_and_skips_analytical():
+    explicit = build_project_request({"pricing_config": {"path_count": 25_000}})
+    analytical = build_project_request({"pricing_config": {"model_method": "analytical"}})
+    assert explicit["pricing_config"]["path_count"] == 25_000
+    assert "path_count" not in analytical["pricing_config"]
+
+
+def test_quote_variants_receive_independent_defaults_without_mutating_input():
+    body = {
+        "pricing_config": {"valuation_date": "2026-09-15"},
+        "quote_variants": [
+            {"label": "MC"},
+            {"label": "解析", "pricing_config": {"model_method": "analytical"}},
+            {"label": "显式", "pricing_config": {"path_count": 50_000}},
+        ],
+    }
+    original = deepcopy(body)
+    request = apply_formal_quote_pricing_defaults(body)
+    assert request["quote_variants"][0]["pricing_config"]["path_count"] == 100_000
+    assert "path_count" not in request["quote_variants"][1]["pricing_config"]
+    assert request["quote_variants"][2]["pricing_config"]["path_count"] == 50_000
+    assert request["pricing_config"] == {"valuation_date": "2026-09-15"}
+    assert FORMAL_QUOTE_MONTE_CARLO_PATH_COUNT == 100_000
+    assert body == original
 
 
 def test_invalid_quote_overrides_are_rejected():

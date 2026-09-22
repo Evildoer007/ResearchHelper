@@ -2,7 +2,7 @@
 
 VS Code 可能把“运行 Python 文件”绑定到一个只装了基础 Python 的解释器；而桌面端
 依赖 PySide6。此启动器优先使用当前可用解释器，否则只在本机已存在的解释器中寻找
-PySide6 并重新拉起 ``app.py``，不安装依赖、不修改环境。
+PySide6 并从项目根目录重新拉起统一入口 ``launcher.py``，不安装依赖、不修改环境。
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-APP = Path(__file__).resolve().with_name("app.py")
 
 
 def _has_pyside(python: Path) -> bool:
@@ -56,9 +55,13 @@ def main() -> None:
         if not _has_pyside(python):
             continue
         if python == current:
-            runpy.run_path(str(APP), run_name="__main__")
+            # VS Code may run this file from a different cwd. The project root
+            # must be importable before launcher imports core/gui packages.
+            if str(ROOT) not in sys.path:
+                sys.path.insert(0, str(ROOT))
+            runpy.run_module("launcher", run_name="__main__")
         else:
-            subprocess.Popen([str(python), str(APP)], cwd=ROOT)
+            subprocess.Popen([str(python), "-m", "launcher"], cwd=ROOT)
         return
     print("无法启动桌面端：未找到安装 PySide6 的 Python 解释器。")
     print("请安装 PySide6，或设置 RESEARCH_HELPER_GUI_PYTHON 指向可用 python.exe。")

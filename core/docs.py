@@ -30,7 +30,7 @@ from pathlib import Path
 
 from llm.client import DeepSeekClient
 
-SOURCES_DIR = Path(__file__).resolve().parent.parent / "sources"
+from .app_paths import SOURCES_DIR
 
 # 单次喂给 LLM 的正文上限。实测两篇券商研报全文 17k~20k 字符，
 # 取 30000 可整篇喂入——此前设 15000 会把靠后的页整段丢掉，

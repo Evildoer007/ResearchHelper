@@ -15,6 +15,9 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.optionhelper_pricing import apply_formal_quote_pricing_defaults
+from core.optionhelper_compat import apply_quote_compatibility_patches
+
 
 def _utf8_safe(value):
     if isinstance(value, str):
@@ -55,7 +58,7 @@ def build_project_request(body: Mapping) -> dict:
         if not isinstance(variants, list):
             raise ValueError("quote_variants 必须为 JSON 数组")
         request["quote_variants"] = variants
-    return _utf8_safe(request)
+    return _utf8_safe(apply_formal_quote_pricing_defaults(request))
 
 
 def main() -> None:
@@ -74,6 +77,18 @@ def main() -> None:
         os.environ["OPTIONHELPER_DATA_ROOT"] = str(project_root / "data")
         os.environ["OPTIONHELPER_RESULT_ROOT"] = str(project_root / "result")
         import tool_entry
+
+        # Keep the activated Skill immutable: release-specific compatibility is
+        # applied at the Host boundary after import and before the project run.
+        # This currently prevents OptionHelper's internal derived ``G`` points
+        # field from being projected into a client-facing Quote table.
+        patches = apply_quote_compatibility_patches()
+        if patches:
+            print(
+                "[ResearchHelper/optionhelper_compat/completed] " + ",".join(patches),
+                file=sys.stderr,
+                flush=True,
+            )
 
         # stdout 是供 GUI 解析的唯一 JSON 协议；阶段信息写入 stderr。这样不会
         # 污染机器可读结果，同时可明确区分卡在鉴权、取数、定价还是生成报价表。

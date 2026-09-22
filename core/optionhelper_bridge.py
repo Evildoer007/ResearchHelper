@@ -19,12 +19,14 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from . import config
+from .app_paths import USER_DATA_ROOT
 from .client_constraints import ClientConstraints
+from .optionhelper_pricing import apply_formal_quote_pricing_defaults
 from .run_tracker import record_external
 from .viewpoint import ViewPackage
 
 _TIMEOUT_S = 600
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = USER_DATA_ROOT
 
 
 @dataclass
@@ -573,6 +575,7 @@ def _run_full_claimed(
         "format": "html",
         **selection_fields,
     }
+    body = apply_formal_quote_pricing_defaults(body)
     skill_root = Path(config.OPTIONHELPER_SKILL_ROOT).resolve()
     env = dict(os.environ)
     for key in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy"):

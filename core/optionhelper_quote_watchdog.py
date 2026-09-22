@@ -24,10 +24,17 @@ def main() -> None:
         if callable(reconfigure):
             reconfigure(encoding="utf-8", errors="replace")
     raw_request = sys.stdin.buffer.read()
-    process = subprocess.Popen(
-        [sys.executable, str(WORKER)], stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
+    try:
+        process = subprocess.Popen(
+            [sys.executable, str(WORKER)], stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+    except OSError as error:
+        sys.stdout.write(json.dumps({
+            "ok": False, "reason": "worker_start",
+            "message": f"OptionHelper 报价子进程无法启动：{type(error).__name__}: {error}",
+        }, ensure_ascii=False))
+        return
     try:
         stdout, stderr = process.communicate(raw_request, timeout=TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
@@ -35,6 +42,8 @@ def main() -> None:
         _stdout, stderr = process.communicate()
         response = {
             "ok": False,
+            "reason": "timeout",
+            "timeout_seconds": TIMEOUT_SECONDS,
             "message": (
                 f"OptionHelper 正式报价超过 {TIMEOUT_SECONDS} 秒已停止；"
                 "请检查 iFinD 凭证、网络或 OptionHelper 运行日志后重试。"
@@ -44,8 +53,24 @@ def main() -> None:
         if stderr:
             sys.stderr.buffer.write(stderr[-2000:])
         return
-    # 子 worker 的 stdout 是唯一 JSON 协议，原样转发；stderr 仅供 GUI 诊断。
-    sys.stdout.buffer.write(stdout)
+    # 子 worker 的 stdout 是唯一 JSON 协议。若它在输出协议之前崩溃，
+    # 包装器必须返回可区分的错误，而不是让 GUI 误认为“没有正式报价”。
+    try:
+        valid_output = isinstance(json.loads(stdout), dict)
+    except (ValueError, UnicodeDecodeError):
+        valid_output = False
+    if not valid_output:
+        sys.stdout.write(json.dumps({
+            "ok": False,
+            "reason": "worker_exit" if process.returncode else "invalid_worker_output",
+            "worker_exit_code": process.returncode,
+            "message": (
+                f"OptionHelper 报价子进程未返回有效 JSON（exit={process.returncode}）；"
+                "请查看本笔报价诊断中的错误输出。"
+            ),
+        }, ensure_ascii=False))
+    else:
+        sys.stdout.buffer.write(stdout)
     if stderr:
         sys.stderr.buffer.write(stderr)
 

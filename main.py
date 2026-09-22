@@ -64,6 +64,7 @@ _CLIENT_CONSTRAINTS = None  # 在 main() 解析为 ClientConstraints
 
 from core import (brief, config, event_evidence, genres, market_confirmation, model_registry,
                   overrides as ov, pipeline, thesis, topics, validator, writer)
+from core.app_paths import OUTPUT_DIR, USER_DATA_ROOT, ensure_user_directories
 from core.client_constraints import ClientConstraints, parse_cli as parse_client_constraints
 from core.provider import get_provider
 from core.run_tracker import RunTracker
@@ -336,8 +337,8 @@ def _finish(ma, title: str, *, tracker: RunTracker | None = None,
 
 
 def _report_path(title: str) -> str:
-    out_dir = Path(__file__).resolve().parent / "output"
-    out_dir.mkdir(exist_ok=True)
+    out_dir = OUTPUT_DIR
+    out_dir.mkdir(parents=True, exist_ok=True)
     return str(out_dir / f"onepager_{_safe_name(title)}.html")
 
 
@@ -512,6 +513,11 @@ def generate_from_brief(text: str, *, pick: bool = False,
                 "候选数量": len(payload.get("suggested_instruments", [])),
                 "检索与淘汰记录": payload.get("etf_discovery_audit", []),
             })
+            tracker.add_metadata("主题公司候选关联核验", [
+                {key: item.get(key, "") for key in (
+                    "code", "name", "origin", "association", "reason", "source_title", "source_url")}
+                for item in payload.get("theme_basket_candidates", [])
+            ])
         while True:
             print("MARKET_CONFIRMATION_REQUIRED=" + json.dumps(payload, ensure_ascii=False), flush=True)
             line = sys.stdin.readline()
@@ -887,7 +893,8 @@ def main() -> None:
         if not text:
             print('用法：python main.py -b "你的需求，例如：昨晚SK海力士发了业绩……"')
             return
-        tracker = RunTracker.create(root=Path(__file__).resolve().parent, request=text, mode="brief")
+        ensure_user_directories()
+        tracker = RunTracker.create(root=USER_DATA_ROOT, request=text, mode="brief")
         tracker.add_metadata("客户约束", _CLIENT_CONSTRAINTS.describe())
         print(f"运行编号：{tracker.run_id}（日志会写入 output/runs）")
         _run_tracked(tracker, lambda: generate_from_brief(
@@ -896,7 +903,8 @@ def main() -> None:
         return
 
     # B【辅路径】App 扫市场推荐候选
-    tracker = RunTracker.create(root=Path(__file__).resolve().parent, request="市场扫描", mode="topics")
+    ensure_user_directories()
+    tracker = RunTracker.create(root=USER_DATA_ROOT, request="市场扫描", mode="topics")
     tracker.add_metadata("客户约束", _CLIENT_CONSTRAINTS.describe())
     print(f"运行编号：{tracker.run_id}（日志会写入 output/runs）")
 

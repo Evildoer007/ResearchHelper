@@ -937,7 +937,7 @@ def _upsert_optionhelper_input(text: str, record: dict) -> str:
         area = re.search(area_pattern, text, flags=re.DOTALL)
         body = area.group(0) if area else ""
         if re.search(item_pattern, body, flags=re.DOTALL):
-            body = re.sub(item_pattern, block, body, count=1, flags=re.DOTALL)
+            body = re.sub(item_pattern, lambda _match: block, body, count=1, flags=re.DOTALL)
         else:
             body = body.replace(
                 _OPTIONHELPER_INPUTS_END,
@@ -998,7 +998,7 @@ def refresh_optionhelper_recommender_result(gap_path: str | Path, record: dict) 
     lines.append("")
     section = "\n".join(lines)
     if re.search(_OPTIONHELPER_SECTION_PATTERN, text, flags=re.DOTALL):
-        text = re.sub(_OPTIONHELPER_SECTION_PATTERN, section.rstrip(), text, count=1, flags=re.DOTALL)
+        text = re.sub(_OPTIONHELPER_SECTION_PATTERN, lambda _match: section.rstrip(), text, count=1, flags=re.DOTALL)
     else:
         text = text.rstrip() + "\n\n---\n\n" + section
     try:
@@ -1038,7 +1038,7 @@ def refresh_optionhelper_result(gap_path: str | Path, oh, *, html_path: str = ""
         + "\n".join(target_lines + _optionhelper_section(oh))
     )
     if re.search(_OPTIONHELPER_SECTION_PATTERN, text, flags=re.DOTALL):
-        text = re.sub(_OPTIONHELPER_SECTION_PATTERN, quote.rstrip(), text, count=1, flags=re.DOTALL)
+        text = re.sub(_OPTIONHELPER_SECTION_PATTERN, lambda _match: quote.rstrip(), text, count=1, flags=re.DOTALL)
     else:
         text += "\n\n---\n\n" + quote
 
@@ -1061,7 +1061,7 @@ def refresh_optionhelper_result(gap_path: str | Path, oh, *, html_path: str = ""
     final = "\n".join(final_lines) + "\n"
     final_pattern = r"## 九、正式报价后最终交付状态\n.*?(?=\n---\n|\Z)"
     if re.search(final_pattern, text, flags=re.DOTALL):
-        text = re.sub(final_pattern, final.rstrip(), text, count=1, flags=re.DOTALL)
+        text = re.sub(final_pattern, lambda _match: final.rstrip(), text, count=1, flags=re.DOTALL)
     else:
         text = text.rstrip() + "\n\n---\n\n" + final
     try:
@@ -1105,7 +1105,7 @@ def refresh_optionhelper_multi_result(gap_path: str | Path, entries: list[dict],
               "Research Helper 仅按分析师勾选写入已有的表格，不改写任何报价数值。", ""]
     quote = "\n".join(lines)
     if re.search(_OPTIONHELPER_SECTION_PATTERN, text, flags=re.DOTALL):
-        text = re.sub(_OPTIONHELPER_SECTION_PATTERN, quote.rstrip(), text, count=1, flags=re.DOTALL)
+        text = re.sub(_OPTIONHELPER_SECTION_PATTERN, lambda _match: quote.rstrip(), text, count=1, flags=re.DOTALL)
     else:
         text += "\n\n---\n\n" + quote
 
@@ -1122,7 +1122,7 @@ def refresh_optionhelper_multi_result(gap_path: str | Path, entries: list[dict],
     final = "\n".join(final_lines) + "\n"
     final_pattern = r"## 九、正式报价后最终交付状态\n.*?(?=\n---\n|\Z)"
     if re.search(final_pattern, text, flags=re.DOTALL):
-        text = re.sub(final_pattern, final.rstrip(), text, count=1, flags=re.DOTALL)
+        text = re.sub(final_pattern, lambda _match: final.rstrip(), text, count=1, flags=re.DOTALL)
     else:
         text = text.rstrip() + "\n\n---\n\n" + final
     try:

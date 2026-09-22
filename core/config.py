@@ -42,9 +42,10 @@ def no_proxy():
 # ---- 凭证加载：环境变量优先，其次本地 config.local.json（已被 .gitignore 忽略）----
 import json
 from pathlib import Path
+from .app_paths import CONFIG_PATH, DATA_CACHE_DIR, OPTIONHELPER_DIR, USER_DATA_ROOT
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_LOCAL_CONFIG_PATH = _PROJECT_ROOT / "config.local.json"
+_PROJECT_ROOT = USER_DATA_ROOT
+_LOCAL_CONFIG_PATH = CONFIG_PATH
 
 
 def _load_local_config() -> dict:
@@ -115,7 +116,6 @@ SEARCH_LANGUAGE = str(_cred("SEARCH_LANGUAGE", "zh-cn") or "zh-cn").strip().lowe
 SEARCH_BING_FALLBACK = _setting_bool("SEARCH_BING_FALLBACK", True)
 
 # 本地数据缓存目录（静态数据取一次存这里，规避配额）
-DATA_CACHE_DIR = _PROJECT_ROOT / "data_cache"
 DEEPSEEK_MODEL_CACHE = DATA_CACHE_DIR / "deepseek_models.json"
 
 
@@ -151,7 +151,7 @@ OPTIONHELPER_SKILL_ROOT = _cred(
 
 # 必须由使用者明确选择解释器；选择后可记录在被忽略的项目级状态文件，
 # 以后复用同一绝对路径，不再重新猜环境。
-_OPTIONHELPER_INTERPRETER_FILE = _PROJECT_ROOT / ".optionhelper" / "interpreter.txt"
+_OPTIONHELPER_INTERPRETER_FILE = OPTIONHELPER_DIR / "interpreter.txt"
 try:
     _SELECTED_OPTIONHELPER_PYTHON = _OPTIONHELPER_INTERPRETER_FILE.read_text(encoding="utf-8").strip()
 except (OSError, UnicodeError):
@@ -161,7 +161,7 @@ OPTIONHELPER_PYTHON = _cred("OPTIONHELPER_PYTHON", _SELECTED_OPTIONHELPER_PYTHON
 # 对话 Agent 完成 Recommender Intent/Research/Critic 后写出的**一次性**公开选择交接件。
 # Quote 桥接会把它原子移动到以 run_id 命名的归档；绝不从旧运行回读。
 OPTIONHELPER_SELECTION_PATH = _cred(
-    "OPTIONHELPER_SELECTION_PATH", str(_PROJECT_ROOT / ".optionhelper" / "selection.pending.json"),
+    "OPTIONHELPER_SELECTION_PATH", str(OPTIONHELPER_DIR / "selection.pending.json"),
 )
 OPTIONHELPER_HOST_URL = _cred("OPTIONHELPER_HOST_URL")
 
@@ -182,10 +182,14 @@ OPTIONHELPER_DEFAULT_CONSTRAINTS = {
 
 def has_optionhelper() -> bool:
     """是否已具备启动新版 Skill 统一就绪检查的本地条件。"""
-    return bool(
-        OPTIONHELPER_SKILL_ROOT
-        and OPTIONHELPER_PYTHON
-        and Path(OPTIONHELPER_PYTHON).exists()
-        and (Path(OPTIONHELPER_SKILL_ROOT) / "scripts" / "environment_check.py").is_file()
-        and (Path(OPTIONHELPER_SKILL_ROOT) / "scripts" / "tool_entry.py").is_file()
-    )
+    try:
+        return bool(
+            OPTIONHELPER_SKILL_ROOT
+            and OPTIONHELPER_PYTHON
+            and Path(OPTIONHELPER_PYTHON).is_file()
+            and (Path(OPTIONHELPER_SKILL_ROOT) / "scripts" / "environment_check.py").is_file()
+            and (Path(OPTIONHELPER_SKILL_ROOT) / "scripts" / "tool_entry.py").is_file()
+        )
+    except OSError:
+        # 权限不足或盘符暂时不可用应表现为“能力未就绪”，不能令整个 GUI 崩溃。
+        return False

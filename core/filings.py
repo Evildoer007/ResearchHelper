@@ -28,7 +28,7 @@ from pathlib import Path
 
 from . import config
 
-SOURCES_DIR = Path(__file__).resolve().parent.parent / "sources"
+from .app_paths import SOURCES_DIR
 
 
 @dataclass

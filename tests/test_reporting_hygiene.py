@@ -22,6 +22,17 @@ class ReportingHygieneTests(unittest.TestCase):
         self.assertEqual(_public_text("截至本次数据查询日2026-09-15，盈利改善。"), "盈利改善。")
         self.assertEqual(_public_text("产业机制层面：价格上涨。"), "价格上涨。")
 
+    def test_customer_text_converts_internal_chain_language_to_business_observation(self) -> None:
+        cleaned = _public_text(
+            "事件—机制—A股暴露传导链清晰，但需注意审厂行为尚未直接证明相关公司获得订单或收入。"
+        )
+        self.assertNotIn("传导链", cleaned)
+        self.assertNotIn("尚未直接证明", cleaned)
+        self.assertIn("后续重点观察供应商订单与收入兑现", cleaned)
+        self.assertNotIn("****", _public_text(
+            "**事件—机制—A股暴露传导链清晰**，但需注意审厂行为尚未直接证明相关公司获得订单或收入。"
+        ))
+
     def test_dense_summary_requires_rewrite_and_audit_notes_are_separate(self) -> None:
         ma = SimpleNamespace(plan=SimpleNamespace(logics=[]))
         rc = ReportContent(主题="测试", 类型="事件")

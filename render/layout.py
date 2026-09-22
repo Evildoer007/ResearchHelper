@@ -12,7 +12,9 @@ import io
 import json
 import re
 
+from core.app_paths import RESOURCE_ROOT
 from core.planner import SRC_SPINE
+from core.report_edits import edit_region, section_region
 
 from . import charts as C
 from . import style as S
@@ -256,25 +258,38 @@ def _html_card_compare(spec: dict, pts: list) -> str | None:
 
 
 def _html_evidence_flow(spec: dict, pts: list) -> str | None:
-    """事件→传导→板块影响的原生 HTML 流程图。
+    """全宽纵向阅读的事件影响路径，避免三栏长句挤成微型文字。
 
     这不是趋势图：节点间的箭头只表示已核验的传导链，不暗示数值上的连续变化。
     每个数据点使用 {标签, 说明}，最多四步，以免一页通出现难以核对的大流程图。
     """
     nodes = []
+    public_labels = {
+        "事件事实": "发生了什么",
+        "产业机制": "如何影响产业",
+        "传导依据": "如何影响产业",
+        "A股暴露": "对应研究标的",
+    }
     for point in pts[:4]:
         label = str(point.get("标签", "")).strip()
         if not label:
             continue
         note = str(point.get("说明") or point.get("值") or "").strip()
         nodes.append(
-            f'<div class="ef-node"><b>{_esc(label)}</b>'
-            f'{f"<span>{_esc(note)}</span>" if note else ""}</div>'
+            '<div class="ef-step">'
+            f'<span class="ef-index">{len(nodes) + 1:02d}</span>'
+            f'<b class="ef-label">{_esc(public_labels.get(label, label))}</b>'
+            f'<span class="ef-detail">{_esc(note) if note else "—"}</span>'
+            '</div>'
         )
     if len(nodes) < 2:
         return None
     ttl = f'<div class="c-title">{_esc(spec.get("标题", ""))}</div>' if spec.get("标题") else ""
-    return f'<div class="htmlchart">{ttl}<div class="evidence-flow">{"<i>→</i>".join(nodes)}</div></div>'
+    return (
+        f'<div class="htmlchart htmlchart--flow">{ttl}'
+        f'<div class="evidence-flow">{"<div class=\"ef-link\" aria-hidden=\"true\">↓</div>".join(nodes)}</div>'
+        '</div>'
+    )
 
 
 _HTML_CHARTS = {"gauge": _html_gauge, "two_col": _html_two_col,
@@ -388,28 +403,49 @@ def _interactive_chart_wrapper(spec: dict, static_html: str) -> str:
     )
 
 
-def _one_chart(spec: dict, logic_id: str) -> str:
+def _one_chart(spec: dict, logic_id: str, edit_prefix: str = "", chart_index: int = 1) -> str:
     """渲染单张图（排版型出 HTML，数值型出 <img>），失败回退到 bar。无数据返回空串。"""
-    pts = spec.get("数据点") or []
-    fn = _HTML_CHARTS.get(spec.get("类型") or "")
+    # 图题放在 HTML 层，数据图本身不再烙入标题。这样人工修订只改变题目文字，
+    # 不接触图表数据、不重算图形，PDF 与交互图也共用同一标题。
+    display_title = str(spec.get("标题") or "").strip()
+    render_spec = dict(spec)
+    render_spec["标题"] = ""
+
+    def with_title(content: str) -> str:
+        if not content:
+            return ""
+        if display_title:
+            rendered_title = _esc(display_title)
+            if edit_prefix:
+                rendered_title = edit_region(f"{edit_prefix}_chart_{chart_index}_title", rendered_title)
+            content = f'<div class="rh-editable-chart"><div class="c-title">{rendered_title}</div>{content}</div>'
+        if edit_prefix:
+            # 单图删除后仍能根据原图的数据关系恢复合适版式；不根据标题猜尺寸。
+            layout = "side" if _compact_side_chart(spec) else "full"
+            content = f"<!-- RH_CHART_LAYOUT:{layout} -->" + content
+            content = section_region(f"{edit_prefix}_chart_{chart_index}", content)
+        return content
+
+    pts = render_spec.get("数据点") or []
+    fn = _HTML_CHARTS.get(render_spec.get("类型") or "")
     if fn and pts:
         try:
-            html = fn(spec, pts)
+            html = fn(render_spec, pts)
         except Exception as e:
             html, err = None, f"{type(e).__name__}: {e}"
         else:
             err = "数据点不符合该图型要求"
         if html:
-            return f'<div class="chart">{html}{_chart_meta_html(spec)}</div>'
+            return with_title(f'<div class="chart">{html}{_chart_meta_html(render_spec)}</div>')
         # **回退到数值型图，而不是直接放弃。** gauge 对数据点要求严
         # （值须是 0~100 的百分位、不得带量纲），writer 填错就整张图没了；
         # 而这些数据点本身是真实的，画成柱状图照样能用。
         # 宁可图型退一档，也不要让一条逻辑光秃秃没有图。
-        CHART_FALLBACKS.append(f"{logic_id}：{spec.get('类型')} → bar（{err}）")
-        spec2 = dict(spec, 类型="bar")
-        return _chart_for(type("X", (), {"图表规格": spec2})()) or ""
-    static_html = _chart_for(type("X", (), {"图表规格": spec})()) or ""
-    return _interactive_chart_wrapper(spec, static_html)
+        CHART_FALLBACKS.append(f"{logic_id}：{render_spec.get('类型')} → bar（{err}）")
+        spec2 = dict(render_spec, 类型="bar")
+        return with_title(_chart_for(type("X", (), {"图表规格": spec2})()) or "")
+    static_html = _chart_for(type("X", (), {"图表规格": render_spec})()) or ""
+    return with_title(_interactive_chart_wrapper(render_spec, static_html))
 
 
 def _compact_side_chart(spec: dict) -> bool:
@@ -444,7 +480,7 @@ def _chart_layout_mode(specs: list[dict]) -> str:
     return "full"
 
 
-def _chart_block(lc) -> str:
+def _chart_block(lc, edit_prefix: str = "") -> str:
     """产出该逻辑全部图表的 HTML（1~2 张并排），无图则空串。
 
     **上限 2 张，代码硬卡**（#81）：提示词里的"给 1~2 项"是倾向不是保证，
@@ -456,7 +492,10 @@ def _chart_block(lc) -> str:
     """
     lid = getattr(lc, "逻辑id", "?")
     specs = (getattr(lc, "图表规格列表", None) or [])[:MAX_CHARTS_PER_LOGIC]
-    blocks = [b for b in (_one_chart(s or {}, lid) for s in specs) if b]
+    blocks = [
+        block for index, spec in enumerate(specs, start=1)
+        if (block := _one_chart(spec or {}, lid, edit_prefix, index))
+    ]
     if not blocks:
         return ""
     if len(blocks) == 1:
@@ -806,13 +845,19 @@ h1 .accent { color:var(--oh-brand-red); }
              max-width:560px; margin:0 auto; font-size:12px; }
 .c-title { font-size:11px; font-family:var(--f-heavy); font-weight:700; color:var(--oh-brand-red); text-align:center; margin-bottom:7px; }
 
-/* 事件证据链：箭头只表达已核验的传导顺序，卡片本身不做因果强度或概率暗示。 */
-.evidence-flow { display:flex; align-items:stretch; justify-content:center; gap:5px; }
-.ef-node { flex:1 1 0; min-width:0; padding:5px 6px; border:1px solid var(--oh-red-border-soft);
+/* 事件影响路径：每一步占满阅读宽度，避免长中文在三张小卡片里逐字换行。 */
+.htmlchart--flow { max-width:none; padding:7px 9px; }
+.htmlchart--flow .c-title { margin-bottom:5px; }
+.evidence-flow { display:flex; flex-direction:column; gap:0; }
+.ef-step { display:grid; grid-template-columns:24px 82px minmax(0, 1fr); align-items:start;
+           gap:7px; padding:6px 8px; border:1px solid var(--oh-red-border-soft);
            background:var(--oh-red-surface); text-align:left; }
-.ef-node b { display:block; color:var(--oh-ink); font-size:9px; line-height:1.25; }
-.ef-node span { display:block; color:var(--oh-muted); font-size:8px; line-height:1.25; margin-top:2px; }
-.evidence-flow i { align-self:center; color:var(--oh-brand-red); font-size:14px; font-style:normal; }
+.ef-step:last-child { background:var(--oh-risk-gold-soft); }
+.ef-index { color:var(--oh-brand-red); font-size:10px; line-height:1.35; font-weight:700; }
+.ef-label { color:var(--oh-ink); font-size:10.5px; line-height:1.35; font-weight:700; }
+.ef-detail { color:var(--oh-ink-soft); font-size:10px; line-height:1.4; overflow-wrap:anywhere; }
+.ef-link { height:12px; line-height:12px; padding-left:15px; color:var(--oh-brand-red);
+           font-size:12px; font-weight:700; }
 
 /* 分位标尺 */
 .g-row { margin:10px 0; }
@@ -898,12 +943,18 @@ _CN_NUM = ["一", "二", "三", "四", "五", "六"]
 def _echarts_assets() -> str:
     """返回客户版 HTML 的离线交互图运行层。
 
-    不能用 CDN：一页通通常在内网或断网环境中打开。ECharts 文件与报告输出目录
-    同属项目根目录，故报告位于 ``output/`` 时相对引用为 ``../assets/vendor/``。
+    不能用 CDN：一页通通常在内网或断网环境中打开。运行库直接内嵌进报告，
+    因此报告复制到另一台电脑后仍可交互，不依赖安装目录或相对路径。
     运行层不调用网络、不重新取数，只把 Python 侧校验过的中间配置画出来。
     """
-    return r'''<script src="../assets/vendor/echarts.min.js"></script>
-<script>
+    try:
+        runtime = base64.b64encode(
+            (RESOURCE_ROOT / "assets" / "vendor" / "echarts.min.js").read_bytes()
+        ).decode("ascii")
+    except OSError:
+        runtime = ""
+    runtime_tag = f'<script src="data:application/javascript;base64,{runtime}"></script>\n'
+    return runtime_tag + r'''<script>
 (() => {
   if (!window.echarts) return;
   const red = '#BF3131', redDeep = '#7D0A0A', blue = '#316FBF', green = '#31BF73',
@@ -1048,8 +1099,8 @@ def _report_title(ma) -> str:
 
 
 def _report_subtitle(date: str) -> str:
-    """Keep the cover subtitle concise; detailed data dates live with charts and sources."""
-    return f"策略研究 · 报告生成 {date}"
+    """Show the report issue date without confusing it with individual data cut-off dates."""
+    return f"研究策略·{date}"
 
 
 def build_html(ma, rc, *, org: str = DEFAULT_ORG, date: str = "", oh_result=None) -> str:
@@ -1078,21 +1129,23 @@ def build_html(ma, rc, *, org: str = DEFAULT_ORG, date: str = "", oh_result=None
     sections = []
     for i, lc in enumerate(spine):
         t, _ = title_of(lc)
-        chart_html = _chart_block(lc)
+        edit_key = f"logic_{i + 1}"
+        chart_html = _chart_block(lc, edit_key)
         # `lc.结论` **不再印进成品**：实测它与正文最后一句高度重复
         # （正文已写"高毛利红利期或正走向终结"，加粗句再说一遍"红利期或退却"），
         # 读者读到的是同一句话说两遍。但它本身不删——改作**交给 OptionHelper 的输入**，
         # 由它把每条逻辑的落点汇成观点包（见 §10）。
         if 'chart-block--side' in chart_html:
-            content_html = f'<div class="logic-split"><div class="body">{_rich(lc.论述)}</div>' \
+            content_html = f'<div class="logic-split"><div class="body">{edit_region(edit_key + "_body", _rich(lc.论述))}</div>' \
                            f'<div class="logic-side-chart">{chart_html}</div></div>'
         else:
-            content_html = f'<div class="body">{_rich(lc.论述)}</div>{chart_html}'
-        sections.append(f"""
+            content_html = f'<div class="body">{edit_region(edit_key + "_body", _rich(lc.论述))}</div>{chart_html}'
+        section_html = f"""
         <div class="logic">
-          <span class="tag">策略逻辑{_CN_NUM[i]}</span><span class="ltitle">{_esc(t)}</span>
+          <span class="tag">策略逻辑{_CN_NUM[i]}</span><span class="ltitle">{edit_region(edit_key + "_title", _esc(t))}</span>
           {content_html}
-        </div>""")
+        </div>"""
+        sections.append(section_region(edit_key, section_html))
 
     # 「补充观察」已按要求删除（#82）：它把可选池逻辑的 `结论` 压成一行印在版面上，
     # 而 `结论` 自 #59 起写的是**给 OptionHelper 的市场含义**（"方向中性、
@@ -1120,9 +1173,9 @@ def build_html(ma, rc, *, org: str = DEFAULT_ORG, date: str = "", oh_result=None
 
     return f"""<!doctype html><html><head><meta charset="utf-8"><style>{_CSS}</style></head><body>
     <div class="page">
-      <h1>场外衍生品投资策略 <span class="accent">—— {_esc(_report_title(ma))}</span></h1>
+      <h1>场外衍生品投资策略 <span class="accent">—— {edit_region("report_title", _esc(_report_title(ma)))}</span></h1>
       <div class="sub">{_report_subtitle(date)}</div>
-      <div class="concl"><span class="lbl">核心结论</span>{_rich(rc.核心结论 or _MISSING_CONCL)}</div>
+      <div class="concl"><span class="lbl">核心结论</span>{edit_region("core_conclusion", _rich(rc.核心结论 or _MISSING_CONCL))}</div>
       {body_html}
       {_footer_block(ma)}
     </div>{interactive_assets}</body></html>"""
@@ -1170,7 +1223,7 @@ def _underlying_block(ma, rc, oh=None) -> str:
     if getattr(ma, "数据查询日", ""):
         rows.append(f"数据查询日：{ma.数据查询日}")
     head = "　｜　".join(rows)
-    body = (f'<div class="u-why"><b>与研究主题的关联及选取原因</b>：{_esc(理由)}</div>'
+    body = (f'<div class="u-why"><b>与研究主题的关联及选取原因</b>：{edit_region("underlying_reason", _esc(理由))}</div>'
             if 理由 else "")
 
     return (f'<div class="under"><div class="u-line"><span class="lbl">挂钩标的</span>'
@@ -1204,7 +1257,7 @@ def confirmed_underlying_block(code: str, *, name: str = "", reason: str = "",
     return (
         '<div class="under"><div class="u-line"><span class="lbl">挂钩标的</span>'
         f'<span class="u-main">{head}</span></div>'
-        f'<div class="u-why"><b>与研究主题的关联及选取原因</b>：{_esc(why)}</div></div>'
+        f'<div class="u-why"><b>与研究主题的关联及选取原因</b>：{edit_region("underlying_reason", _esc(why))}</div></div>'
     )
 
 

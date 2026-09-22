@@ -80,6 +80,8 @@ class Brief:
     # 市场确认页动态发现的主题公司候选池，只在本次运行内使用。分析师勾选其中的公司
     # 后才写入上面的“主题篮子候选”；绝不把本次发现结果写回人工维护的证券/行业库。
     主题篮子候选池: list[TargetRef] = dfield(default_factory=list)
+    # 确认页展示的逐公司主题关联证据；代码/简称校验与业务关联校验分开留痕。
+    主题篮子候选依据: dict[str, dict] = dfield(default_factory=dict)
     主题: str = ""
     主导类型: str = ""
     附加类型: list[str] = dfield(default_factory=list)

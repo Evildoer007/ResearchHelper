@@ -64,6 +64,7 @@ class Confirmation:
     research_theme: str = ""         # 细分研究主题；放在末尾以兼容旧位置参数
     theme_basket_codes: list[str] = field(default_factory=list)  # 分析师确认的本次主题公司篮子
     theme_basket_confirmed: bool = False
+    theme_basket_evidence: dict[str, dict[str, str]] = field(default_factory=dict)
     # 仅当 ETF 的官方事实显示为“部分暴露”时使用：分析师必须同时勾选确认并
     # 写明映射理由，不能把这类工具当作自动通过的直接主题工具。
     partial_exposure_confirmed: bool = False
@@ -123,6 +124,8 @@ class ExposureAssessment:
 
 
 def from_dict(raw: dict) -> Confirmation:
+    basket_evidence = raw.get("theme_basket_evidence") or {}
+    basket_evidence = basket_evidence if isinstance(basket_evidence, dict) else {}
     return Confirmation(
         market=str(raw.get("market") or "").strip(),
         research_scope=str(raw.get("research_scope") or "").strip(),
@@ -134,6 +137,15 @@ def from_dict(raw: dict) -> Confirmation:
         theme_basket_codes=[_normalize_code(x) for x in (raw.get("theme_basket_codes") or [])
                             if _normalize_code(x)],
         theme_basket_confirmed="theme_basket_codes" in raw,
+        theme_basket_evidence={
+            _normalize_code(code): {
+                "reason": str(value.get("reason") or "").strip()[:500],
+                "source": str(value.get("source") or "").strip()[:500],
+                "association": str(value.get("association") or "").strip()[:30],
+            }
+            for code, value in basket_evidence.items()
+            if _normalize_code(code) and isinstance(value, dict)
+        },
         partial_exposure_confirmed=bool(raw.get("partial_exposure_confirmed", False)),
         research_mode=str(raw.get("research_mode") or "industry").strip(),
     )
@@ -571,10 +583,10 @@ def _suggestions(brief, *, provider: DataProvider | None = None) -> list[dict]:
 
 def discover_theme_companies(brief, *, provider: DataProvider | None = None,
                              limit: int = _THEME_BASKET_MAX) -> list[dict]:
-    """从 iFinD 动态发现细分主题的 A 股公司，供分析师确认研究篮子。
+    """从 iFinD 动态发现细分主题的 A 股公司，供后续关联核实。
 
-    问财的“概念股”结果只提供候选范围，不直接当成事实：代码与简称仍批量走
-    THS_BasicData 核验。它与 ETF 动态发现一样是一次运行内的候选池，不写回人工库。
+    问财的“概念股”结果只提供候选范围，不直接当成业务关联事实：代码与简称
+    批量走 THS_BasicData 核验。它是一次运行内的候选池，不写回人工库。
     """
     from .provider import iFinDProvider
 
@@ -609,10 +621,52 @@ def discover_theme_companies(brief, *, provider: DataProvider | None = None,
             "code": code,
             "name": actual_name,
             "origin": "iFinD 动态主题发现",
-            "note": f"iFinD 问财“{theme} 概念股”候选，代码与简称已核验",
+            "note": f"iFinD 问财“{theme} 概念股”候选；仅代码与简称已核验，主题关联待核实",
             "market_value": item.总市值,
+            "association": "concept_only",
+            "reason": "概念股检索命中；尚无可核实的具体业务关联原文",
+            "source_title": "iFinD 问财概念股检索",
+            "source_url": "",
         })
     return out
+
+
+def _enrich_theme_company_evidence(candidates: list[dict], theme: str,
+                                   provider: DataProvider | None) -> list[dict]:
+    """Check a bounded set of system candidates against source-linked passages.
+
+    Never turn a search failure, concept inclusion, or a model suggestion into
+    automatic core membership.  The analyst may still supply a source manually.
+    """
+    from .provider import iFinDProvider
+
+    if not isinstance(provider, iFinDProvider) or not provider.available():
+        return candidates
+    from .evidence_discovery import build_searcher
+    from .theme_company_evidence import search_company_association
+
+    searcher = build_searcher()
+    checked = 0
+    for candidate in candidates:
+        if candidate.get("association") == "client_named":
+            continue
+        if checked >= 8:  # confirmation must not issue 20 serial remote requests
+            candidate["note"] += "；自动关联检索限额已达，请分析师补充依据"
+            continue
+        checked += 1
+        assessment = search_company_association(theme, str(candidate.get("name") or ""), searcher)
+        candidate.update(assessment)
+        diagnostics = searcher.take_diagnostics()
+        if diagnostics and not any(item.get("ok") for item in diagnostics):
+            candidate.update(association="unverified", reason="自动关联检索服务暂不可用；未形成业务关联证明",
+                             source_title="", source_url="")
+            candidate["note"] = "关联检索不可用；可人工补充依据或改选其他取数路径"
+            continue
+        if assessment["association"] in {"direct", "indirect"}:
+            candidate["note"] = "已检索到披露原文；请核对后决定是否纳入研究篮子"
+        else:
+            candidate["note"] = "证券身份已核验；主题业务关联仍待分析师核实"
+    return candidates
 
 
 def _theme_basket_candidates(brief, *, provider: DataProvider | None = None) -> list[dict]:
@@ -636,9 +690,10 @@ def _theme_basket_candidates(brief, *, provider: DataProvider | None = None) -> 
         item = by_code.get(code)
         if item is None or not getattr(item, "可用", False):
             continue
-        out.append({"code": code, "name": item.名称, "origin": "客户点名（已核验）",
-                    "note": "客户在原始需求中明确列示的个股，代码与简称已核验",
-                    "core": True})
+        out.append({"code": code, "name": item.名称, "origin": "客户明确点名",
+                    "note": "客户在原始需求中明确列示；证券身份已核验，业务关联仍须在研究中分析",
+                    "association": "client_named", "reason": "客户在原始需求中明确点名该公司",
+                    "source_title": "客户原始需求", "source_url": "", "core": True})
         known.add(code)
 
     # 普通行业、以及未能明确识别细分主题的需求，仍不把 LLM 自行给出的候选个股
@@ -649,8 +704,10 @@ def _theme_basket_candidates(brief, *, provider: DataProvider | None = None) -> 
         code = str(getattr(item, "代码", "") or "").upper()
         if not code or not getattr(item, "可用", False) or universe._is_fund(code) or code in known:
             continue
-        out.append({"code": code, "name": item.名称, "origin": "需求解析核心候选",
-                    "note": "需求解析识别并已核验的主题相关公司", "core": True})
+        out.append({"code": code, "name": item.名称, "origin": "需求解析建议（待核实）",
+                    "note": "解析器提出该公司；仅代码与简称已核验，主题关联待核实",
+                    "association": "unverified", "reason": "需求解析建议，尚无可核实的具体业务关联原文",
+                    "source_title": "", "source_url": "", "core": False})
         known.add(code)
 
     # 只有细分主题与映射行业不同才扩展。例如“光模块→通信设备”；普通“证券→证券”
@@ -661,7 +718,9 @@ def _theme_basket_candidates(brief, *, provider: DataProvider | None = None) -> 
             if code and code not in known:
                 out.append(item)
                 known.add(code)
-    return out[:_THEME_BASKET_MAX]
+    enriched = _enrich_theme_company_evidence(out[:_THEME_BASKET_MAX], proposed_theme, provider)
+    rank = {"client_named": 0, "direct": 1, "indirect": 2, "concept_only": 3, "unverified": 4}
+    return sorted(enriched, key=lambda item: rank.get(str(item.get("association") or ""), 4))
 
 
 def _scope_options(brief, theme: str) -> list[str]:
@@ -715,6 +774,13 @@ def proposal(brief, *, provider: DataProvider | None = None) -> dict:
         TargetRef(str(item.get("name") or ""), str(item.get("code") or ""), "ok:本次主题候选")
         for item in basket_candidates
     ]
+    brief.主题篮子候选依据 = {
+        str(item.get("code") or "").upper(): {
+            key: str(item.get(key) or "")
+            for key in ("association", "reason", "source_title", "source_url", "origin")
+        }
+        for item in basket_candidates if item.get("code")
+    }
     audit = list(getattr(brief, "_etf_discovery_audit", []) or [])
     reasons = list(dict.fromkeys(row["reason"] for row in audit if row["status"] in {"failed", "rejected"}))
     discovery_note = ""
@@ -770,8 +836,14 @@ def proposal(brief, *, provider: DataProvider | None = None) -> dict:
         # 三条路径互斥：有需人工确认的细分主题公司时走主题篮子；主题本身就是
         # 数据源已验证行业时直接走行业成分；只有没有可用行业/篮子时才建议 ETF。
         "recommended_research_mode": (
-            "theme_basket" if basket_candidates
-            else ("industry" if scope_options else ("theme_etf" if etf_scope else "industry"))
+            "theme_basket" if (
+                any(item.get("association") == "client_named" for item in basket_candidates)
+                or sum(item.get("association") == "direct" for item in basket_candidates) >= _THEME_BASKET_MIN
+            )
+            else ("industry" if proposed_theme in scope_options
+                  else ("theme_etf" if suggested and etf_scope
+                        else ("industry" if scope_options
+                              else ("theme_basket" if basket_candidates else ("theme_etf" if etf_scope else "industry")))))
         ),
         "reason": getattr(brief, "板块理由", ""),
         "suggested_instruments": suggested,
@@ -944,6 +1016,16 @@ def verify(value: Confirmation, brief=None, *, provider: DataProvider | None = N
         invalid = [code for code in value.theme_basket_codes if code not in allowed]
         if invalid:
             result.errors.append("主题研究篮子包含未核验候选：" + "、".join(invalid))
+        associations = getattr(brief, "主题篮子候选依据", {}) or {}
+        for code in value.theme_basket_codes:
+            candidate = associations.get(code) or {}
+            if not candidate or candidate.get("association") in {"client_named", "direct", "indirect"}:
+                continue
+            manual = value.theme_basket_evidence.get(code) or {}
+            if (not str(manual.get("reason") or "").strip()
+                    or not str(manual.get("source") or "").strip()
+                    or manual.get("association") not in {"direct", "indirect"}):
+                result.errors.append(f"{code} 仅为待核实候选；请填写关联类型、主题关联理由及资料来源，或取消勾选")
 
     if value.reason == "":
         result.warnings.append("未填写映射理由（选填）")

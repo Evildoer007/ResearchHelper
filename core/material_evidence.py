@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
-MATERIALS_DIR = Path(__file__).resolve().parent.parent / "output" / "materials"
+from .app_paths import MATERIALS_DIR
 MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024
 SUPPORTED_SUFFIXES = {".pdf", ".txt", ".md", ".docx"}
 
