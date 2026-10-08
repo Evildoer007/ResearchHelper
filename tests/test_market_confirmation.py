@@ -732,8 +732,13 @@ class MarketConfirmationTests(unittest.TestCase):
 
     def test_auto_electronics_keeps_basket_instead_of_forcing_one_industry(self) -> None:
         b = brief("基于A股汽车电子产业智能化加速的投资机会", "A股", ["汽车", "电子"])
-        self.assertEqual(proposal(b)["proposed_scope"], "汽车、电子")
-        self.assertEqual(proposal(b)["suggested_instruments"], [])
+        # This test covers the multi-industry basket decision.  Keep external
+        # iFinD discovery out of the assertion so the release gate is stable
+        # when a live terminal happens to return newly listed theme ETFs.
+        with patch("core.market_confirmation.discover_etfs", return_value=[]):
+            payload = proposal(b)
+        self.assertEqual(payload["proposed_scope"], "汽车、电子")
+        self.assertEqual(payload["suggested_instruments"], [])
         checked = verify(Confirmation("A股", "汽车、电子", research_only=True), b,
                          provider=self.provider)
         self.assertTrue(checked.ok, checked.errors)

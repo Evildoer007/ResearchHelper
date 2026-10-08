@@ -38,6 +38,26 @@ def preflight_runtime() -> None:
     ], timeout=60)
 
 
+def run_release_tests() -> None:
+    """Run the release gate without depending on the user's global TEMP ACLs."""
+    test_root = BUILD / "release-tests"
+    if test_root.exists():
+        shutil.rmtree(test_root)
+    temp_root = test_root / "temp"
+    pytest_root = test_root / "pytest"
+    temp_root.mkdir(parents=True)
+    env = dict(os.environ)
+    for name in ("TEMP", "TMP", "TMPDIR"):
+        env[name] = str(temp_root)
+    try:
+        run([
+            sys.executable, "-m", "pytest", "-q", "tests",
+            f"--basetemp={pytest_root}", "-p", "no:cacheprovider",
+        ], env=env)
+    finally:
+        shutil.rmtree(test_root, ignore_errors=True)
+
+
 def verify_runtime_files(app: Path) -> None:
     required = {
         "Qt 平台插件": "qwindows.dll",
@@ -145,7 +165,7 @@ def main() -> None:
     version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
     preflight_runtime()
     if not args.skip_tests:
-        run([sys.executable, "-m", "pytest", "-q", "tests"])
+        run_release_tests()
     if not args.reuse_build:
         for target in (BUILD, DIST):
             if target.exists():
