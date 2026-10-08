@@ -67,7 +67,7 @@ def series(code: str, indicator: str, *, years: int = 10,
     if not prov.available():
         return []
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     end = dt.date.today()
     begin = end.replace(year=end.year - years)
@@ -142,7 +142,7 @@ def series_multi(codes: list[str], indicator: str, *, years: int = 3,
     if not prov.available():
         return out, list(codes)
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     end = dt.date.today()
     begin = end.replace(year=end.year - years)

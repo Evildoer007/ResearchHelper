@@ -36,8 +36,7 @@ def discover(b, names, amounts=None, searched_names=None):
     response = {"errorcode": 0, "tables": [{"table": {
         "基金代码": list(names), "基金简称": searched_names or list(names.values()),
     }}]}
-    ths = SimpleNamespace(THS_iwencai=lambda *args: response)
-    with patch.dict("sys.modules", {"iFinDPy": ths}), patch("core.history.series", side_effect=(
+    with patch("core.ifind_client.client.THS_iwencai", return_value=response), patch("core.history.series", side_effect=(
         lambda code, *args, **kwargs: (amounts or {}).get(code, [3e7] * 20)
     )):
         return mc.discover_etfs(b, provider=DiscoveryProvider(names))
@@ -148,7 +147,8 @@ class ETFDiscoveryScopeTests(unittest.TestCase):
 
     def test_empty_theme_does_not_search_entire_etf_market(self):
         b = Brief(原始需求="", 主题="", ok=True)
-        with patch.dict("sys.modules", {"iFinDPy": SimpleNamespace(THS_iwencai=lambda *args: self.fail("不得全市场搜索"))}):
+        with patch("core.ifind_client.client.THS_iwencai",
+                   side_effect=AssertionError("不得全市场搜索")):
             self.assertEqual(mc.discover_etfs(b, provider=DiscoveryProvider({})), [])
         self.assertEqual(mc._discovery_terms(b), ())
         self.assertEqual(b._etf_discovery_audit[0]["stage"], "theme")

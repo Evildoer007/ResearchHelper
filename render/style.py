@@ -59,6 +59,8 @@ FONT_STACK = [
     "Source Han Sans CN",
     "HarmonyOS Sans SC",    # 华为，官方免费商用
     "Alibaba PuHuiTi",      # 阿里巴巴普惠体，官方免费商用
+    "PingFang SC",          # macOS 系统中文字体；只调用本机字体，不随应用分发
+    "Hiragino Sans GB",     # 较旧 macOS 的中文无衬线字体回退
     "DengXian",             # 等线：本机兜底
     "SimSun",               # 最后兜底，保证不出豆腐块
 ]

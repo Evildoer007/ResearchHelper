@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Research Helper 使用说明书</title>
+  <style>
+    :root {
+      --ink: #202124;
+      --muted: #69707a;
+      --line: #e2e4e8;
+      --panel: #f7f7f8;
+      --paper: #ffffff;
+      --side: #202427;
+      --side-2: #2c3135;
+      --wine: #7d0a0a;
+      --red: #b83b3b;
+      --red-soft: #fbf0f0;
+      --gold: #d8b66b;
+      --gold-soft: #fbf6e8;
+      --blue: #416b83;
+      --green: #557a64;
+      --shadow: 0 18px 48px rgba(25, 28, 31, .08);
+      --radius: 18px;
+      --content: 1120px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #f1f2f3;
+      font: 15px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+        "Microsoft YaHei", sans-serif;
+    }
+    a { color: var(--wine); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, kbd {
+      font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+      font-size: .92em;
+    }
+    code { background: #f0f1f2; border-radius: 6px; padding: 2px 6px; }
+    kbd { border: 1px solid #cfd2d6; border-bottom-width: 2px; border-radius: 6px; padding: 1px 6px; background: white; }
+    .layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); min-height: 100vh; }
+    aside {
+      position: sticky; top: 0; height: 100vh; overflow: auto;
+      padding: 26px 20px 32px; color: #f7f7f7; background: var(--side);
+    }
+    .brand { display: flex; gap: 13px; align-items: center; margin-bottom: 22px; }
+    .brand-mark {
+      width: 44px; height: 44px; border-radius: 13px; display: grid; place-items: center;
+      background: var(--wine); font-weight: 800; letter-spacing: .5px;
+    }
+    .brand strong { display: block; font-size: 16px; }
+    .brand small { color: #aeb4ba; }
+    .search {
+      width: 100%; margin: 2px 0 18px; padding: 10px 12px; border-radius: 10px;
+      border: 1px solid #444b50; background: var(--side-2); color: white; outline: none;
+    }
+    .search:focus { border-color: #8e969d; }
+    nav a {
+      display: block; margin: 2px 0; padding: 7px 10px; border-radius: 9px;
+      color: #c8cdd2; font-size: 13px;
+    }
+    nav a:hover, nav a.active { background: #353b40; color: #fff; text-decoration: none; }
+    nav .group { margin: 17px 10px 6px; color: #777f86; font-size: 11px; font-weight: 700; letter-spacing: .12em; }
+    .aside-note { margin-top: 22px; padding: 13px; border: 1px solid #41474c; border-radius: 12px; color: #bfc5ca; font-size: 12px; }
+    main { min-width: 0; }
+    .hero {
+      color: white; background:
+        radial-gradient(circle at 83% 24%, rgba(216,182,107,.22), transparent 28%),
+        linear-gradient(135deg, #202427 0%, #2e3236 56%, #4f1114 130%);
+      padding: 72px max(34px, calc((100% - var(--content))/2)) 62px;
+    }
+    .eyebrow { color: #e7cf97; font-weight: 700; letter-spacing: .14em; font-size: 12px; }
+    h1 { margin: 10px 0 12px; font-size: clamp(34px, 5vw, 60px); line-height: 1.15; letter-spacing: -.03em; }
+    .hero p { max-width: 790px; color: #d4d8dc; font-size: 18px; }
+    .hero-meta { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 25px; }
+    .pill { padding: 6px 11px; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; color: #e5e7e9; font-size: 12px; }
+    .toolbar { display: flex; gap: 9px; margin-top: 24px; }
+    button {
+      border: 1px solid #d5d8dc; border-radius: 10px; padding: 9px 13px;
+      background: white; color: var(--ink); cursor: pointer; font: inherit;
+    }
+    button:hover { border-color: #aeb3b8; }
+    .hero button { background: rgba(255,255,255,.08); color: white; border-color: rgba(255,255,255,.24); }
+    .content { max-width: calc(var(--content) + 68px); margin: 0 auto; padding: 30px 34px 90px; }
+    section {
+      scroll-margin-top: 20px; margin: 28px 0; padding: 34px;
+      background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+    }
+    section.hidden-by-search { display: none; }
+    h2 { margin: 0 0 18px; font-size: 27px; line-height: 1.3; }
+    h3 { margin: 28px 0 10px; font-size: 19px; }
+    h4 { margin: 20px 0 7px; font-size: 16px; }
+    p { margin: 9px 0; }
+    ul, ol { padding-left: 1.35rem; }
+    li + li { margin-top: 5px; }
+    .lead { color: #50565d; font-size: 17px; }
+    .callout { margin: 17px 0; padding: 15px 17px; border-radius: 12px; border-left: 4px solid var(--blue); background: #f2f7fa; }
+    .callout.warn { border-color: var(--gold); background: var(--gold-soft); }
+    .callout.stop { border-color: var(--red); background: var(--red-soft); }
+    .callout.good { border-color: var(--green); background: #f1f7f3; }
+    .label { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+    .required { color: #7d0a0a; background: #f7dddd; }
+    .optional { color: #5f4b14; background: #f5e9bd; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+    .card h3, .card h4 { margin-top: 0; }
+    .card-number { color: var(--wine); font-size: 28px; font-weight: 800; line-height: 1; }
+    .quick { margin-top: -58px; position: relative; }
+    .quick section { border-top: 4px solid var(--gold); }
+    .steps { counter-reset: step; display: grid; gap: 13px; }
+    .step { position: relative; padding: 16px 17px 16px 62px; border: 1px solid var(--line); border-radius: 13px; }
+    .step::before {
+      counter-increment: step; content: counter(step); position: absolute; left: 17px; top: 15px;
+      width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+      color: white; background: var(--wine); font-weight: 800;
+    }
+    .step strong { display: block; margin-bottom: 3px; }
+    .flow { display: flex; align-items: stretch; gap: 9px; overflow-x: auto; padding: 10px 2px 14px; }
+    .flow-node { min-width: 145px; flex: 1; padding: 14px; border: 1px solid #dddfe2; border-radius: 12px; background: #fafafa; }
+    .flow-node b { display: block; margin-bottom: 4px; }
+    .arrow { align-self: center; color: var(--red); font-size: 22px; }
+    .app-map { display: grid; grid-template-columns: 190px minmax(300px, 1fr) 280px; min-height: 360px; border: 1px solid #cfd3d7; border-radius: 15px; overflow: hidden; }
+    .app-map > div { padding: 20px; }
+    .app-map .history { color: #edf0f2; background: #24282b; }
+    .app-map .workspace { background: #fbfbfb; }
+    .app-map .delivery { border-left: 1px solid #d9dcdf; background: #f6f6f7; }
+    .fake-input, .fake-line { height: 34px; margin: 9px 0; border: 1px solid #d9dcdf; border-radius: 9px; background: white; }
+    .fake-input.big { height: 115px; }
+    .fake-run { margin: 9px 0; padding: 8px; border-radius: 8px; background: #353b40; color: #d7dade; }
+    .route { border-top: 4px solid var(--blue); }
+    .route:nth-child(2) { border-top-color: var(--green); }
+    .route:nth-child(3) { border-top-color: var(--wine); }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+    th, td { padding: 11px 12px; text-align: left; vertical-align: top; border: 1px solid var(--line); }
+    th { background: #f4f5f6; }
+    .question { margin: 10px 0; padding: 14px 16px; border: 1px solid #e1d6bb; border-radius: 11px; background: #fffaf0; }
+    .question b { color: #795e1e; }
+    pre { overflow: auto; padding: 15px; border-radius: 12px; color: #f1f3f4; background: #282c30; line-height: 1.6; }
+    .shot { margin: 18px 0; border: 1px dashed #afb5ba; border-radius: 15px; background: #fafafa; overflow: hidden; }
+    .shot-head { display: flex; justify-content: space-between; gap: 15px; padding: 11px 14px; border-bottom: 1px dashed #c9cdd1; color: #555d64; font-size: 13px; }
+    .shot-body { min-height: 200px; padding: 25px; display: grid; place-items: center; text-align: center; color: #858b90; background: linear-gradient(135deg, #fafafa, #f2f3f4); }
+    .shot-body b { display: block; color: #61686e; font-size: 18px; }
+    .checklist { list-style: none; padding: 0; }
+    .checklist li { position: relative; padding: 9px 9px 9px 36px; border-bottom: 1px solid #eceeef; }
+    .checklist li::before { content: "□"; position: absolute; left: 8px; top: 7px; color: var(--wine); font-size: 20px; }
+    details { margin: 10px 0; border: 1px solid var(--line); border-radius: 11px; background: #fff; }
+    summary { cursor: pointer; padding: 12px 14px; font-weight: 700; }
+    details > div { padding: 0 14px 14px; color: #4f565d; }
+    .footer { color: #7a8187; text-align: center; font-size: 12px; padding: 10px 0 30px; }
+    @media (max-width: 980px) {
+      .layout { display: block; }
+      aside { position: relative; height: auto; }
+      nav { columns: 2; }
+      nav .group { break-after: avoid; }
+      .grid.three { grid-template-columns: 1fr; }
+      .app-map { grid-template-columns: 150px minmax(280px, 1fr); }
+      .app-map .delivery { grid-column: 1 / -1; border-left: 0; border-top: 1px solid #d9dcdf; }
+    }
+    @media (max-width: 680px) {
+      .grid { grid-template-columns: 1fr; }
+      .content { padding: 20px 12px 60px; }
+      section { padding: 23px 18px; }
+      .hero { padding: 50px 20px 78px; }
+      .app-map { display: block; }
+      nav { columns: 1; }
+    }
+    @media print {
+      body { background: white; font-size: 11pt; }
+      aside, .toolbar { display: none; }
+      .layout { display: block; }
+      .hero { padding: 30px; color: #111; background: white; border-bottom: 3px solid var(--wine); }
+      .hero p, .eyebrow, .pill { color: #333; }
+      .content { max-width: none; padding: 0; }
+      .quick { margin-top: 0; }
+      section { break-inside: avoid; box-shadow: none; border: 0; border-bottom: 1px solid #ddd; border-radius: 0; margin: 0; padding: 22px 8px; }
+      a { color: #111; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside>
+    <div class="brand"><div class="brand-mark">RH</div><div><strong>Research Helper</strong><small>使用说明书 · 0.9</small></div></div>
+    <input id="docSearch" class="search" placeholder="搜索说明书，例如：ETF、报价、导出">
+    <nav id="toc">
+      <div class="group">开始</div>
+      <a href="#overview">1. 产品能做什么</a>
+      <a href="#quickstart">2. 五分钟开始</a>
+      <a href="#setup">3. 首次设置</a>
+      <a href="#screen">4. 界面说明</a>
+      <div class="group">研究流程</div>
+      <a href="#question">5. 怎样提出问题</a>
+      <a href="#targets">6. 选择取数目标</a>
+      <a href="#normal">7. 普通研究</a>
+      <a href="#event">8. 事件驱动研究</a>
+      <a href="#materials">9. 补充材料</a>
+      <div class="group">交付</div>
+      <a href="#report">10. 报告、编辑与导出</a>
+      <a href="#optionhelper">11. 产品推荐与报价</a>
+      <a href="#history">12. 历史任务</a>
+      <a href="#trouble">13. 常见问题</a>
+      <a href="#security">14. 安全与检查</a>
+      <a href="#screenshots">15. 截图清单</a>
+    </nav>
+    <div class="aside-note">本说明书面向分析师。维护、升级、打包和 OptionHelper 迁移请查阅项目维护手册。</div>
+  </aside>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow">ANALYST USER GUIDE</div>
+      <h1>Research Helper<br>使用说明书</h1>
+      <p>从客户问题到可复核的一页通：本手册说明首次配置、研究取数、证据审核、报告编辑、产品结构推荐及正式报价的完整操作。</p>
+      <div class="hero-meta"><span class="pill">Windows / macOS</span><span class="pill">普通主题研究</span><span class="pill">事件驱动研究</span><span class="pill">OptionHelper 可选</span></div>
+      <div class="toolbar"><button onclick="window.print()">打印 / 另存为 PDF</button><button onclick="document.querySelector('#quickstart').scrollIntoView()">直接看快速开始</button></div>
+    </header>
+
+    <div class="content">
+      <div class="quick">
+        <section id="quickstart">
+          <h2>2. 五分钟开始</h2>
+          <p class="lead">第一次使用时，先完成设置，再用一个普通行业问题走通研究流程。暂时不要从复杂事件或多标的报价开始。</p>
+          <div class="steps">
+            <div class="step"><strong>打开设置并完成连接测试</strong>至少配置 DeepSeek 和 iFinD；事件搜索再配置 Tavily；需要报价时再配置 OptionHelper。</div>
+            <div class="step"><strong>输入一个明确问题</strong>例如：“分析未来一个月机器人行业的投资机会。”</div>
+            <div class="step"><strong>确认研究取数目标</strong>在标准行业、人工主题篮子和主题 ETF 中选择一条路径。</div>
+            <div class="step"><strong>审核候选论点</strong>勾选真正回答客户问题、且有数据或材料支持的 2—3 条论点。</div>
+            <div class="step"><strong>检查报告并导出</strong>预览一页通，必要时编辑文字或删除图表，再导出 PDF。</div>
+            <div class="step"><strong>需要产品时再进入报价</strong>选择挂钩标的和结构，完成 OptionHelper 正式报价；研究报告本身不依赖报价成功。</div>
+          </div>
+          <div class="callout good"><b>建议的第一次测试问题：</b>“分析未来一个月机器人行业的投资机会。”它能覆盖需求解析、目标确认、行业取数、论点审核、报告预览和历史任务。</div>
+        </section>
+      </div>
+
+      <section id="overview">
+        <h2>1. 产品能做什么</h2>
+        <p>Research Helper 是面向投研分析师的桌面应用。它把客户原始问题、市场数据、上传材料和公开证据整理为一份可复核的研究报告，并可在研究完成后接入 OptionHelper 生成场外衍生品结构候选和正式参考报价。</p>
+        <div class="flow" aria-label="完整流程图">
+          <div class="flow-node"><b>客户问题</b>主题、期限、风险偏好、点名证券</div><div class="arrow">→</div>
+          <div class="flow-node"><b>需求解析</b>研究什么、是否事件型</div><div class="arrow">→</div>
+          <div class="flow-node"><b>目标确认</b>行业 / 篮子 / ETF</div><div class="arrow">→</div>
+          <div class="flow-node"><b>取数与论点</b>行情、基本面、材料和证据</div><div class="arrow">→</div>
+          <div class="flow-node"><b>报告交付</b>预览、编辑、HTML / PDF</div><div class="arrow">→</div>
+          <div class="flow-node"><b>可选报价</b>画像、结构、正式报价</div>
+        </div>
+        <div class="grid">
+          <div class="card"><h3>适合</h3><ul><li>行业或主题未来一段时间的投资机会；</li><li>单只 ETF/指数的表现、风险和配置价值；</li><li>外部事件对 A 股行业、公司篮子或 ETF 的影响；</li><li>已有研究材料的归纳、数据验证和一页通交付；</li><li>研究完成后的挂钩标的筛选与结构报价。</li></ul></div>
+          <div class="card"><h3>不等于</h3><ul><li>自动替代分析师作出最终投资判断；</li><li>在没有数据和原文时补造事实；</li><li>把研究取数 ETF 自动当成最终产品标的；</li><li>绕过证券真实性、主题暴露、流动性或报价校验；</li><li>无需审核即可直接外发的全自动研报。</li></ul></div>
+        </div>
+        <div class="callout"><b>两个对象必须分清：</b>“研究取数目标”决定报告分析哪些数据；“挂钩标的”决定后续对哪个证券推荐产品和报价。它们可以相同，也可以不同，并且分别确认。</div>
+      </section>
+
+      <section id="setup">
+        <h2>3. 首次设置</h2>
+        <p class="lead">首次启动向导只需要填写你有权限使用的服务。没有配置的可选能力会保持不可用，不影响其它已配置功能。</p>
+        <table>
+          <thead><tr><th>能力</th><th>是否必需</th><th>作用</th><th>首次使用建议</th></tr></thead>
+          <tbody>
+            <tr><td>DeepSeek API</td><td><span class="label required">研究必需</span></td><td>需求解析、研究规划、写作和证据分类</td><td>填写 API Key，刷新模型目录，分别选择快速模型和质量模型并测试连接。</td></tr>
+            <tr><td>iFinD</td><td><span class="label required">完整取数必需</span></td><td>证券身份、行业成分、行情、基本面、ETF事实等</td><td>Windows 配置官方 SDK 与账号；macOS 使用获授权的 HTTP Refresh Token。</td></tr>
+            <tr><td>Tavily</td><td><span class="label optional">事件研究建议</span></td><td>公开网页搜索与正文清洗</td><td>填写 Key，优先选基础搜索；资料难找时再使用高级搜索。可启用 Bing RSS 兜底。</td></tr>
+            <tr><td>OptionHelper</td><td><span class="label optional">正式报价才需要</span></td><td>结构候选、定价参数和正式参考报价</td><td>只填写已经构建并验收通过的 Skill 路径和独立 Python 环境。</td></tr>
+          </tbody>
+        </table>
+        <h3>推荐设置顺序</h3>
+        <ol><li>在“LLM 设置”刷新实时模型目录，测试快速档与质量档；</li><li>在“iFinD 凭证”填写授权信息并运行环境检查；</li><li>在“搜索设置”填写 Tavily Key、语言/地区，点击测试连接；</li><li>确实需要产品报价时再配置 OptionHelper；</li><li>保存设置后重启应用，再运行环境检查。</li></ol>
+        <div class="callout warn"><b>不要截图或外发设置页面中的秘密。</b>API Key、iFinD 账号密码、Refresh Token 和内部路径都属于本机配置。说明书截图时请先遮挡。</div>
+        <div class="shot"><div class="shot-head"><span>建议截图 01</span><span>首次设置向导</span></div><div class="shot-body"><div><b>待加入真实截图</b>展示字段位置和“测试连接”，所有凭证必须打码。</div></div></div>
+      </section>
+
+      <section id="screen">
+        <h2>4. 界面说明</h2>
+        <div class="app-map" role="img" aria-label="Research Helper界面分区示意图">
+          <div class="history"><b>历史任务</b><div class="fake-input">搜索任务</div><div class="fake-run">最近运行 1</div><div class="fake-run">最近运行 2</div><div class="fake-run">更早任务</div><small>搜索 · 打开 · 重命名</small></div>
+          <div class="workspace"><b>研究工作台</b><div class="fake-input big"></div><div class="fake-line"></div><div class="fake-line"></div><div class="fake-line"></div><p>输入需求、约束、材料和事件模式，启动研究。</p></div>
+          <div class="delivery"><b>交付与内部复核</b><div class="fake-input big"></div><div class="fake-input big"></div><p>查看报告、运行摘要、底稿、报价任务和编辑入口。</p></div>
+        </div>
+        <h3>三个主要区域</h3>
+        <div class="grid three">
+          <div class="card"><div class="card-number">A</div><h4>历史任务</h4><p>搜索过去的客户问题，打开报告和底稿，或把长问题重命名为便于识别的标题。</p></div>
+          <div class="card"><div class="card-number">B</div><h4>研究工作台</h4><p>粘贴客户原始需求，填写期限与风险约束，上传材料，选择是否为事件驱动型。</p></div>
+          <div class="card"><div class="card-number">C</div><h4>交付与内部复核</h4><p>跟踪进度，预览报告，查看研究与报价状态，进入报告编辑和导出。</p></div>
+        </div>
+        <div class="shot"><div class="shot-head"><span>建议截图 02</span><span>应用主界面全景</span></div><div class="shot-body"><div><b>待加入真实截图</b>最好使用空白任务或虚构问题，避免客户信息。</div></div></div>
+      </section>
+
+      <section id="question">
+        <h2>5. 怎样提出问题</h2>
+        <p>好的问题至少说明“研究什么”。期限、关注点和点名证券会提高结果针对性，但不是所有问题都必须同时包含。</p>
+        <h3>推荐结构</h3>
+        <pre>研究对象 + 研究期限 + 想回答的问题 +（可选）点名证券/公司 +（可选）产品约束</pre>
+        <div class="question"><b>行业型：</b>分析未来一个月机器人行业的投资机会，重点关注订单、盈利和估值。</div>
+        <div class="question"><b>主题型：</b>分析未来半年锂电池与固态电池产业链，关注碳酸锂价格、技术进度和应用普及。</div>
+        <div class="question"><b>单只 ETF：</b>分析机器人ETF 562500.SH 近1个月和3个月表现、波动率、回撤、成交情况及未来一个月展望。</div>
+        <div class="question"><b>事件型：</b>英伟达新一代 AI 芯片开始放量交付，分析对 A 股光模块行业未来三个月的影响。</div>
+        <div class="question"><b>多公司篮子：</b>分析消费电子创新周期，并重点研究立讯精密、歌尔股份等客户点名公司。</div>
+        <h3>系统当前需要什么</h3>
+        <ul><li>能够识别一个研究主题、标准行业、公司篮子或主题 ETF；</li><li>证券代码使用数据源格式，例如 <code>562500.SH</code>、<code>159995.SZ</code>；</li><li>如果只写代码，最好同时写 ETF 名称或主题，避免名称查询失败时主题为空；</li><li>需要研究明确事件影响时，勾选“事件驱动型”；</li><li>客户产品约束可填写在专用栏，不必混进研究主题。</li></ul>
+        <div class="callout stop"><b>避免：</b>“帮我看看”“最近怎么样”“推荐一个产品”这类没有研究对象的句子。系统无法据此确定应该取哪个行业、哪些公司或哪只 ETF 的数据。</div>
+      </section>
+
+      <section id="targets">
+        <h2>6. 选择研究取数目标</h2>
+        <p class="lead">需求解析后，所有研究都必须经过目标确认。三条路径互斥，本次报告只能选择其中一条作为主要研究口径。</p>
+        <div class="grid three">
+          <div class="card route"><h3>标准行业</h3><p><b>数据来自：</b>iFinD 可以验证并取得成分股的行业节点。</p><p><b>适合：</b>机器人、半导体、食品饮料等行业整体研究。</p><p><b>注意：</b>主题名称不一定等于标准行业名称。</p></div>
+          <div class="card route"><h3>人工主题篮子</h3><p><b>数据来自：</b>分析师逐只勾选、完成证券身份和业务关联审核的公司。</p><p><b>适合：</b>光模块、固态电池等跨行业细分主题。</p><p><b>注意：</b>系统候选默认不代表核心公司。</p></div>
+          <div class="card route"><h3>主题 ETF</h3><p><b>数据来自：</b>ETF 官方跟踪指数的真实成分。</p><p><b>适合：</b>客户明确研究某只 ETF，或 ETF 是最清晰的主题篮子。</p><p><b>注意：</b>需要真实性、跟踪指数、主题暴露和流动性校验。</p></div>
+        </div>
+        <h3>怎么选</h3>
+        <table><thead><tr><th>客户问题</th><th>建议路径</th><th>原因</th></tr></thead><tbody>
+          <tr><td>“机器人行业未来一个月怎么样？”</td><td>标准行业或主题 ETF</td><td>若数据源有合适行业节点可按行业成分；若客户关心 ETF 表现则按 ETF 真实成分。</td></tr>
+          <tr><td>“光模块产业链机会”</td><td>人工主题篮子</td><td>光模块属于细分主题，标准行业可能过宽。</td></tr>
+          <tr><td>“分析 562500.SH 的表现”</td><td>主题 ETF</td><td>研究对象已经是具体 ETF；行情指标使用 ETF 自身，成分研究使用跟踪指数成分。</td></tr>
+          <tr><td>“锂电池和固态电池，并研究客户点名的五家公司”</td><td>人工主题篮子</td><td>只采用分析师确认的客户点名公司，ETF 留到后续报价确认。</td></tr>
+        </tbody></table>
+        <div class="callout"><b>ETF 暴露等级：</b>直接暴露可以继续；部分暴露需要分析师核对跟踪指数和主要成分、填写映射理由；不相关会停止该 ETF 路径。流动性最低要求与优选水平分别显示。</div>
+        <div class="shot"><div class="shot-head"><span>建议截图 03</span><span>确认研究市场与取数目标</span></div><div class="shot-body"><div><b>待加入真实截图</b>最好分别提供标准行业、人工篮子、主题 ETF 三种选中状态。</div></div></div>
+      </section>
+
+      <section id="normal">
+        <h2>7. 普通研究完整操作</h2>
+        <div class="steps">
+          <div class="step"><strong>粘贴客户原始问题</strong>尽量保留原文，不要先把客户问题改写成自己的结论。</div>
+          <div class="step"><strong>填写客户约束</strong>期限、最大损失、本金波动和收益偏好主要供后续产品审核使用。</div>
+          <div class="step"><strong>按需加入材料</strong>可上传 PDF 或粘贴文字，并填写来源和材料日期。</div>
+          <div class="step"><strong>启动研究并检查解析结果</strong>核对研究主题、体裁、关注点和客户点名证券。发现方向错误时应返回修改。</div>
+          <div class="step"><strong>确认取数路径</strong>选择标准行业、人工主题篮子或主题 ETF，并核对映射理由。</div>
+          <div class="step"><strong>等待取数与候选论点</strong>运行进度会显示当前阶段；外部接口较慢不等于程序卡死。</div>
+          <div class="step"><strong>勾选正文论点</strong>优先选择直接回答客户问题、有明确数据日期和来源的 2—3 条。</div>
+          <div class="step"><strong>检查一页通</strong>检查标题、结论、图表、来源、数据日期和一页校验，再决定是否进入产品报价。</div>
+        </div>
+        <div class="callout warn"><b>看到缺口时：</b>不要为了让流程通过而随便补数字。可返回调整取数目标、补充有来源的材料，或保留缺口并停止不可靠结论。</div>
+      </section>
+
+      <section id="event">
+        <h2>8. 事件驱动研究</h2>
+        <p>IPO、业绩/指引、政策、产品发布、产能变化等明确外部事件，建议勾选“按明确外部事件处理”。科技回调、风格轮动等市场状态通常使用普通研究，不必强行填写事件证据。</p>
+        <div class="flow">
+          <div class="flow-node"><b>事件事实</b>到底发生了什么</div><div class="arrow">→</div>
+          <div class="flow-node"><b>产业机制</b>供需、价格、技术或竞争格局如何变化</div><div class="arrow">→</div>
+          <div class="flow-node"><b>A股暴露</b>所选行业、公司或 ETF 为什么相关</div><div class="arrow">→</div>
+          <div class="flow-node"><b>组合传导链</b>形成可写入报告的研究逻辑</div>
+        </div>
+        <h3>操作步骤</h3>
+        <ol><li>在主界面勾选事件驱动型；</li><li>点击“管理事件证据”，可先自动查找候选；</li><li>逐条核对原文、日期、来源和对象，勾选可采用内容；</li><li>先确认研究取数目标，系统再针对本次行业、篮子或 ETF 补搜 A 股暴露；</li><li>检查组合传导链是否真正解释“为什么影响本次研究对象”；</li><li>候选论点中至少选择一条由确认事件证据支持的事件主轴。</li></ol>
+        <div class="callout stop"><b>“搜索到”不等于“证据完整”。</b>纯股价播报、走势图、搜索摘要和没有正文的网页不能代替事件事实或产业传导原文。系统不会自动采用任何候选。</div>
+        <div class="shot"><div class="shot-head"><span>建议截图 04</span><span>事件证据包与搜索进度</span></div><div class="shot-body"><div><b>待加入真实截图</b>展示事件事实、产业机制、A股暴露和勾选方式。</div></div></div>
+      </section>
+
+      <section id="materials">
+        <h2>9. 补充材料</h2>
+        <div class="grid">
+          <div class="card"><h3>上传 PDF</h3><p>适合研报、公告、访谈纪要和正式材料。系统会提取原文，保留文件名、页码和材料日期。</p></div>
+          <div class="card"><h3>粘贴文字</h3><p>适合网页摘录、客户补充说明和短材料。必须填写来源，建议同时记录发布日期或数据日期。</p></div>
+        </div>
+        <h3>材料使用原则</h3>
+        <ul><li>材料进入候选证据，不会自动覆盖市场数据；</li><li>过期、未来日期或日期不明的材料需要人工确认；</li><li>报告中的数字必须有明确口径和日期；</li><li>客户提供事实、公开原文、行情数据和系统分析要能够区分；</li><li>不要上传无权使用或不应留存在本机的材料。</li></ul>
+      </section>
+
+      <section id="report">
+        <h2>10. 报告、编辑与导出</h2>
+        <p>自动报告完成后先看“交付与报价”页。正式交付前应检查：标题是否回答客户问题、核心结论是否简洁、每张图是否有清楚标题和来源、数据日期是否明确、PDF 是否实测为一页。</p>
+        <h3>可以编辑什么</h3>
+        <div class="grid three">
+          <div class="card"><h4>文字</h4><p>报告标题、核心结论、逻辑标题、正文和图表标题。</p></div>
+          <div class="card"><h4>结构</h4><p>论点顺序、论点显隐、图表显隐和删除单张图表。</p></div>
+          <div class="card"><h4>交付</h4><p>保存修订版 HTML、重新导出 PDF、打开产物目录。</p></div>
+        </div>
+        <p>自动稿不会被直接覆盖。人工修改保存为修订版；删除图表后，剩余图表和文字会根据图形尺寸重新排版。每次导出 PDF 都会重新检查真实页数。</p>
+        <div class="callout warn"><b>一页校验失败时：</b>先精简重复文字和低价值图表，再检查字号与布局。不要通过极端缩小字体让内容勉强塞进一页。</div>
+        <div class="shot"><div class="shot-head"><span>建议截图 05</span><span>报告编辑器</span></div><div class="shot-body"><div><b>待加入真实截图</b>展示保存 HTML、导出 PDF、删除图表和打开输出文件夹。</div></div></div>
+      </section>
+
+      <section id="optionhelper">
+        <h2>11. OptionHelper 产品推荐与正式报价</h2>
+        <p class="lead">这是研究完成后的独立支线。只想生成研究报告时可以完全不进入该流程。</p>
+        <div class="flow">
+          <div class="flow-node"><b>选择待报价标的</b>客户点名或研究工具</div><div class="arrow">→</div>
+          <div class="flow-node"><b>产品画像</b>收益、波动率、回撤、流动性</div><div class="arrow">→</div>
+          <div class="flow-node"><b>结构候选</b>OptionHelper 独立推荐</div><div class="arrow">→</div>
+          <div class="flow-node"><b>人工确认</b>逐标的选择结构</div><div class="arrow">→</div>
+          <div class="flow-node"><b>正式报价</b>定价数据与条款</div><div class="arrow">→</div>
+          <div class="flow-node"><b>写入一页通</b>分析师勾选结果</div>
+        </div>
+        <h3>注意事项</h3>
+        <ul><li>系统自动发现的同主题 ETF 不会全部默认弹出；需要时点击“比较其他同主题工具”；</li><li>每只标的独立推荐，某只“无候选”不影响其它标的；</li><li>产品画像用于推荐前审核，不替代 OptionHelper 的正式定价数据；</li><li>结构候选必须由分析师确认，正式报价失败不删除已完成的研究报告；</li><li>报价完成后，由分析师选择哪些产品写入一页通，不按胜率自动筛选。</li></ul>
+        <div class="callout"><b>状态理解：</b><code>recommending</code> 表示结构推荐；<code>quoting</code> 表示正式定价；<code>finalizing</code> 表示报价已经返回，正在同步底稿、HTML 和 PDF。</div>
+        <div class="shot"><div class="shot-head"><span>建议截图 06</span><span>多标的 OptionHelper 审核</span></div><div class="shot-body"><div><b>待加入真实截图</b>展示产品画像、结构下拉框、加入报价队列和无候选状态。</div></div></div>
+      </section>
+
+      <section id="history">
+        <h2>12. 历史任务</h2>
+        <ul><li>在左侧搜索框输入主题、代码或客户问题关键词；</li><li>同一完整问题的重复运行会合并展示；</li><li>可把长问题重命名为简短标题，原始客户问题不会被修改；</li><li>打开历史任务可查看当次报告、运行摘要、底稿和交付文件；</li><li>历史报告默认只读，点击“编辑此报告”会创建独立修订版；</li><li>若最新一次运行失败但旧报告存在，界面会明确提示当前展示的是此前版本。</li></ul>
+        <div class="shot"><div class="shot-head"><span>建议截图 07</span><span>历史任务搜索与重命名</span></div><div class="shot-body"><div><b>待加入真实截图</b>使用虚构标题，避免展示客户名称。</div></div></div>
+      </section>
+
+      <section id="trouble">
+        <h2>13. 常见问题</h2>
+        <details open><summary>显示“尚未形成取数目标”</summary><div>系统没有形成可用的标准行业、公司篮子或主题 ETF。检查问题是否写明研究对象；若已输入 ETF 代码，同时补充 ETF 名称或主题。确认 iFinD 可用，并查看候选淘汰原因。</div></details>
+        <details><summary>DeepSeek 网页能用，但应用 API 失败</summary><div>网页会话和 API 是两套服务。检查 API Key、接口地址、网络权限和账号可用模型；在“LLM 设置”刷新模型目录并测试。</div></details>
+        <details><summary>事件证据只找到产业机制</summary><div>事件主体、时间或动作可能不够明确，或事件事实网页无法读取。补充公司全称、公告/业绩/发布等动作和日期；优先采用公司、交易所或监管原文。</div></details>
+        <details><summary>主题公司看起来不相关</summary><div>先看候选来源和关联等级。概念股命中只是线索；没有具体业务原文的公司不应预勾选。可补充依据、删除候选，或改用主题 ETF 真实成分。</div></details>
+        <details><summary>研究完成但没有正式报价</summary><div>检查是否勾选待报价标的、是否确认结构，以及 OptionHelper Skill、独立 Python、凭证和正式条款是否完整。报价失败不会影响研究报告。</div></details>
+        <details><summary>一直显示正在重建最终 PDF</summary><div>先查看报价任务是否已进入 <code>finalizing</code>。若长时间不结束，保存 quote id 和运行记录，重启应用后从历史任务检查研究报告是否已生成。</div></details>
+        <details><summary>安装版启动时报找不到 main.py、core 或 tool_entry</summary><div>确认使用最新版完整安装包。便携版必须完整解压，不能只复制 EXE。<code>tool_entry</code> 属于 OptionHelper Skill，需使用构建并验收后的 Skill，而不是源码仓库。</div></details>
+        <details><summary>报告超过一页</summary><div>在编辑器删除低价值图表、压缩重复论述并重新导出。以重新读取的真实 PDF 页数为准。</div></details>
+      </section>
+
+      <section id="security">
+        <h2>14. 安全与交付前检查</h2>
+        <div class="grid">
+          <div><h3>每次研究前</h3><ul class="checklist"><li>客户问题和研究期限完整</li><li>DeepSeek 与 iFinD 状态正常</li><li>事件型任务已确认搜索服务</li><li>材料具有使用权限与来源日期</li><li>需要报价时 OptionHelper 已就绪</li></ul></div>
+          <div><h3>外发报告前</h3><ul class="checklist"><li>研究对象与标题一致</li><li>数字有日期、单位和来源</li><li>结论没有内部审核术语</li><li>报告未显示内部证据编号或底稿提示</li><li>PDF 实测为一页</li><li>报价表只含分析师确认项目</li></ul></div>
+        </div>
+        <div class="callout stop"><b>不要外发：</b>内部底稿、API Key、账号密码、Refresh Token、OptionHelper memory、客户原始材料目录、调试日志和未经确认的报价候选。</div>
+      </section>
+
+      <section id="screenshots">
+        <h2>15. 需要补充的真实截图</h2>
+        <p>真实截图会显著提高说明书的可操作性。建议按下面清单提供 PNG，窗口尽量完整、分辨率不低于 1600×900。可以分批发送。</p>
+        <table><thead><tr><th>编号</th><th>截图内容</th><th>需要展示</th><th>注意事项</th></tr></thead><tbody>
+          <tr><td>01</td><td>首次设置向导</td><td>各配置项、保存/测试按钮</td><td>所有 Key、账号、Token 打码</td></tr>
+          <tr><td>02</td><td>主界面全景</td><td>历史任务、研究工作台、交付区</td><td>使用虚构客户问题</td></tr>
+          <tr><td>03A—C</td><td>取数目标确认</td><td>标准行业、人工篮子、主题 ETF 三种路径</td><td>最好使用同一个公开主题</td></tr>
+          <tr><td>04</td><td>事件证据包</td><td>三类证据、进度、勾选和保存</td><td>使用公开事件</td></tr>
+          <tr><td>05</td><td>候选论点审核</td><td>数据论点、材料论点、选择按钮</td><td>不要展示受限研报原文</td></tr>
+          <tr><td>06</td><td>报告预览和编辑器</td><td>编辑、删除图表、保存、导出</td><td>报告可用演示数据</td></tr>
+          <tr><td>07</td><td>OptionHelper 审核</td><td>产品画像、结构候选、无候选、报价队列</td><td>隐藏真实客户条款和正式价格</td></tr>
+          <tr><td>08</td><td>历史任务</td><td>搜索、重命名、历史报告入口</td><td>客户名称和问题匿名化</td></tr>
+        </tbody></table>
+        <div class="callout good"><b>最优先的四张：</b>主界面、取数目标确认、候选论点审核、报告编辑器。有这四张就能先完成第一版图文说明。</div>
+      </section>
+
+      <div class="footer">Research Helper 使用说明书 · 网页离线版 · 最后更新：2026-09-30</div>
+    </div>
+  </main>
+</div>
+<script>
+  const sections = [...document.querySelectorAll('section[id]')];
+  const links = [...document.querySelectorAll('#toc a')];
+  const search = document.querySelector('#docSearch');
+  const observer = new IntersectionObserver(entries => {
+    const visible = entries.filter(x => x.isIntersecting).sort((a,b) => b.intersectionRatio-a.intersectionRatio)[0];
+    if (!visible) return;
+    links.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + visible.target.id));
+  }, { rootMargin: '-15% 0px -72% 0px', threshold: [0, .25, .6] });
+  sections.forEach(section => observer.observe(section));
+  search.addEventListener('input', () => {
+    const query = search.value.trim().toLowerCase();
+    sections.forEach(section => section.classList.toggle('hidden-by-search', query && !section.innerText.toLowerCase().includes(query)));
+  });
+</script>
+</body>
+</html>

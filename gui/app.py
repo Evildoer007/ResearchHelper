@@ -285,7 +285,7 @@ def _load_json(path: Path) -> dict:
 
 
 class FirstRunDialog(QDialog):
-    """发布版首次启动向导；所有秘密只写入当前 Windows 用户目录。"""
+    """发布版首次启动向导；所有秘密只写入当前操作系统用户目录。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -295,7 +295,7 @@ class FirstRunDialog(QDialog):
         title = QLabel("欢迎使用 Research Helper")
         title.setProperty("kind", "section")
         intro = QLabel(
-            f"配置只保存在当前 Windows 用户目录：{DATA_ROOT}\n"
+            f"配置只保存在当前用户目录：{DATA_ROOT}\n"
             "DeepSeek 是研究生成的必需项；Tavily、iFinD 与 OptionHelper 可稍后配置，"
             "未配置的能力会在界面中保持不可用。"
         )
@@ -314,24 +314,29 @@ class FirstRunDialog(QDialog):
         self.ifind_account = QLineEdit()
         self.ifind_password = QLineEdit()
         self.ifind_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ifind_refresh_token = QLineEdit()
+        self.ifind_refresh_token.setEchoMode(QLineEdit.EchoMode.Password)
+        self.ifind_refresh_token.setPlaceholderText("macOS/Linux取数或OptionHelper报价使用")
         self.ifind_sdk = QLineEdit()
         self.ifind_sdk.setPlaceholderText("可选：iFinDPy.py 所在目录或官方 SDK 目录")
         self.option_skill = QLineEdit()
         self.option_skill.setPlaceholderText("可选：OptionHelper Skill 根目录")
         self.option_python = QLineEdit()
-        self.option_python.setPlaceholderText("可选：OptionHelper 独立环境 python.exe")
+        self.option_python.setPlaceholderText("可选：OptionHelper 独立环境 Python")
         form.addRow("DeepSeek API Key", self.deepseek_key)
         form.addRow("快速模型", self.fast_model)
         form.addRow("质量模型", self.quality_model)
         form.addRow("Tavily API Key", self.tavily_key)
         form.addRow("iFinD 账号", self.ifind_account)
         form.addRow("iFinD 密码", self.ifind_password)
+        form.addRow("iFinD Refresh Token", self.ifind_refresh_token)
         form.addRow("iFinD SDK 路径", self.ifind_sdk)
         form.addRow("OptionHelper Skill", self.option_skill)
         form.addRow("OptionHelper Python", self.option_python)
         layout.addLayout(form)
         hint = QLabel(
-            "iFinD 仍需先安装官方终端/Quant SDK；OptionHelper 必须使用通过兼容性检查的独立环境。"
+            "Windows可使用官方iFinD SDK；macOS/Linux使用官方HTTP接口与Refresh Token。"
+            "OptionHelper必须使用通过兼容性检查的独立环境。"
             "首次设置后可在应用设置中修改或测试连接。"
         )
         hint.setProperty("kind", "caption")
@@ -367,6 +372,7 @@ class FirstRunDialog(QDialog):
             "TAVILY_API_KEY": self.tavily_key.text().strip(),
             "IFIND_ACCOUNT": self.ifind_account.text().strip(),
             "IFIND_PASSWORD": self.ifind_password.text().strip(),
+            "IFIND_REFRESH_TOKEN": self.ifind_refresh_token.text().strip(),
             "IFIND_SDK_PATH": self.ifind_sdk.text().strip(),
             "OPTIONHELPER_SKILL_ROOT": self.option_skill.text().strip(),
             "OPTIONHELPER_PYTHON": self.option_python.text().strip(),
@@ -2332,7 +2338,7 @@ class SearchSettingsDialog(QDialog):
 
 
 class IFindCredentialsDialog(QDialog):
-    """管理两条彼此独立的 iFinD 凭证通道，且从不回显既有秘密。"""
+    """管理iFinD SDK、HTTP及OptionHelper凭证，且从不回显既有秘密。"""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -2347,10 +2353,9 @@ class IFindCredentialsDialog(QDialog):
         self.refresh_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.refresh_token.setPlaceholderText("已配置；留空则不修改")
         hint = QLabel(
-            "研究数据使用 iFinD 账号和密码；OptionHelper 正式报价使用独立的 Refresh Token。"
-            "三项均为本机秘密：账号/密码仅写入被 Git 忽略的 config.local.json；"
-            "Refresh Token 仅交由 OptionHelper 保存到被忽略的 .optionhelper/memory.md。"
-            "若系统环境变量已设置 IFIND_ACCOUNT/IFIND_PASSWORD，它们优先于此处配置。"
+            "Windows研究取数可使用iFinD账号、密码和官方SDK；macOS/Linux研究取数使用"
+            "官方HTTP接口与Refresh Token。Refresh Token也会在OptionHelper已配置时同步给其"
+            "凭证组件。所有字段均为本机秘密，不会进入运行日志或发布包。"
         )
         hint.setWordWrap(True)
         save, cancel = QPushButton("安全保存"), QPushButton("取消")
@@ -2359,7 +2364,7 @@ class IFindCredentialsDialog(QDialog):
         form = QFormLayout(self)
         form.addRow("研究数据 iFinD 账号", self.account)
         form.addRow("研究数据 iFinD 密码", self.password)
-        form.addRow("OptionHelper Refresh Token", self.refresh_token)
+        form.addRow("iFinD HTTP / OptionHelper Refresh Token", self.refresh_token)
         form.addRow("", hint)
         form.addRow("", ResearchHelperWindow._row(save, cancel))
 
@@ -2387,7 +2392,7 @@ class IFindCredentialsDialog(QDialog):
 
     def save(self) -> None:
         account, password, token = (self.account.text().strip(), self.password.text(), self.refresh_token.text().strip())
-        if token:
+        if token and self._optionhelper_ready():
             ok, message = self._save_refresh_token(token)
             if not ok:
                 QMessageBox.warning(self, "Refresh Token 未保存", message)
@@ -2397,12 +2402,21 @@ class IFindCredentialsDialog(QDialog):
             config["IFIND_ACCOUNT"] = account
         if password:
             config["IFIND_PASSWORD"] = password
+        if token:
+            config["IFIND_REFRESH_TOKEN"] = token
         try:
             LOCAL_CONFIG.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError as error:
             QMessageBox.warning(self, "保存失败", str(error))
             return
         self.accept()
+
+    @staticmethod
+    def _optionhelper_ready() -> bool:
+        from core import config
+
+        root = Path(config.OPTIONHELPER_SKILL_ROOT) if config.OPTIONHELPER_SKILL_ROOT else None
+        return bool(root and (root / "scripts" / "environment_check.py").is_file())
 
 
 class ThemeAssociationDialog(QDialog):
@@ -4452,7 +4466,7 @@ class ResearchHelperWindow(QMainWindow):
         self._option_error_output = ""
         process = QProcess(self)
         self._apply_run_model_environment(process)
-        apply_to_qprocess(process)
+        apply_to_qprocess(process, external_python=True)
         process.setWorkingDirectory(str(DATA_ROOT))
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         process.readyReadStandardOutput.connect(self._read_option_output)
@@ -4675,7 +4689,7 @@ class ResearchHelperWindow(QMainWindow):
                 payload[key] = job.selection_payload[key]
         process = QProcess(self)
         self._apply_run_model_environment(process)
-        apply_to_qprocess(process)
+        apply_to_qprocess(process, external_python=True)
         process.setWorkingDirectory(str(DATA_ROOT))
         process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
         process.readyReadStandardOutput.connect(self._read_option_output)

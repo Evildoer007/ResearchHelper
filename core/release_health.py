@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import platform
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -29,17 +30,24 @@ def collect() -> dict:
     ensure_user_directories()
     sdk_paths = configure_ifind_sdk()
     writable, writable_detail = _writable(USER_DATA_ROOT)
+    sdk_ready = importlib.util.find_spec("iFinDPy") is not None
+    http_ready = bool(config.IFIND_REFRESH_TOKEN)
+    data_channel = (
+        "官方SDK" if sdk_ready and config.IFIND_ACCOUNT and config.IFIND_PASSWORD
+        else "官方HTTP API" if http_ready else "未配置"
+    )
     checks = {
         "user_data_writable": {"ok": writable, "detail": writable_detail},
         "deepseek_configured": {"ok": bool(config.DEEPSEEK_API_KEY), "detail": "已配置" if config.DEEPSEEK_API_KEY else "未配置"},
         "tavily_configured": {"ok": bool(config.TAVILY_API_KEY), "detail": "已配置" if config.TAVILY_API_KEY else "未配置（可使用 Bing 兜底）"},
-        "ifind_sdk": {"ok": importlib.util.find_spec("iFinDPy") is not None, "detail": "；".join(sdk_paths) or "未发现官方 SDK"},
+        "ifind_sdk": {"ok": sdk_ready or http_ready, "detail": data_channel},
         "ifind_credentials": {"ok": config.has_ifind(), "detail": "已配置" if config.has_ifind() else "未配置"},
         "optionhelper": {"ok": config.has_optionhelper(), "detail": "已就绪" if config.has_optionhelper() else "未配置或完整性检查未通过"},
         "echarts_asset": {"ok": (RESOURCE_ROOT / "assets" / "vendor" / "echarts.min.js").is_file(), "detail": "离线交互图运行库"},
     }
     return {
         "generated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        "platform": platform.platform(),
         "python": sys.version,
         "executable": sys.executable,
         "resource_root": str(RESOURCE_ROOT),

@@ -20,10 +20,9 @@ _preview_*
 /_*.pkl
 
 # ==== 只留本地的工作文档 ====
-# 设计与论点库的问题记录属于内部工作底稿，不随代码分发。
+# 设计文档属于内部工作底稿，不随代码分发。
 # THESIS_LIBRARY.md 例外：它被 core/thesis.py 直接解析，是代码的一部分。
 DESIGN.md
-论点库说明与问题.md
 
 # ==== 第三方材料：绝不提交 ====
 # references/ 是券商研报与内部模板（含标注"内部使用"的材料），有版权与合规风险；
@@ -54,3 +53,4 @@ build/
 dist/
 *.spec
 !ResearchHelper.spec
+!ResearchHelper-macOS.spec

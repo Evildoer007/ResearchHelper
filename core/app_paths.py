@@ -2,12 +2,14 @@ r"""Research Helper 的安装资源与用户数据路径。
 
 源码运行时保持原有目录布局，避免影响开发与既有测试；PyInstaller 发布版则把
 只读程序资源与可写数据严格分开。最终用户的配置、材料、缓存、运行记录和报告
-统一写入 ``%LOCALAPPDATA%\ResearchHelper``，不向安装目录写文件。
+Windows 写入 ``%LOCALAPPDATA%\ResearchHelper``，macOS 写入
+``~/Library/Application Support/ResearchHelper``，不向安装目录写文件。
 """
 
 from __future__ import annotations
 
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -34,6 +36,20 @@ def resource_root() -> Path:
     return SOURCE_ROOT
 
 
+def platform_data_root(system: str | None = None) -> Path:
+    """返回当前平台约定的用户数据根目录，不创建目录。"""
+    current = (system or platform.system()).strip().lower()
+    if current == "windows":
+        local = str(os.environ.get("LOCALAPPDATA") or "").strip()
+        base = Path(local) if local else Path.home() / "AppData" / "Local"
+    elif current == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        xdg = str(os.environ.get("XDG_DATA_HOME") or "").strip()
+        base = Path(xdg) if xdg else Path.home() / ".local" / "share"
+    return (base / APP_NAME).resolve()
+
+
 def user_data_root() -> Path:
     """返回本机可写数据根目录。
 
@@ -44,9 +60,7 @@ def user_data_root() -> Path:
         return configured
     if not IS_FROZEN:
         return SOURCE_ROOT
-    local = str(os.environ.get("LOCALAPPDATA") or "").strip()
-    base = Path(local) if local else Path.home() / "AppData" / "Local"
-    return (base / APP_NAME).resolve()
+    return platform_data_root()
 
 
 RESOURCE_ROOT = resource_root()

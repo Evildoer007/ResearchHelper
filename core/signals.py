@@ -270,7 +270,7 @@ def _sector_snapshot_ifind(sector: str, days: int = 10) -> dict | None:
     if not prov.available():
         return None
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     # 主题名→行业名的解析统一由 universe.resolve_sector 负责（那里是成分股的唯一入口），
     # 这里只需要拿到解析结果用于口径标注。

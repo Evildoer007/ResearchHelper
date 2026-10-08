@@ -518,6 +518,10 @@ def generate_from_brief(text: str, *, pick: bool = False,
                     "code", "name", "origin", "association", "reason", "source_title", "source_url")}
                 for item in payload.get("theme_basket_candidates", [])
             ])
+            tracker.add_metadata(
+                "主题公司发现审计",
+                payload.get("theme_company_discovery_audit", []),
+            )
         while True:
             print("MARKET_CONFIRMATION_REQUIRED=" + json.dumps(payload, ensure_ascii=False), flush=True)
             line = sys.stdin.readline()

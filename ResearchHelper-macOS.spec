@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller onedir 配置；不打包任何本机凭证、材料、缓存或正式报价状态。"""
+"""PyInstaller macOS .app配置；不包含凭证、材料、缓存或报价状态。"""
 
+import os
 from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 
@@ -24,8 +25,6 @@ datas = [
     (str(root / "README.md"), "."),
     (str(root / "assets"), "assets"),
 ]
-# 冻结主进程用 RESOURCE_ROOT/core/*.py 调度 worker；独立 OptionHelper Python 使用
-# runtime_source。两份都是不含凭证/数据的兼容源码，只用于跨解释器进程边界。
 datas += py_tree("core", "core")
 datas += py_tree("core", "runtime_source/core")
 datas += py_tree("llm", "runtime_source/llm")
@@ -42,16 +41,24 @@ a = Analysis(
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
-    hooksconfig={},
+    # 只收集报告静态渲染使用的 Agg 后端。大型 Conda 环境常通过
+    # sitecustomize 注册 IDE 后端，自动发现会把无关 GUI/科学计算包拉入应用。
+    hooksconfig={"matplotlib": {"backends": ["Agg"]}},
     runtime_hooks=[],
-    # Anaconda 中 akshare/pandas 的可选发现链会把整套 Notebook、文档构建和代码
-    # 格式化工具误判为运行依赖；这些模块不参与 Research Helper 的任何交付路径。
+    # akshare、pandas 以及 Conda 的第三方 hook 会探测大量“已安装但本项目未
+    # 导入”的可选生态。明确排除它们，保证打包范围由项目需求决定，而不是由
+    # 构建机恰好安装了什么决定。
     excludes=[
         "tkinter", "pytest", "IPython", "dask", "sphinx", "docutils",
         "nbformat", "notebook", "jupyter", "jedi", "astroid", "black",
         "pylint", "yapf", "PyQt5", "PyQt6", "PySide2", "pyarrow",
         "numba", "llvmlite", "boto3", "botocore", "tables", "sqlalchemy",
         "zmq", "fsspec", "statsmodels", "patsy",
+        "tensorflow", "tensorflow_probability", "tensorboard", "keras",
+        "torch", "torchvision", "torchaudio", "pytorch_lightning",
+        "jax", "jaxlib", "cupy", "transformers",
+        "sklearn", "xgboost", "lightgbm", "catboost",
+        "shapely", "geopandas", "sympy", "cv2",
     ],
     noarchive=False,
 )
@@ -65,16 +72,28 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
-    disable_windowed_traceback=False,
+    target_arch=os.environ.get("RESEARCH_HELPER_MAC_ARCH") or None,
+    codesign_identity=os.environ.get("APPLE_CODESIGN_IDENTITY") or None,
+    entitlements_file=str(root / "packaging" / "macos" / "entitlements.plist"),
 )
 coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
     strip=False,
-    upx=True,
-    upx_exclude=[],
+    upx=False,
     name="ResearchHelper",
+)
+app = BUNDLE(
+    coll,
+    name="ResearchHelper.app",
+    bundle_identifier="com.researchhelper.desktop",
+    info_plist={
+        "CFBundleDisplayName": "Research Helper",
+        "CFBundleName": "Research Helper",
+        "NSHighResolutionCapable": True,
+        "LSMinimumSystemVersion": "12.0",
+    },
 )

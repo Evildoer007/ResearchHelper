@@ -117,7 +117,7 @@ def etf_constituents(etf_code: str, *, provider=None, use_cache: bool = True) ->
             pass
 
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     d = ths.THS_BasicData(code, "ths_tracking_index_code_fund", "")
     if not isinstance(d, dict) or d.get("errorcode") != 0 or not d.get("tables"):
@@ -255,7 +255,7 @@ def _is_real_industry(name: str, provider=None, *, min_hit: float = 0.6) -> bool
     if not prov.available():
         return False
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     try:
         d = ths.THS_iwencai(f"{name} 所属同花顺行业", "stock")
@@ -337,7 +337,7 @@ def _query_iwencai(query: str, provider=None) -> list[Leader]:
     if not prov.available():
         return []
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     d = ths.THS_iwencai(query, "stock")
     if d.get("errorcode", -1) != 0:
@@ -391,7 +391,7 @@ def _industry_chain_of_stock(name_or_code: str, provider=None) -> list[str]:
     if not prov.available():
         return []
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     try:
         d = ths.THS_iwencai(f"{name_or_code} 所属同花顺行业", "stock")

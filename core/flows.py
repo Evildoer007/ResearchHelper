@@ -26,7 +26,7 @@ def _wc_series(query: str, field_prefix: str, ty: str,
     if not prov.available():
         return []
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     for attempt in range(2):
         d = ths.THS_iwencai(query, ty)
@@ -173,7 +173,7 @@ def earnings_preannouncement(code: str, provider: DataProvider | None = None) ->
         out.error = "iFinD 不可用"
         return out
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     for attempt in range(2):
         d = ths.THS_iwencai(f"{code} 业绩预告类型 预告净利润变动幅度", "stock")

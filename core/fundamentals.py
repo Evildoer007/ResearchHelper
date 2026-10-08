@@ -278,7 +278,7 @@ def sector_institution_percentile(sector: str, *, top: int = 15, quarters: int =
         out.error = "iFinD 不可用"
         return out
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     # 由近及远列出 quarters 个季度末（报告期），每期一次批量查询
     period = ft.latest_report_period()

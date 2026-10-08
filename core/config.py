@@ -104,6 +104,12 @@ DEEPSEEK_MODEL = DEEPSEEK_QUALITY_MODEL
 # 数据源主力。注意：账户有周度取数上限，静态/慢变数据须缓存到本地（见 data_cache/）。
 IFIND_ACCOUNT = _cred("IFIND_ACCOUNT")
 IFIND_PASSWORD = _cred("IFIND_PASSWORD")
+# macOS 无本地 iFinDPy SDK，使用官方 HTTP API。Refresh Token 只保存在当前
+# 用户配置或环境变量中；短期 Access Token 仅驻留内存，不写日志或运行底稿。
+IFIND_REFRESH_TOKEN = _cred("IFIND_REFRESH_TOKEN")
+IFIND_API_BASE_URL = str(
+    _cred("IFIND_API_BASE_URL", "https://quantapi.51ifind.com/api/v1")
+).strip().rstrip("/")
 
 # ---- 公开证据检索 ----
 # Tavily 负责高质量 URL 发现及清洗正文；无 Key、调用失败或额度不足时可回退
@@ -134,8 +140,8 @@ def has_llm() -> bool:
 
 
 def has_ifind() -> bool:
-    """是否配置了 iFinD 账户。未配置时取数层回退到 akshare。"""
-    return bool(IFIND_ACCOUNT and IFIND_PASSWORD)
+    """是否配置了 SDK 账号或官方 HTTP API Refresh Token。"""
+    return bool((IFIND_ACCOUNT and IFIND_PASSWORD) or IFIND_REFRESH_TOKEN)
 
 
 # ---- OptionHelper Skill（正式参考报价）集成配置 ----

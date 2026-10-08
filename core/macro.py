@@ -97,7 +97,7 @@ def series(key: str, *, years: int = 10, use_cache: bool = True) -> list[tuple[s
     if not prov.available():
         return []
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     end = dt.date.today()
     begin = end.replace(year=end.year - years)

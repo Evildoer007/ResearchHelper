@@ -53,7 +53,7 @@ def _cache_path(sector: str) -> "config.Path":
 
 
 def _query(sector: str, months: int, prov: iFinDProvider) -> dict:
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     d = ths.THS_iwencai(
         f"{sector} 未来{months}个月限售股解禁金额 解禁日期 所属同花顺行业", "stock")

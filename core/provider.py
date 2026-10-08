@@ -20,6 +20,7 @@ import time
 from typing import Any
 
 from . import config
+from .ifind_client import client as ifind
 from .run_tracker import record_external
 
 
@@ -80,21 +81,13 @@ class iFinDProvider(DataProvider):
         self.total_data_vol = 0  # 累计消耗，监控配额
 
     def available(self) -> bool:
-        if not config.has_ifind():
-            return False
-        try:
-            import iFinDPy  # noqa: F401
-            return True
-        except Exception:
-            return False
+        return config.has_ifind() and ifind.available()
 
     def _ensure_login(self) -> None:
         """惰性登录，进程内只登一次。"""
         if self._logged_in:
             return
-        import iFinDPy as ths
-
-        ret = ths.THS_iFinDLogin(config.IFIND_ACCOUNT, config.IFIND_PASSWORD)
+        ret = ifind.THS_iFinDLogin(config.IFIND_ACCOUNT, config.IFIND_PASSWORD)
         if ret in (0, -201):  # 0=成功, -201=已登录
             self._logged_in = True
         else:
@@ -138,11 +131,9 @@ class iFinDProvider(DataProvider):
             started = time.perf_counter()
             try:
                 self._ensure_login()
-                import iFinDPy as ths
-
                 code_str = ",".join(codes)
                 ind_str = ";".join(indicators)
-                d = ths.THS_BasicData(code_str, ind_str, self._join_params(indicators, params))
+                d = ifind.THS_BasicData(code_str, ind_str, self._join_params(indicators, params))
                 if d.get("errorcode", -1) != 0:
                     error = f"errorcode={d.get('errorcode')} {d.get('errmsg')}"
                     record_external("iFinD THS_BasicData", status="failed",
@@ -174,9 +165,7 @@ class iFinDProvider(DataProvider):
             started = time.perf_counter()
             try:
                 self._ensure_login()
-                import iFinDPy as ths
-
-                d = ths.THS_HistoryQuotes(code, indicator, "", start, end)
+                d = ifind.THS_HistoryQuotes(code, indicator, "", start, end)
                 if d.get("errorcode", -1) != 0:
                     error = f"errorcode={d.get('errorcode')} {d.get('errmsg')}"
                     record_external("iFinD THS_HistoryQuotes", status="failed",
@@ -207,9 +196,7 @@ class iFinDProvider(DataProvider):
         if not self._logged_in:
             return
         try:
-            import iFinDPy as ths
-
-            logout = getattr(ths, "THS_iFinDLogout", None)
+            logout = getattr(ifind, "THS_iFinDLogout", None)
             if callable(logout):
                 logout()
         except Exception:

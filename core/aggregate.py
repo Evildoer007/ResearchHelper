@@ -219,7 +219,7 @@ def iwencai_field_sum(codes: list[str], field: str, date_yyyymmdd: str,
     if not prov.available():
         return None
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     q = " ".join(codes) + f" {date_yyyymmdd} {field}"
     for attempt in range(2):        # 网络抖动兜底，非主要防线（主要防线是上面的登录修正）
@@ -398,7 +398,7 @@ def sector_forward_pe(sector: str, *, top: int = 15, provider: DataProvider | No
         out.error = "iFinD 不可用"
         return out
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     fy1 = dt.date.today().year + 1
     q = " ".join(codes) + f" 总市值 {fy1}年预测净利润平均值"
@@ -452,7 +452,7 @@ def sector_shareholder_change(
     if not prov.available():
         return {}
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     d = ths.THS_iwencai(
         f"{sector}板块 近{months}个月大股东增减持股数 总市值 总股本 所属行业", "stock")

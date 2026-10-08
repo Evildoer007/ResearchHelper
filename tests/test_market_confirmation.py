@@ -528,10 +528,9 @@ class MarketConfirmationTests(unittest.TestCase):
         response = {"errorcode": 0, "dataVol": 1, "tables": [{"table": {
             "基金代码": ["516520.SH"], "基金简称": ["智能驾驶ETF"],
         }}]}
-        fake_ifind = SimpleNamespace(THS_iwencai=lambda *_args, **_kwargs: response)
         b = brief("汽车电子智能化投资机会", "A股", ["汽车电子"])
         b.ETF检索词 = ["汽车电子", "智能驾驶"]
-        with patch.dict(sys.modules, {"iFinDPy": fake_ifind}):
+        with patch("core.ifind_client.client.THS_iwencai", return_value=response):
             rows = market_confirmation.discover_etfs(b, provider=DiscoveryProvider())
         self.assertEqual(rows[0]["code"], "516520.SH")
         self.assertEqual(rows[0]["exposure_level"], "direct")
@@ -989,7 +988,9 @@ class MarketConfirmationTests(unittest.TestCase):
             "usage": {"total_tokens": 5},
         }
         client = DeepSeekClient()
-        with patch("llm.client.requests.post", return_value=response) as post:
+        with patch("llm.client.config.DEEPSEEK_API_KEY", "offline-test-key"), \
+                patch.object(client, "api_key", "offline-test-key"), \
+                patch("llm.client.requests.post", return_value=response) as post:
             result = client.chat_json("只输出 JSON。", "返回 JSON。", retries=0)
         self.assertTrue(result.ok, result.error)
         self.assertEqual(post.call_args.kwargs["json"]["thinking"], {"type": "disabled"})

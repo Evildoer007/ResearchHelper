@@ -19,6 +19,7 @@ _INVALID_SCOPE_RE = re.compile(r"^[\d\W_]+$")
 # 不能用 ``\b``：Python 把中文也视为 word character，故“512690.SH的”在
 # SH 与“的”之间没有词边界，用户最常见的自然语言写法会漏掉明确 ETF 代码。
 _ETF_CODE_RE = re.compile(r"(?<![0-9A-Za-z])\d{6}\.(?:SH|SZ)(?![0-9A-Za-z])", re.I)
+_A_STOCK_CODE_RE = re.compile(r"(?:00|30|60|68)\d{4}\.(?:SH|SZ)", re.I)
 _COMMODITY_RE = re.compile(r"黄金|白银|原油|贵金属|商品|铜|豆粕|农产品", re.I)
 # 问财会返回数百乃至上千条“相关基金”。动态发现只需为人工确认页补足少数候选，
 # 绝不能为每一条结果发一次 iFinD 基础数据请求，否则确认页会在报告开始前假死数分钟。
@@ -386,7 +387,7 @@ def discover_etfs(brief, *, provider: DataProvider | None = None, limit: int = 8
         return []
     try:
         provider._ensure_login()
-        import iFinDPy as ths
+        from .ifind_client import client as ths
     except Exception:
         _discovery_audit(brief, "provider", "failed", "iFinD 登录或接口加载失败")
         return []
@@ -631,6 +632,124 @@ def discover_theme_companies(brief, *, provider: DataProvider | None = None,
     return out
 
 
+def discover_llm_theme_companies(brief, *, provider: DataProvider | None = None,
+                                 limit: int = _THEME_BASKET_MAX) -> list[dict]:
+    """Use LLM-planned, source-bound web retrieval as the primary lead source.
+
+    The model never supplies a trusted security identity. Every retained name
+    must occur in retrieved text, then resolve to an A-share code through
+    iFinD and pass a final official-name check. iFinD concept search remains a
+    separate recall fallback in :func:`_theme_basket_candidates`.
+    """
+    from .provider import iFinDProvider
+    from .evidence_discovery import SearchHit, build_searcher
+    from .theme_company_evidence import (
+        assess_company_hits, extract_company_leads, plan_theme_company_search,
+    )
+
+    provider = provider or get_provider()
+    theme = _proposed_theme(brief)
+    audit: list[dict] = []
+    setattr(brief, "_theme_company_discovery_audit", audit)
+    if not theme or not isinstance(provider, iFinDProvider) or not provider.available():
+        audit.append({"stage": "identity", "status": "skipped",
+                      "reason": "LLM 公司发现需要可用的 iFinD 证券身份校验"})
+        return []
+
+    plans, plan_warnings = plan_theme_company_search(theme)
+    audit.extend({"stage": "planning", "status": "warning", "reason": item}
+                 for item in plan_warnings)
+    searcher = build_searcher()
+    materials: list[dict] = []
+    for plan in plans[:6]:
+        query = str(plan.get("query") or "").strip()
+        if not query:
+            continue
+        hits = searcher(query, limit=4)
+        diagnostics = searcher.take_diagnostics()
+        audit.extend({"stage": "search", "status": "completed" if row.get("ok") else "failed",
+                      "segment": plan.get("segment", ""), **row} for row in diagnostics)
+        for hit in hits:
+            text = str(hit.raw_content or hit.summary or "").strip()
+            if not text:
+                continue
+            materials.append({
+                "segment": plan.get("segment", ""), "query": query,
+                "title": hit.title, "url": hit.url, "text": text,
+            })
+    leads, extract_warnings = extract_company_leads(theme, materials, limit=min(limit, 15))
+    audit.extend({"stage": "extraction", "status": "warning", "reason": item}
+                 for item in extract_warnings)
+    if not leads:
+        audit.append({"stage": "extraction", "status": "empty",
+                      "reason": "公开资料中未形成通过逐字校验的公司线索"})
+        return []
+
+    resolved: list[tuple[dict, str]] = []
+    for lead in leads:
+        code = _normalize_code(lead.get("code"))
+        name = str(lead.get("name") or "").strip()
+        if not _A_STOCK_CODE_RE.fullmatch(code):
+            code = ""
+            try:
+                matches = universe._query_iwencai(f'"{name}" 股票代码 股票简称', provider)
+            except Exception:
+                matches = []
+            normalized_name = re.sub(r"\s+", "", name).lower()
+            exact = next((item for item in matches
+                          if re.sub(r"\s+", "", str(item.简称 or "")).lower() == normalized_name), None)
+            if exact is not None:
+                code = _normalize_code(exact.代码)
+        if _A_STOCK_CODE_RE.fullmatch(code):
+            resolved.append((lead, code))
+        else:
+            audit.append({"stage": "identity", "status": "rejected", "company": name,
+                          "reason": "无法把检索原文中的公司名称唯一解析为 A 股代码"})
+    if not resolved:
+        return []
+
+    codes = list(dict.fromkeys(code for _lead, code in resolved))
+    basic = provider.get_basic(codes, ["ths_stock_short_name_stock"])
+    if not getattr(basic, "ok", False):
+        audit.append({"stage": "identity", "status": "failed", "reason": "iFinD 简称核验失败"})
+        return []
+    output: list[dict] = []
+    seen: set[str] = set()
+    for lead, code in resolved:
+        if code in seen or universe._is_fund(code):
+            continue
+        actual_name = str(_first_value(basic, code, "ths_stock_short_name_stock") or "").strip()
+        lead_name = str(lead.get("name") or "").strip()
+        left = re.sub(r"\s+", "", actual_name).lower()
+        right = re.sub(r"\s+", "", lead_name).lower()
+        if not actual_name or not (left == right or left in right or right in left):
+            audit.append({"stage": "identity", "status": "rejected", "company": lead_name,
+                          "code": code, "reason": f"官方简称「{actual_name or '—'}」与检索公司名不符"})
+            continue
+        hit = SearchHit(
+            title=str(lead.get("source_title") or ""), url=str(lead.get("source_url") or ""),
+            raw_content=str(lead.get("reason") or ""), provider="LLM source-bound retrieval",
+        )
+        evidence = assess_company_hits(theme, actual_name, [hit])
+        if evidence["association"] == "unverified":
+            evidence = {
+                "association": "concept_only", "reason": str(lead.get("reason") or ""),
+                "source_title": str(lead.get("source_title") or ""),
+                "source_url": str(lead.get("source_url") or ""),
+            }
+        output.append({
+            "code": code, "name": actual_name, "origin": "LLM 产业链检索",
+            "note": "LLM 按产业环节检索并从原文抽取；证券身份已由 iFinD 核验",
+            "segment": str(lead.get("segment") or ""), "core": False, **evidence,
+        })
+        audit.append({"stage": "identity", "status": "completed", "company": actual_name,
+                      "code": code, "segment": lead.get("segment", "")})
+        seen.add(code)
+        if len(output) >= limit:
+            break
+    return output
+
+
 def _enrich_theme_company_evidence(candidates: list[dict], theme: str,
                                    provider: DataProvider | None) -> list[dict]:
     """Check a bounded set of system candidates against source-linked passages.
@@ -648,7 +767,7 @@ def _enrich_theme_company_evidence(candidates: list[dict], theme: str,
     searcher = build_searcher()
     checked = 0
     for candidate in candidates:
-        if candidate.get("association") == "client_named":
+        if candidate.get("association") in {"client_named", "direct", "indirect"}:
             continue
         if checked >= 8:  # confirmation must not issue 20 serial remote requests
             candidate["note"] += "；自动关联检索限额已达，请分析师补充依据"
@@ -700,6 +819,15 @@ def _theme_basket_candidates(brief, *, provider: DataProvider | None = None) -> 
     # 伪装成主题核心样本；但上面的“客户点名”样本必须保留。
     if not proposed_theme or not proposed_scope or proposed_theme in scope_parts:
         return out
+    # 主入口：LLM 先拆产业环节，再从公开原文中抽取确实出现的公司；证券身份
+    # 仍由 iFinD 验证。LLM 不能凭记忆列名单，也不能直接生成可采用候选。
+    for item in discover_llm_theme_companies(brief, provider=provider):
+        code = str(item.get("code") or "").upper()
+        if code and code not in known:
+            out.append(item)
+            known.add(code)
+
+    # 解析器建议作为次级线索；它没有原文时不得抢在检索证据候选之前。
     for item in (getattr(brief, "候选标的", []) or []):
         code = str(getattr(item, "代码", "") or "").upper()
         if not code or not getattr(item, "可用", False) or universe._is_fund(code) or code in known:
@@ -710,10 +838,11 @@ def _theme_basket_candidates(brief, *, provider: DataProvider | None = None) -> 
                     "source_title": "", "source_url": "", "core": False})
         known.add(code)
 
-    # 只有细分主题与映射行业不同才扩展。例如“光模块→通信设备”；普通“证券→证券”
-    # 继续用行业整体法，不额外伪造一套主题公司池。
-    if proposed_theme and proposed_scope and proposed_theme != proposed_scope:
-        for item in discover_theme_companies(brief, provider=provider):
+    # iFinD“XX概念股”只作补漏，不再是主候选来源；仅填补 LLM 证据检索没有覆盖
+    # 的代码，概念命中本身仍不是业务关联证据。
+    if proposed_theme and proposed_scope and proposed_theme != proposed_scope and len(out) < _THEME_BASKET_MAX:
+        for item in discover_theme_companies(brief, provider=provider,
+                                             limit=_THEME_BASKET_MAX - len(out)):
             code = str(item.get("code") or "").upper()
             if code and code not in known:
                 out.append(item)
@@ -831,6 +960,9 @@ def proposal(brief, *, provider: DataProvider | None = None) -> dict:
         "proposed_sectors": sectors,
         "proposed_industries": parts,
         "theme_basket_candidates": basket_candidates,
+        "theme_company_discovery_audit": list(
+            getattr(brief, "_theme_company_discovery_audit", []) or []
+        ),
         "theme_basket_min": _THEME_BASKET_MIN,
         "theme_basket_max": _THEME_BASKET_MAX,
         # 三条路径互斥：有需人工确认的细分主题公司时走主题篮子；主题本身就是

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import site
 import sys
 from pathlib import Path
@@ -25,6 +26,8 @@ def _config_sdk_path() -> str:
 
 
 def _pth_candidates() -> list[Path]:
+    if platform.system() != "Windows":
+        return []
     home = Path.home()
     roots = [
         home / "anaconda3" / "Lib" / "site-packages",

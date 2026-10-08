@@ -42,7 +42,7 @@ class Filing:
 
 def _query_latest(code: str, provider=None) -> list[Filing]:
     """查某标的最新公告。провайдер 保留位供未来切换，当前直连 iFinD。"""
-    from iFinDPy import THS_iwencai
+    from .ifind_client import client as ths
 
     from .provider import iFinDProvider
 
@@ -51,7 +51,7 @@ def _query_latest(code: str, provider=None) -> list[Filing]:
         return []
     prov._ensure_login()
 
-    r = THS_iwencai(f"{code} 最新公告标题", "stock")
+    r = ths.THS_iwencai(f"{code} 最新公告标题", "stock")
     if r.get("errorcode") != 0:
         return []
     tables = r.get("tables") or []

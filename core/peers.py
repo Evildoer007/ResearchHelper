@@ -60,7 +60,7 @@ def sector_industry(sector: str, provider: DataProvider | None = None) -> str:
     if not prov.available():
         return ""
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     d = ths.THS_iwencai(f"{leaders[0].简称} 所属同花顺行业", "stock")
     if d.get("errorcode", -1) != 0:
@@ -82,7 +82,7 @@ def _industry_rows(level_name: str, provider: DataProvider | None = None) -> lis
     if not prov.available():
         return []
     prov._ensure_login()
-    import iFinDPy as ths
+    from .ifind_client import client as ths
 
     d = ths.THS_iwencai(f"{level_name} 成分股 所属同花顺行业", "stock")
     if d.get("errorcode", -1) != 0:

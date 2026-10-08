@@ -10,7 +10,9 @@ from core.brief import Brief, TargetRef
 from core.evidence_discovery import SearchHit
 from core.market_confirmation import Confirmation, proposal, verify
 from core.provider import FetchResult
-from core.theme_company_evidence import assess_company_hits
+from core.theme_company_evidence import (
+    assess_company_hits, extract_company_leads, plan_theme_company_search,
+)
 
 
 class Provider:
@@ -67,6 +69,66 @@ def test_industry_background_in_company_filing_is_not_its_business_proof():
     hit = _hit("https://static.cninfo.com.cn/a.pdf",
                "人形机器人行业产品需求增长较快，产业链上下游持续扩张。")
     assert assess_company_hits("人形机器人", "潍柴动力", [hit])["association"] == "unverified"
+
+
+class FakeLlm:
+    def __init__(self, data):
+        self.data = data
+
+    def available(self):
+        return True
+
+    def chat_json(self, *_args, **_kwargs):
+        return type("Result", (), {"ok": True, "data": self.data, "error": ""})()
+
+
+def test_llm_plans_industry_segments_without_naming_companies():
+    plans, warnings = plan_theme_company_search("人形机器人", FakeLlm({"segments": [
+        {"segment": "行星滚柱丝杠", "keywords": ["丝杠"], "query": "行星滚柱丝杠 产品"},
+        {"segment": "执行器", "keywords": ["执行器"], "query": "执行器 A股 年报"},
+    ]}))
+    assert not warnings
+    assert plans[0]["segment"] == "行星滚柱丝杠"
+    assert "A股" in plans[0]["query"]
+    assert "年报" in plans[1]["query"]
+
+
+def test_llm_company_extraction_requires_name_and_verbatim_quote_in_source():
+    materials = [{
+        "segment": "执行器", "title": "三花智控公告", "url": "https://example.com/a",
+        "text": "三花智控已开展人形机器人执行器产品研发，相关项目处于客户验证阶段。",
+    }]
+    leads, warnings = extract_company_leads("人形机器人", materials, FakeLlm({"companies": [
+        {"company_name": "三花智控", "code": "002050.SZ", "segment": "执行器",
+         "source_id": "S1", "evidence_quote": "三花智控已开展人形机器人执行器产品研发，相关项目处于客户验证阶段。"},
+        {"company_name": "无关公司", "code": "000001.SZ", "segment": "执行器",
+         "source_id": "S1", "evidence_quote": "无关公司从事机器人业务。"},
+    ]}))
+    assert len(leads) == 1
+    assert leads[0]["name"] == "三花智控"
+    # Code is removed because it was not present in the supplied source. The
+    # caller must resolve it through iFinD rather than trust model memory.
+    assert leads[0]["code"] == ""
+    assert any("逐字原文校验" in item for item in warnings)
+
+
+def test_llm_retrieval_precedes_parser_and_ifind_concept_fallback():
+    brief = Brief(原始需求="人形机器人", 主题="人形机器人", 市场范围="A股",
+                  涉及板块=["自动化设备"], ok=True)
+    brief.候选标的 = [TargetRef("潍柴动力", "000338.SZ", "ok:潍柴动力")]
+    llm = {"code": "002050.SZ", "name": "三花智控", "origin": "LLM 产业链检索",
+           "association": "direct", "reason": "公司披露人形机器人执行器业务",
+           "source_title": "公告", "source_url": "https://example.com/a"}
+    concept = {"code": "000333.SZ", "name": "美的集团", "origin": "iFinD 动态主题发现",
+               "association": "concept_only", "reason": "概念命中", "source_title": "问财", "source_url": ""}
+    with patch("core.market_confirmation.discover_llm_theme_companies", return_value=[llm]), \
+         patch("core.market_confirmation.discover_theme_companies", return_value=[concept]), \
+         patch("core.market_confirmation._suggestions", return_value=[]), \
+         patch("core.universe.validate_industries", return_value=([], ["自动化设备"])):
+        payload = proposal(brief, provider=Provider())
+    candidates = payload["theme_basket_candidates"]
+    assert [item["code"] for item in candidates[:3]] == ["002050.SZ", "000333.SZ", "000338.SZ"]
+    assert candidates[0]["origin"] == "LLM 产业链检索"
 
 
 def test_parser_suggestion_is_not_core_and_etf_is_preferred_to_unverified_basket():

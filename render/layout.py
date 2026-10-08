@@ -285,9 +285,11 @@ def _html_evidence_flow(spec: dict, pts: list) -> str | None:
     if len(nodes) < 2:
         return None
     ttl = f'<div class="c-title">{_esc(spec.get("标题", ""))}</div>' if spec.get("标题") else ""
+    connector = '<div class="ef-link" aria-hidden="true">↓</div>'
+    flow_nodes = connector.join(nodes)
     return (
         f'<div class="htmlchart htmlchart--flow">{ttl}'
-        f'<div class="evidence-flow">{"<div class=\"ef-link\" aria-hidden=\"true\">↓</div>".join(nodes)}</div>'
+        f'<div class="evidence-flow">{flow_nodes}</div>'
         '</div>'
     )
 
