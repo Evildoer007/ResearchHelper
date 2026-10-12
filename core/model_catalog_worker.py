@@ -26,17 +26,18 @@ def main() -> int:
     try:
         payload = json.loads(sys.stdin.read() or "{}")
         key = str(payload.get("api_key") or config.DEEPSEEK_API_KEY)
+        base_url = str(payload.get("base_url") or config.DEEPSEEK_BASE_URL).strip().rstrip("/")
         with no_proxy():
             catalog = fetch_model_catalog(
                 api_key=key,
-                base_url=config.DEEPSEEK_BASE_URL,
+                base_url=base_url,
                 cache_path=config.DEEPSEEK_MODEL_CACHE,
             )
             result = catalog.payload()
             if payload.get("action") == "test" and catalog.ok:
                 result["test"] = test_chat_model(
                     api_key=key,
-                    base_url=config.DEEPSEEK_BASE_URL,
+                    base_url=base_url,
                     model=str(payload.get("model") or ""),
                 )
     except Exception as error:  # noqa: BLE001

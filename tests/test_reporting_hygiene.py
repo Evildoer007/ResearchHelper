@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from core.writer import (_normalise_chart_specs, _public_text, _parse, write,
+from core.writer import (_deduplicate_chart_data, _normalise_chart_specs, _public_text, _parse, write,
                          LogicContent, ReportContent)
 from render.layout import _footer_block
 
@@ -87,6 +87,22 @@ class ReportingHygieneTests(unittest.TestCase):
         )]
         _normalise_chart_specs(ma, rc)
         self.assertEqual(rc.logics[0].图表规格列表[0]["数据截至"], "2026-09-15")
+
+    def test_same_dataset_is_not_repeated_across_logics(self) -> None:
+        points = [{"标签": "甲", "值": "10%"}, {"标签": "乙", "值": "5%"}]
+        rc = ReportContent(主题="测试", 类型="板块")
+        rc.logics = [
+            LogicContent(逻辑id="a", 论述="", 结论="", 图表规格列表=[
+                {"类型": "bar", "标题": "涨跌幅", "数据点": points},
+            ]),
+            LogicContent(逻辑id="b", 论述="", 结论="", 图表规格列表=[
+                {"类型": "lollipop", "标题": "另一种展示", "数据点": points},
+            ]),
+        ]
+        _deduplicate_chart_data(rc)
+        self.assertEqual(len(rc.logics[0].图表规格列表), 1)
+        self.assertEqual(rc.logics[1].图表规格列表, [])
+        self.assertIn("重复数据图", rc.内部审核备注[0])
 
 
 if __name__ == "__main__":

@@ -96,6 +96,24 @@ class MarketConfirmationTests(unittest.TestCase):
         self.assertEqual(payload["verified_scope_options"], ["消费电子"])
         self.assertEqual(payload["recommended_research_mode"], "industry")
 
+    def test_robot_and_wind_offer_verified_standard_industry_routes(self) -> None:
+        from core.market_confirmation import _scope_options
+
+        robot = brief("机器人板块怎么样", "A股", ["机器人"])
+        wind = brief("风电行业怎么样", "A股", ["风电"])
+        self.assertEqual(_scope_options(robot, "机器人")[:2], ["自动化设备", "机械设备"])
+        self.assertEqual(_scope_options(wind, "风电")[:2], ["风电设备", "电力设备"])
+
+    def test_broker_synonyms_are_direct_exposure_and_wind_broad_etf_is_partial(self) -> None:
+        broker = instruments.Instrument(
+            "159842.SZ", "证券ETF", "银华中证全指证券公司ETF", "行业ETF",
+        )
+        wind = instruments.Instrument(
+            "516000.SH", "新能源ETF", "华夏中证新能源ETF", "行业ETF",
+        )
+        self.assertEqual(assess_exposure("券商", broker, official_name=broker.官方名).level, "direct")
+        self.assertEqual(assess_exposure("风电", wind, official_name=wind.官方名).level, "partial")
+
     def test_all_research_requires_confirmation_regardless_of_risk(self) -> None:
         for raw, market, sectors in [
             ("机器人行业怎么样", "A股", ["自动化设备"]),

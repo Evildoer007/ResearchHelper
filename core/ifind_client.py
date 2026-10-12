@@ -16,6 +16,7 @@ from typing import Any
 import requests
 
 from . import config
+from .sdk_bootstrap import ifind_sdk_import_context
 
 
 def _parts(value: str, separator: str = ";") -> list[str]:
@@ -73,7 +74,10 @@ class IFindClient:
 
     @staticmethod
     def _sdk():
-        import iFinDPy  # type: ignore
+        # 旧版 Windows SDK 会在模块导入阶段通过 sysconfig 定位
+        # iFinDPy.pth；冻结程序必须临时恢复真实 purelib 位置。
+        with ifind_sdk_import_context():
+            import iFinDPy  # type: ignore
 
         return iFinDPy
 

@@ -64,7 +64,7 @@ def test_per_quote_diagnostic_keeps_structure_elapsed_error_without_selection(tm
     assert saved["worker_duration_seconds"] == 180.02
     assert saved["failure_reason"] == "timeout"
     assert saved["last_worker_stage"] == "[OptionHelper/pricing/running]"
-    assert saved["pricing"]["path_count"] == 100_000
+    assert saved["pricing"]["path_count"] == 10_000
     assert "private market prompt" not in path.read_text(encoding="utf-8")
     assert "private selection rationale" not in path.read_text(encoding="utf-8")
 

@@ -8,6 +8,7 @@ GUI 的 Qt 定时器只能在事件循环可调度时生效；若 Qt/子进程�
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,7 +16,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WORKER = ROOT / "core" / "optionhelper_quote_worker.py"
-TIMEOUT_SECONDS = 180
+def _timeout_seconds() -> int:
+    """正式报价允许较长计算，但仍保留进程级安全上限。"""
+    try:
+        value = int(os.environ.get("RESEARCH_HELPER_QUOTE_TIMEOUT_SECONDS", "900"))
+    except (TypeError, ValueError):
+        value = 900
+    return max(180, min(value, 3600))
+
+
+TIMEOUT_SECONDS = _timeout_seconds()
 
 
 def main() -> None:
@@ -46,7 +56,8 @@ def main() -> None:
             "timeout_seconds": TIMEOUT_SECONDS,
             "message": (
                 f"OptionHelper 正式报价超过 {TIMEOUT_SECONDS} 秒已停止；"
-                "请检查 iFinD 凭证、网络或 OptionHelper 运行日志后重试。"
+                "复杂结构在 10,000 条模拟路径下仍可能耗时较长；"
+                "请检查 iFinD、网络和本笔报价诊断后重试。"
             ),
         }
         sys.stdout.write(json.dumps(response, ensure_ascii=False))

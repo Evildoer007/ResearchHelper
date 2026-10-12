@@ -22,6 +22,8 @@ datas = [
     (str(root / "underlying_map.json"), "."),
     (str(root / "VERSION"), "."),
     (str(root / "README.md"), "."),
+    (str(root / "docs" / "user-guide.html"), "docs"),
+    (str(root / "docs" / "images"), "docs/images"),
     (str(root / "assets"), "assets"),
 ]
 # 冻结主进程用 RESOURCE_ROOT/core/*.py 调度 worker；独立 OptionHelper Python 使用
@@ -52,6 +54,9 @@ a = Analysis(
         "pylint", "yapf", "PyQt5", "PyQt6", "PySide2", "pyarrow",
         "numba", "llvmlite", "boto3", "botocore", "tables", "sqlalchemy",
         "zmq", "fsspec", "statsmodels", "patsy",
+        # iFinD 是终端用户单独安装的专有 SDK。发布包只提供发现与兼容层，
+        # 运行时从用户配置的 SDK 目录导入，不能把构建机副本冻结进程序。
+        "iFinDPy", "iFinDSubPy",
     ],
     noarchive=False,
 )

@@ -1,0 +1,8 @@
+interface:
+  display_name: "Research Helper"
+  short_description: "可审计的投研取数、证据整理与报告生成"
+  brand_color: "#8F8F94"
+  default_prompt: "Use $research-helper as a guided workflow: continue automatically between steps, and at each analyst checkpoint ask one concrete question with a recommended answer."
+
+policy:
+  allow_implicit_invocation: true

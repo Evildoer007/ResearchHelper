@@ -523,56 +523,19 @@ def _selection_section(ma) -> list[str]:
 
 def delivery_check_markdown(ma, rc, oh_result=None, *, pdf_pages: int | None = None,
                             pdf_error: str = "", layout_audit: dict | None = None) -> str:
-    """真实 PDF 页数后的交付判定，供运行结束时追加到内部底稿。
-
-    估算版面只用于预警；只有 PDF 实测页数能决定一页通是否允许作为正式客户交付。
-    此处不尝试偷偷删除正文、图表或冻结报价表——压缩哪些内容必须由分析师复核决定。
-    """
-    lines = ["---", "", "## 八、一页通正式交付校验", ""]
+    """记录 PDF 导出状态与实际页数，不以页数阻断交付。"""
+    lines = ["---", "", "## 八、PDF 导出记录", ""]
     if pdf_error:
-        lines += ["- **状态：未通过（未取得可校验 PDF）**",
+        lines += ["- **状态：PDF 未导出**",
                   f"- 导出错误：{pdf_error}",
-                  "- 处理：检查 QtWebEngine/Chromium 后以同一份 HTML 重新导出 PDF；"
-                  "在实测为 1 页前，不得作为正式一页通发出。", ""]
+                  "- 处理：检查 QtWebEngine/Chromium 后以同一份 HTML 重新导出 PDF。", ""]
         return "\n".join(lines)
     if pdf_pages is None:
-        lines += ["- **状态：未校验**",
-                  "- 本次没有导出 PDF，HTML 预览不能证明其为单页。",
-                  "- 处理：用 `--pdf` 或桌面端“导出 PDF 并校验一页”重跑；"
-                  "在实测为 1 页前，仅可作内部草稿。", ""]
+        lines += ["- **状态：本次未导出 PDF**",
+                  "- HTML 报告已保留，可在桌面端或命令行按需导出。", ""]
         return "\n".join(lines)
-    if pdf_pages == 1:
-        lines += ["- **状态：通过**",
-                  "- 真实 PDF 页数：**1 页**。可作为正式一页通交付（仍需按常规流程复核内容与报价）。", ""]
-        return "\n".join(lines)
-
-    logics = _rendered_logics(ma, rc)
-    chart_counts = sorted(((len(item.图表规格列表 or []), item.逻辑id) for item in logics), reverse=True)
-    body_counts = sorted(((len(item.论述 or ""), item.逻辑id) for item in logics), reverse=True)
-    lines += [f"- **状态：不通过（禁止正式交付）**",
-              f"- 真实 PDF 页数：**{pdf_pages} 页**；一页通的硬约束为 1 页。",
-              "- 处理建议（改完后必须重新导出并实测）："]
-    overflow = (layout_audit or {}).get("overflow") or []
-    labels = []
-    for item in overflow:
-        if isinstance(item, dict) and str(item.get("label") or "").strip():
-            label = str(item["label"]).strip()
-            if label not in labels:
-                labels.append(label)
-    if labels:
-        lines.append("  - 渲染定位（仅辅助定位，以 PDF 页数为准）：第 1 页后溢出的区块为 "
-                     + "、".join(f"`{label}`" for label in labels[:5]) + "。")
-    if chart_counts and chart_counts[0][0]:
-        count, logic_id = chart_counts[0]
-        lines.append(f"  1. 优先复核 `{logic_id}` 的 {count} 张图；删减一张独占行图通常最有效。")
-    if body_counts and body_counts[0][0]:
-        count, logic_id = body_counts[0]
-        lines.append(f"  2. 压缩最长正文 `{logic_id}`（当前 {count} 字），保留可证伪依据与结论。")
-    if len(rc.核心结论 or ""):
-        lines.append(f"  3. 压缩核心结论（当前 {len(rc.核心结论)} 字），避免重复正文。")
-    if oh_result is not None and getattr(oh_result, "ok", False):
-        lines.append("  4. 正式报价表是已冻结交付事实，优先压缩研究正文/图表，不得在此处擅自删改报价行。")
-    lines.append("")
+    lines += ["- **状态：已导出**",
+              f"- 真实 PDF 页数：**{pdf_pages} 页**。当前报告不设单页限制，按实际内容自然分页。", ""]
     return "\n".join(lines)
 
 

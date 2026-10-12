@@ -24,7 +24,7 @@
         ↓
 标的产品画像 → OptionHelper 推荐 → 人工确认 → 正式报价
         ↓
-选择报价写入一页通并重新校验交付文件
+选择报价写入策略报告并重新导出交付文件
 ```
 
 ### 1.2 目录与职责
@@ -32,7 +32,7 @@
 | 路径 | 职责 | 常见维护任务 |
 |---|---|---|
 | `main.py` | 命令行入口、端到端编排、运行底稿元数据 | 调整阶段顺序、确认协议、底稿留痕 |
-| `gui/` | PySide6 桌面端、历史任务、报告编辑器 | 调整交互、对话框、任务状态、编辑功能 |
+| `gui/` | PySide6 桌面端、统一设置、历史任务、报告编辑器 | 调整交互、对话框、任务状态、编辑功能 |
 | `core/brief.py` | 客户需求结构化解析 | 增加需求字段、修正主题或事件识别 |
 | `core/market_confirmation.py` | 市场、取数路径、主题篮子及 ETF 校验 | 调整研究路径、候选发现、暴露规则 |
 | `core/theme_company_evidence.py` | 主题公司检索规划、原文约束和关联分级 | 调整公司候选证据逻辑 |
@@ -41,12 +41,14 @@
 | `core/evidence_discovery.py` | Tavily/Bing 检索、正文读取和事件证据发现 | 调整搜索策略、实体消歧、来源过滤 |
 | `core/thesis.py`、`THESIS_LIBRARY.md` | 论点定义、触发条件和字段依赖 | 新增或修改研究论点 |
 | `core/writer.py` | 报告文字生成及写作约束 | 调整客户版表达和论证结构 |
-| `render/` | 图表、HTML、PDF、版式和交付渲染 | 新增图型、改配色、修复一页布局 |
+| `render/` | 图表、HTML、PDF、版式和交付渲染 | 新增图型、改配色、修复自适应与分页布局 |
 | `core/report_edits.py`、`gui/report_editor.py` | 结构化人工修订 | 增加可编辑字段或图表操作 |
 | `core/product_profile.py` | 报价前标的产品画像 | 调整结构推荐前的市场事实输入 |
 | `core/optionhelper_*` | OptionHelper 推荐、报价、兼容和诊断 | 协议适配、超时、报价错误排查 |
 | `core/run_tracker.py` | 运行阶段、外部调用、产物和恢复建议 | 增加可观测性和故障留痕 |
 | `tools/` | 发布、OptionHelper 检查、迁移和 smoke 工具 | 构建、升级、激活、回退 |
+| `docs/user-guide.html`、`docs/images/` | 应用内置用户说明及配图 | 操作变化后更新说明和脱敏截图 |
+| `skills/research-helper/` | 独立 Codex Skill 源码、运行时快照和发布包 | 同步研究逻辑、更新 Skill 版本、重新构建 ZIP |
 | `tests/` | 自动化回归 | 所有逻辑修改必须补充或更新测试 |
 
 ### 1.3 三类运行环境
@@ -98,7 +100,7 @@ Research Helper 的测试与构建使用开发环境解释器；OptionHelper 任
 |---|---|---|
 | LLM | `DEEPSEEK_API_KEY`、`DEEPSEEK_FAST_MODEL`、`DEEPSEEK_QUALITY_MODEL`、`DEEPSEEK_FALLBACK_MODEL`、`DEEPSEEK_BASE_URL` | 模型 ID 必须以实时 `/models` 目录为准 |
 | 搜索 | `TAVILY_API_KEY`、`SEARCH_PROVIDER`、`SEARCH_DEPTH`、`SEARCH_COUNTRY`、`SEARCH_LANGUAGE`、`SEARCH_BING_FALLBACK` | 高级搜索消耗更多额度；Bing 仅是低成本兜底 |
-| 研究数据 | `IFIND_ACCOUNT`、`IFIND_PASSWORD`、`IFIND_SDK_PATH` | iFinD 官方 SDK 不随发布包分发 |
+| 研究数据 | `IFIND_ACCOUNT`、`IFIND_PASSWORD`、`IFIND_SDK_PATH`、`IFIND_REFRESH_TOKEN`、`IFIND_API_BASE_URL` | Windows 优先使用官方 SDK；macOS/Linux 使用官方 HTTP API；SDK 不随发布包分发 |
 | OptionHelper | `OPTIONHELPER_SKILL_ROOT`、`OPTIONHELPER_PYTHON`、`OPTIONHELPER_SELECTION_PATH` | 必须指向已验收 Skill 与独立解释器 |
 | 客户默认约束 | `OPTIONHELPER_DEFAULT_CONSTRAINTS` | 只放期限、最大损失和本金波动等约束，不放市场价格或条款结果 |
 
@@ -145,16 +147,18 @@ python gui/start.py
 output/environment-check.json
 ```
 
-`ready_for_research=true` 只代表基本研究入口可用；`ready_for_formal_quote=true` 才表示正式报价所需本机条件同时就绪。
+`ready_for_research=true` 只代表基本研究入口可用；`ready_for_formal_quote=true` 表示 OptionHelper Skill、解释器和本地配置等静态条件就绪。环境检查不会为每个未来合同区间调用真实行情或交易日历，因此该字段不保证当笔报价的数据接口、权限、日历覆盖和条款一定完整；正式报价仍须通过当笔前置检查。
 
 ### 3.3 每日/每次使用前建议检查
 
 1. 启动后运行环境检查；
-2. LLM 设置页刷新实时模型目录，确认快速档和质量档仍可用；
+2. 在统一“设置”窗口刷新实时模型目录，确认快速档和质量档仍可用；
 3. 需要事件检索时测试 Tavily 连接和剩余额度；
 4. 需要正式报价时确认 OptionHelper 就绪；
 5. 运行一个低敏感、短流程的问题，确认取数确认框、报告预览和历史记录正常；
 6. 检查磁盘空间，尤其是 `output/`、`data/`、`result/` 和 `.optionhelper/migrations/`。
+
+面向用户的入口以右上角“设置”和“使用说明”为准；研究表单不再维护重复的 API 按钮，内部复核页也不再维护第二套历史运行选择器。
 
 ### 3.4 定期维护建议
 
@@ -205,10 +209,12 @@ git status --short
 ### 4.4 文档同步
 
 - 用户能感知的安装、配置或操作变化：更新 `README.md`；
+- 应用内操作步骤、界面名称或截图变化：更新 `docs/user-guide.html` 及必要的脱敏图片；
 - 架构、业务对象和强制校验规则变化：更新 `DESIGN.md` 正文；
 - 修改、排障、发布或升级方法变化：更新本手册；
 - 论点定义或字段依赖变化：更新 `THESIS_LIBRARY.md`；
 - 历史修复经过：只写入 `DESIGN.md` 修改日志，不把 README 写成开发日志。
+- Skill 的工作流、配置或运行时变化：更新 `skills/research-helper/`，提升 `VERSION` 并重新构建发布 ZIP；桌面应用版本与 Skill 版本分别管理。
 
 当前 `.gitignore` 将 `DESIGN.md` 作为本地内部工作文档排除。对外或跨机器交接使用机构批准的受控文档渠道，保留现有忽略规则。
 
@@ -320,7 +326,7 @@ ETF 暴露分为直接、部分和不相关：
 
 来源等级用于排序和审核，原文校验仍须单独通过。普通新闻按媒体来源处理，只有原始披露文件可归入公司披露。
 
-### 5.7 报告文字、图表与一页校验
+### 5.7 报告文字、图表与 PDF 交付
 
 相关文件：`core/writer.py`、`render/charts.py`、`render/layout.py`、`render/interactive.py`、`render/pdf_out.py`。
 
@@ -331,8 +337,8 @@ ETF 暴露分为直接、部分和不相关：
 - 图表注明真实数据日期、单位和来源；
 - 图型必须匹配数据关系，不为视觉效果强行使用复杂图；
 - HTML 交互图与 PDF 静态图来自同一数据；
-- 报价写回后重新生成并重新校验 PDF；
-- PDF 实测一页才标记为正式交付。
+- 报价写回后重新生成 PDF，并记录实际页数；
+- PDF 按实际内容自然分页；不得为压成一页自动删减已审核正文、来源、风险提示或报价事实。
 
 推荐测试：`tests/test_layout.py`、`tests/test_structure_charts.py`、`tests/test_reporting_hygiene.py`、`tests/test_delivery_gate.py`。
 
@@ -346,7 +352,7 @@ ETF 暴露分为直接、部分和不相关：
 - 自动稿更新后能否重新应用人工覆盖；
 - 删除图表后是否清理空容器并重新布局；
 - 保存修订版 HTML 与导出 PDF 是否写入正确历史任务；
-- PDF 是否重新执行一页校验。
+- PDF 是否重新导出并记录实际页数。
 
 推荐测试：`tests/test_report_edits.py`、`tests/test_report_editor_gui.py`。
 
@@ -366,6 +372,14 @@ Research Helper 与 OptionHelper 的职责必须保持分离：
 - `core/optionhelper_quote_watchdog.py`；
 - `core/optionhelper_compat.py`；
 - `core/optionhelper_pricing.py`。
+
+当前正式报价规则：
+
+- 非解析法未显式提供 `pricing_config.path_count` 时补充 `10000`；`quote_variants` 中的独立显式值及调用方显式值优先；
+- `10000` 是交互式参考报价的默认计算规模，不能视为精度承诺；需要更高精度时由调用方显式提高并重新验收耗时；
+- 报价进程默认最长等待 900 秒。先根据最后阶段区分数据准备、交易日历、条款校验和 Monte Carlo 计算，不能看到“报价失败”就直接调整路径数；
+- OptionHelper 独立取得正式行情、波动率、利率、分红和交易日历。Research Helper 的 iFinD SDK 研究取数成功，不能证明 OptionHelper 的 HTTP 数据入口或交易日历可用；
+- 路径依赖结构要求交易日历完整覆盖合同区间。本地缓存只有覆盖整个请求区间时才能作为回退；服务不可用且缓存不完整时应在计算前失败，并保留请求区间、提供商和缓存覆盖诊断。
 
 推荐测试：`tests/test_optionhelper_compat.py`、`tests/test_optionhelper_migration.py`、`tests/test_optionhelper_update_check.py`、`tests/test_quote_diagnostics.py`、`tests/test_gui_quote_candidates.py`。
 
@@ -482,7 +496,8 @@ python tools/optionhelper_check_update.py `
 | `No module named 'tool_entry'` | Skill 路径指向源码根目录、入口缺失或 ACL 拒绝读取 | 用构建后 Skill；运行受保护激活；检查 `scripts/tool_entry.py` 和目录权限 |
 | 点击报价无反应 | 子进程未启动、错误回调未显示、解释器不可用 | 查运行 JSON/JSONL、终端和报价任务区；检查 `OPTIONHELPER_PYTHON` |
 | `ProcessError.Crashed` | OptionHelper 子进程崩溃或环境/Store/SDK 异常 | 查看同一 quote id 的诊断和 stderr 摘要；运行统一就绪检查 |
-| 正式报价超时 | Monte Carlo 路径、行情请求、日历或外部 Store 较慢 | 查阶段耗时，先区分计算耗时、死锁和网络失败，再决定是否调整超时 |
+| 交易日历暂不可用、本地资产未完整覆盖请求区间 | OptionHelper 日历服务失败，且本地缓存没有覆盖整个合同区间 | 核对估值日、期限、请求区间、HTTP 数据权限和缓存覆盖；这是计算前失败，降低 Monte Carlo 路径数无效 |
+| 正式报价超时 | Monte Carlo 计算、行情请求、日历或外部 Store 较慢 | 查看最后阶段和耗时；默认路径数为 10000、进程超时为 900 秒。确认已进入计算阶段后再评估路径数或超时 |
 | 报价完成但界面一直“正在重建” | HTML/PDF 刷新回调或路径处理失败 | 查 `finalizing` 阶段、PDF 回调和同一运行产物；研究结果与报价文件应保留 |
 | 条款缺少名称或数值 | 新版输出协议变化、内部派生字段被当成外发事实 | 比较候选与当前协议；仅在窄兼容层处理，不在 Writer 猜测字段 |
 
@@ -637,14 +652,23 @@ PDF、历史任务、OptionHelper推荐与一笔真实小规模报价。没有De
 5. 不把报价 ETF 反向当成研究取数对象；
 6. 不使用宽行业或单只代表股静默替代失败目标。
 
-#### F. HTML 正常、PDF 失败或超过一页
+#### F. HTML 正常但 PDF 导出失败或页数异常
 
 1. 检查 Qt WebEngine 是否可用；
 2. 查看静态图、字体或本地 ECharts 资源是否缺失；
 3. 检查删除图表后的空容器和布局标记；
 4. 检查报价写回后是否重新渲染；
-5. 以实际 PDF 页数为准，不通过 CSS 预估宣称一页；
+5. 读取并记录实际 PDF 页数，不通过 CSS 预估页数；多页本身不是失败；
 6. 修订版和自动版分别检查，避免打开错文件。
+
+#### G. OptionHelper 提示交易日历不可用或覆盖不足
+
+1. 记录 quote id、估值日、产品期限和错误全文；
+2. 查看报价诊断中的最后成功阶段，确认错误发生在 Monte Carlo 计算前；
+3. 检查 OptionHelper 所用数据提供商、iFinD HTTP 权限和网络，不以 Research Helper 的 SDK 研究取数成功作为替代判断；
+4. 核对本地日历缓存的起止日期是否完整覆盖合同区间；部分覆盖不可继续报价；
+5. 恢复数据服务或补齐受控缓存后重新审核并重试，不复用失败任务的 selection；
+6. 只有诊断明确停在数值计算阶段且达到 900 秒时，才评估路径数和超时设置。
 
 ---
 

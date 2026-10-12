@@ -74,7 +74,9 @@ def _setting_bool(key: str, default: bool) -> bool:
 
 # ---- DeepSeek / LLM 配置 ----
 DEEPSEEK_API_KEY = _cred("DEEPSEEK_API_KEY")
-DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+DEEPSEEK_BASE_URL = str(
+    _cred("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+).strip().rstrip("/")
 # 模型 ID 会随供应商升级而变化。配置只保存分析师明确选择的逻辑档位；账号当前
 # 可用目录由 GET /models 动态取得。DEEPSEEK_MODEL 继续作为旧版配置兼容入口。
 _LEGACY_DEEPSEEK_MODEL = str(_LOCAL.get("DEEPSEEK_MODEL") or "").strip()

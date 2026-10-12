@@ -1,6 +1,6 @@
 # Research Helper
 
-Research Helper 是面向投研分析师的桌面应用，用于将客户需求、市场数据和研究材料整理为可复核的《场外衍生品投资策略》一页通。Windows 与 macOS 使用同一套研究流程，并分别构建独立发布包；系统覆盖需求解析、研究取数、论点审核、图表与报告生成、结构化编辑，以及可选的 OptionHelper 产品推荐和正式参考报价。
+Research Helper 是面向投研分析师的桌面应用，用于将客户需求、市场数据和研究材料整理为可复核的《场外衍生品投资策略》报告。Windows 与 macOS 使用同一套研究流程，并分别构建独立发布包；系统覆盖需求解析、研究取数、论点审核、图表与报告生成、结构化编辑，以及可选的 OptionHelper 产品推荐和正式参考报价。“一页通”沿用为报告产品名称。
 
 > 本项目用于内部研究与信息整理。生成内容不构成投资建议、销售要约或交易承诺。
 
@@ -12,8 +12,9 @@ Research Helper 是面向投研分析师的桌面应用，用于将客户需求�
 - 支持普通行业研究、市场状态研究和明确外部事件研究。
 - 读取 iFinD 市场数据、上传材料、粘贴文字及公开网页证据。
 - 由分析师审核候选论点、主题公司、事件证据和待报价标的。
-- 生成一页通 HTML/PDF、内部底稿、交互复核页和运行日志。
+- 生成策略报告 HTML/PDF、内部底稿、交互复核页和运行日志。
 - 支持结构化报告编辑、历史任务搜索与重命名。
+- 内置网页使用说明，并在统一“设置”窗口管理模型、搜索、iFinD、OptionHelper 与环境检查。
 - 为每只待报价标的生成产品画像，并接入 OptionHelper 推荐和正式报价。
 
 ## 工作流程
@@ -32,13 +33,13 @@ Research Helper 是面向投研分析师的桌面应用，用于将客户需求�
         ↓
 候选论点审核
         ↓
-一页通 HTML/PDF、内部底稿与运行记录
+策略报告 HTML/PDF、内部底稿与运行记录
         ↓
 确认待报价标的
         ↓
 标的产品画像 → OptionHelper 推荐 → 人工确认 → 正式报价
         ↓
-选择报价写入一页通
+选择报价写入策略报告
 ```
 
 ## 关键概念
@@ -84,7 +85,7 @@ Research Helper 是面向投研分析师的桌面应用，用于将客户需求�
 
 优先使用 `ResearchHelper-Setup-<版本>.exe`。没有安装器时，可解压 `ResearchHelper-<版本>-win64.zip` 并运行 `ResearchHelper.exe`。
 
-首次启动按设置向导完成：
+首次启动按设置向导完成；之后可通过应用右上角“设置”统一维护全部配置：
 
 1. 填写 DeepSeek API Key；
 2. 按权限配置 Tavily、iFinD 和 OptionHelper；
@@ -138,6 +139,8 @@ python -c "import iFinDPy; print(iFinDPy.__file__)"
 
 ## 配置
 
+桌面端统一通过右上角“设置”管理 LLM、公开搜索、iFinD、OptionHelper 和运行环境检查。配置文件仍是底层存储与批量部署入口，普通用户无需手工编辑。
+
 Windows发布版配置写入`%LOCALAPPDATA%\ResearchHelper\config.local.json`；macOS发布版写入
 `~/Library/Application Support/ResearchHelper/config.local.json`；源码版写入项目根目录的
 `config.local.json`。环境变量优先于本地配置。配置修改后重启应用。
@@ -187,13 +190,15 @@ Windows发布版配置写入`%LOCALAPPDATA%\ResearchHelper\config.local.json`；
 
 ### LLM 模型
 
-桌面端“LLM 设置”通过 DeepSeek `GET /models` 读取账号当前可用模型，并分别配置快速档、质量档和备用档。运行前再次检查模型目录；模型临时下线时，由分析师确认是否仅在本次运行使用备用模型。运行日志记录请求模型和接口实际返回模型。
+桌面端“设置 → LLM”通过 DeepSeek `GET /models` 读取账号当前可用模型，并分别配置快速档、质量档和备用档。运行前再次检查模型目录；模型临时下线时，由分析师确认是否仅在本次运行使用备用模型。运行日志记录请求模型和接口实际返回模型。
 
 ### 公开搜索
 
-Tavily 是主要公开搜索入口，可选择基础或高级搜索；Bing RSS 提供免费兜底。设置页支持 API Key、国家/语言偏好、连接测试和兜底开关。搜索服务、检索词、命中网址、正文读取和候选淘汰原因写入内部审计，API Key 不进入日志。
+Tavily 是主要公开搜索入口，可选择基础或高级搜索；Bing RSS 提供免费兜底。“设置 → 搜索”支持 API Key、国家/语言偏好、连接测试和兜底开关。搜索服务、检索词、命中网址、正文读取和候选淘汰原因写入内部审计，API Key 不进入日志。
 
 ## 使用桌面应用
+
+右上角“使用说明”可随时打开内置网页说明书；“设置”集中管理运行所需配置。左侧历史任务栏是旧任务的唯一入口，可搜索、折叠和重命名，不在“内部复核”页重复显示历史选择器。
 
 ### 1. 输入需求
 
@@ -245,7 +250,7 @@ iFinD“XX 概念股”仅在公开资料召回不足时补充候选。系统发
 - 保存并导出 PDF；
 - 打开产物文件夹。
 
-删除图表后，剩余图表和正文会根据图型重新布局。PDF 重新执行实际页数校验。
+删除图表后，剩余图表和正文会根据图型重新布局。PDF 会重新导出并记录实际页数。
 
 ### 5. 查看历史任务
 
@@ -282,7 +287,7 @@ python main.py -b "分析消费电子板块的投资机会。" --confirm-market 
 | `-b`, `--brief` | 客户需求 |
 | `--confirm-market` | 接收分析师研究取数目标确认 |
 | `--pick` | 人工选择正文候选论点 |
-| `--pdf` | 导出 PDF 并执行实际页数校验 |
+| `--pdf` | 导出 PDF 并记录实际页数 |
 | `--overrides <json>` | 导入人工数据补充文件 |
 | `--optionhelper recommend` | 运行结构推荐 |
 | `--optionhelper quote` | 使用已确认 selection 发起正式报价 |
@@ -335,6 +340,10 @@ scripts/environment_check.py
 
 OptionHelper 版本检查、激活和回退步骤见 [MAINTENANCE.md](MAINTENANCE.md)。
 
+正式报价的非解析法请求在没有显式指定时默认使用 `10,000` 条 Monte Carlo 路径；显式路径数优先。报价进程最长默认等待 900 秒。路径数只影响数值计算的耗时与精度，不能解决行情、交易日历或条款不完整问题。
+
+OptionHelper 会独立取得正式定价所需的行情、波动率、利率、分红和交易日历。Research Helper 能通过 Windows iFinD SDK 完成研究取数，不代表 OptionHelper 的 HTTP 数据入口和交易日历已经可用。路径依赖产品要求交易日历完整覆盖合同区间；日历服务不可用且本地缓存覆盖不足时，报价会在 Monte Carlo 计算前停止。
+
 ## 输出文件
 
 源码版默认写入项目 `output/`；发布版写入 `%LOCALAPPDATA%\ResearchHelper\output\`。
@@ -342,7 +351,7 @@ OptionHelper 版本检查、激活和回退步骤见 [MAINTENANCE.md](MAINTENANC
 | 文件 | 用途 |
 |---|---|
 | `onepager_<主题>.html` | 自动生成的一页通 HTML |
-| `onepager_<主题>.pdf` | 通过实际页数校验的 PDF |
+| `onepager_<主题>.pdf` | 成功导出并记录实际页数的 PDF |
 | `onepager_<主题>_人工修订.json` | 结构化编辑覆盖层 |
 | `onepager_<主题>_人工修订.html/.pdf` | 人工修订版报告 |
 | `onepager_<主题>_内部底稿.md` | 研究口径、数据缺口、证据和产品调用记录 |
@@ -354,7 +363,7 @@ OptionHelper 版本检查、激活和回退步骤见 [MAINTENANCE.md](MAINTENANC
 
 客户版报告仅展示已确认内容。内部证据编号、候选淘汰信息、调用诊断和完整证据组合保留在内部底稿。
 
-PDF 只有在实际渲染结果为一页时通过正式交付校验。报告标题下显示“研究策略·YYYY年M月D日”；各图表和数据来源保留实际数据日期。
+PDF 按实际内容自然分页；成功导出后记录真实页数，不因超过一页阻止交付，也不会为压缩页数自动删除研究内容。报告标题下显示“研究策略·YYYY年M月D日”；各图表和数据来源保留实际数据日期。
 
 ## 开发、测试与发布
 
@@ -408,6 +417,8 @@ gui/                        PySide6 桌面应用
 core/                       需求解析、取数、研究、校验与产品桥接
 llm/                        LLM 客户端
 render/                     图表、HTML、PDF 与内部底稿
+docs/user-guide.html        应用内置网页使用说明书
+skills/research-helper/     独立发布的 Research Helper Codex Skill
 tools/                      发布、检查、迁移和 smoke 工具
 tests/                      自动化测试
 THESIS_LIBRARY.md           机器可读论点库
@@ -423,11 +434,11 @@ underlying_map.json         行业/主题与常用工具映射
 
 ### DeepSeek 网页可用，但 API 调用失败
 
-网页会话与 API 使用不同链路。检查 API Key、`DEEPSEEK_BASE_URL`、网络策略和 443 端口，并在“LLM 设置”中刷新模型目录和测试质量档模型。
+网页会话与 API 使用不同链路。检查 API Key、`DEEPSEEK_BASE_URL`、网络策略和 443 端口，并在“设置 → LLM”中刷新模型目录和测试质量档模型。
 
 ### iFinD 取数失败
 
-检查官方终端/SDK、`iFinDPy` 导入、账号密码、数据权限和周度额度。关键数据缺失时系统会保留缺口。
+Windows 检查官方终端/SDK、`iFinDPy` 导入、账号密码、数据权限和周度额度；macOS/Linux 检查 Refresh Token 与 HTTP API 权限。关键数据缺失时系统会保留缺口。发布包不再分发官方 SDK，可在“设置 → iFinD”指定本机 SDK 路径。
 
 ### 事件证据候选很少
 
@@ -435,11 +446,11 @@ underlying_map.json         行业/主题与常用工具映射
 
 ### 研究完成但没有正式报价
 
-检查待报价标的是否确认、OptionHelper 环境是否就绪、结构是否由分析师确认，以及报价任务区显示的失败阶段。
+检查待报价标的是否确认、OptionHelper 环境是否就绪、结构是否由分析师确认，以及报价任务区显示的失败阶段。若提示“交易日历暂不可用”或“本地资产未完整覆盖请求区间”，这是 OptionHelper 正式定价数据前置条件不足，不是 10,000 条模拟路径计算超时。
 
-### HTML 正常但 PDF 未通过
+### HTML 正常但 PDF 导出失败
 
-检查 Qt WebEngine、静态图资源和实际 PDF 页数。报价写回或人工编辑后，PDF 会重新生成并再次校验。
+检查 Qt WebEngine、静态图、字体和本地资源。报价写回或人工编辑后，PDF 会重新生成并记录实际页数；多页 PDF 属于正常交付结果。
 
 ## 安全与合规
 

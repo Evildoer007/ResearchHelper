@@ -8,7 +8,7 @@ from pathlib import Path
 from PySide6.QtCore import QTimer, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
+    QApplication, QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox,
     QPlainTextEdit, QPushButton, QSplitter, QTabWidget, QTextBrowser, QVBoxLayout, QWidget,
 )
 
@@ -43,6 +43,11 @@ class ReportEditorDialog(QDialog):
         self.hidden_logic = {str(key) for key in (previous.get("hidden_logic") or [])}
         self.chart_keys = chart_sections(self.source)
         self.hidden_charts = {str(key) for key in (previous.get("hidden_charts") or [])}
+        raw_sizes = previous.get("chart_sizes") if isinstance(previous.get("chart_sizes"), dict) else {}
+        self.chart_sizes = {
+            str(key): str(value) for key, value in raw_sizes.items()
+            if str(value) in {"small", "medium", "large"}
+        }
         self.current_key = ""
         self.saved_result: dict | None = None
         self._preview_file: Path | None = None
@@ -97,6 +102,7 @@ class ReportEditorDialog(QDialog):
             item.setCheckState(Qt.CheckState.Unchecked if key in self.hidden_charts else Qt.CheckState.Checked)
             self.chart_list.addItem(item)
         self.chart_list.itemChanged.connect(lambda _item: self._schedule_preview())
+        self.chart_list.currentItemChanged.connect(self._chart_changed)
         chart_page = QWidget()
         chart_layout = QVBoxLayout(chart_page)
         chart_help = QLabel(
@@ -106,6 +112,16 @@ class ReportEditorDialog(QDialog):
         chart_help.setWordWrap(True)
         chart_layout.addWidget(chart_help)
         chart_layout.addWidget(self.chart_list, 1)
+        size_row = QHBoxLayout()
+        size_row.addWidget(QLabel("选中图表尺寸"))
+        self.chart_size = QComboBox()
+        self.chart_size.addItem("自动", "auto")
+        self.chart_size.addItem("小（约半栏）", "small")
+        self.chart_size.addItem("中（约四分之三栏）", "medium")
+        self.chart_size.addItem("大（整栏）", "large")
+        self.chart_size.currentIndexChanged.connect(self._chart_size_changed)
+        size_row.addWidget(self.chart_size, 1)
+        chart_layout.addLayout(size_row)
         remove_chart = QPushButton("删除选中图表")
         restore_chart = QPushButton("恢复选中图表")
         remove_chart.clicked.connect(lambda: self._set_selected_chart_visible(False))
@@ -132,7 +148,7 @@ class ReportEditorDialog(QDialog):
             self.preview.loadFinished.connect(self._preview_loaded)
         right = QWidget()
         right_layout = QVBoxLayout(right)
-        right_layout.addWidget(QLabel("实时预览（最终是否为一页仍以导出 PDF 实测为准）"))
+        right_layout.addWidget(QLabel("实时预览（PDF 将按实际内容自然分页）"))
         right_layout.addWidget(self.preview, 1)
 
         split = QSplitter(Qt.Orientation.Horizontal)
@@ -171,6 +187,8 @@ class ReportEditorDialog(QDialog):
 
         if self.field_list.count():
             self.field_list.setCurrentRow(0)
+        if self.chart_list.count():
+            self.chart_list.setCurrentRow(0)
         self._refresh_preview()
 
     def _logic_label(self, key: str) -> str:
@@ -220,6 +238,30 @@ class ReportEditorDialog(QDialog):
                 hidden.append(str(item.data(Qt.ItemDataRole.UserRole)))
         return hidden
 
+    def _chart_size_state(self) -> dict[str, str]:
+        return dict(self.chart_sizes)
+
+    def _chart_changed(self, current, _previous) -> None:
+        key = str(current.data(Qt.ItemDataRole.UserRole)) if current else ""
+        value = self.chart_sizes.get(key, "auto")
+        index = self.chart_size.findData(value)
+        self.chart_size.blockSignals(True)
+        self.chart_size.setCurrentIndex(max(0, index))
+        self.chart_size.setEnabled(bool(key))
+        self.chart_size.blockSignals(False)
+
+    def _chart_size_changed(self, _index: int) -> None:
+        item = self.chart_list.currentItem()
+        if item is None:
+            return
+        key = str(item.data(Qt.ItemDataRole.UserRole))
+        value = str(self.chart_size.currentData() or "auto")
+        if value == "auto":
+            self.chart_sizes.pop(key, None)
+        else:
+            self.chart_sizes[key] = value
+        self._schedule_preview()
+
     def _set_selected_chart_visible(self, visible: bool) -> None:
         item = self.chart_list.currentItem()
         if item is not None:
@@ -243,7 +285,7 @@ class ReportEditorDialog(QDialog):
         order, hidden = self._logic_state()
         return apply_edits(
             self.source, fields=self.values, logic_order=order, hidden_logic=hidden,
-            hidden_charts=self._chart_state(),
+            hidden_charts=self._chart_state(), chart_sizes=self._chart_size_state(),
         )
 
     def _refresh_preview(self) -> None:
@@ -266,7 +308,7 @@ class ReportEditorDialog(QDialog):
             order, hidden = self._logic_state()
             final, sidecar, payload = save_revision(
                 self.base_html, fields=self.values, logic_order=order, hidden_logic=hidden,
-                hidden_charts=self._chart_state(),
+                hidden_charts=self._chart_state(), chart_sizes=self._chart_size_state(),
             )
         except (OSError, ValueError) as error:
             QMessageBox.warning(self, "无法保存修订", str(error))
@@ -315,15 +357,12 @@ class ReportEditorDialog(QDialog):
                 pages = None
             self.saved_result["pdf"] = str(path)
             self.saved_result["pdf_pages"] = pages
-            if pages == 1:
-                self.status.setText(f"修订版 PDF 已导出并通过一页校验：{path}")
-                QMessageBox.information(self, "导出完成", f"修订版 PDF 已导出，实测为 1 页。\n{path}")
-            elif pages is None:
+            if pages is None:
                 self.status.setText(f"修订版 PDF 已导出，但页数无法校验：{path}")
                 QMessageBox.warning(self, "需要复核", f"PDF 已导出，但未能确认真实页数。\n{path}")
             else:
-                self.status.setText(f"修订版 PDF 实测 {pages} 页，不能作为一页通正式交付：{path}")
-                QMessageBox.warning(self, "超过一页", f"修订版 PDF 实测 {pages} 页，请压缩内容后重新导出。\n{path}")
+                self.status.setText(f"修订版 PDF 已导出，共 {pages} 页：{path}")
+                QMessageBox.information(self, "导出完成", f"修订版 PDF 已导出，共 {pages} 页。\n{path}")
 
         print_page_async(self.preview.page(), target, on_done=done)
 
@@ -338,6 +377,10 @@ class ReportEditorDialog(QDialog):
             self.logic_list.item(index).setCheckState(Qt.CheckState.Checked)
         for index in range(self.chart_list.count()):
             self.chart_list.item(index).setCheckState(Qt.CheckState.Checked)
+        self.chart_sizes.clear()
+        self.chart_size.blockSignals(True)
+        self.chart_size.setCurrentIndex(0)
+        self.chart_size.blockSignals(False)
         default = logic_sections(self.source)
         items = {}
         while self.logic_list.count():

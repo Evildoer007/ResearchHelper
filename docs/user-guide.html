@@ -110,7 +110,8 @@
     .card { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
     .card h3, .card h4 { margin-top: 0; }
     .card-number { color: var(--wine); font-size: 28px; font-weight: 800; line-height: 1; }
-    .quick { margin-top: -58px; position: relative; }
+    .content > #overview { margin-top: -58px; position: relative; }
+    .quick { margin-top: 0; position: relative; }
     .quick section { border-top: 4px solid var(--gold); }
     .steps { counter-reset: step; display: grid; gap: 13px; }
     .step { position: relative; padding: 16px 17px 16px 62px; border: 1px solid var(--line); border-radius: 13px; }
@@ -129,8 +130,8 @@
     .app-map .history { color: #edf0f2; background: #24282b; }
     .app-map .workspace { background: #fbfbfb; }
     .app-map .delivery { border-left: 1px solid #d9dcdf; background: #f6f6f7; }
-    .fake-input, .fake-line { height: 34px; margin: 9px 0; border: 1px solid #d9dcdf; border-radius: 9px; background: white; }
-    .fake-input.big { height: 115px; }
+    .fake-input, .fake-line { min-height: 34px; margin: 9px 0; padding: 7px 10px; display: flex; align-items: center; border: 1px solid #d9dcdf; border-radius: 9px; background: white; color: #697078; font-size: 12px; }
+    .fake-input.big { min-height: 115px; align-items: flex-start; }
     .fake-run { margin: 9px 0; padding: 8px; border-radius: 8px; background: #353b40; color: #d7dade; }
     .route { border-top: 4px solid var(--blue); }
     .route:nth-child(2) { border-top-color: var(--green); }
@@ -145,6 +146,13 @@
     .shot-head { display: flex; justify-content: space-between; gap: 15px; padding: 11px 14px; border-bottom: 1px dashed #c9cdd1; color: #555d64; font-size: 13px; }
     .shot-body { min-height: 200px; padding: 25px; display: grid; place-items: center; text-align: center; color: #858b90; background: linear-gradient(135deg, #fafafa, #f2f3f4); }
     .shot-body b { display: block; color: #61686e; font-size: 18px; }
+    .manual-shot { max-width: 860px; margin: 22px auto; border: 1px solid var(--line); border-radius: 16px; overflow: hidden; background: #f7f7f8; box-shadow: 0 10px 28px rgba(25, 28, 31, .06); }
+    .manual-shot img { display: block; width: 100%; height: auto; max-height: 620px; object-fit: contain; background: #eef0f2; }
+    .manual-shot figcaption { padding: 13px 16px; color: #596169; font-size: 13px; border-top: 1px solid var(--line); }
+    .manual-shot figcaption b { color: var(--ink); }
+    .shot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
+    .shot-grid .manual-shot { margin: 10px 0; max-width: none; }
+    .figure-note { margin: 10px 2px 0; color: #616970; font-size: 13px; }
     .checklist { list-style: none; padding: 0; }
     .checklist li { position: relative; padding: 9px 9px 9px 36px; border-bottom: 1px solid #eceeef; }
     .checklist li::before { content: "□"; position: absolute; left: 8px; top: 7px; color: var(--wine); font-size: 20px; }
@@ -163,6 +171,7 @@
     }
     @media (max-width: 680px) {
       .grid { grid-template-columns: 1fr; }
+      .shot-grid { grid-template-columns: 1fr; }
       .content { padding: 20px 12px 60px; }
       section { padding: 23px 18px; }
       .hero { padding: 50px 20px 78px; }
@@ -185,7 +194,7 @@
 <body>
 <div class="layout">
   <aside>
-    <div class="brand"><div class="brand-mark">RH</div><div><strong>Research Helper</strong><small>使用说明书 · 0.9</small></div></div>
+    <div class="brand"><div class="brand-mark">RH</div><div><strong>Research Helper</strong><small>图文使用说明书 · 0.9</small></div></div>
     <input id="docSearch" class="search" placeholder="搜索说明书，例如：ETF、报价、导出">
     <nav id="toc">
       <div class="group">开始</div>
@@ -205,7 +214,6 @@
       <a href="#history">12. 历史任务</a>
       <a href="#trouble">13. 常见问题</a>
       <a href="#security">14. 安全与检查</a>
-      <a href="#screenshots">15. 截图清单</a>
     </nav>
     <div class="aside-note">本说明书面向分析师。维护、升级、打包和 OptionHelper 迁移请查阅项目维护手册。</div>
   </aside>
@@ -214,28 +222,12 @@
     <header class="hero">
       <div class="eyebrow">ANALYST USER GUIDE</div>
       <h1>Research Helper<br>使用说明书</h1>
-      <p>从客户问题到可复核的一页通：本手册说明首次配置、研究取数、证据审核、报告编辑、产品结构推荐及正式报价的完整操作。</p>
+      <p>从客户问题到可复核的研究策略报告：本手册结合真实界面，说明首次配置、研究取数、证据审核、报告编辑、产品结构推荐及正式报价的完整操作。</p>
       <div class="hero-meta"><span class="pill">Windows / macOS</span><span class="pill">普通主题研究</span><span class="pill">事件驱动研究</span><span class="pill">OptionHelper 可选</span></div>
       <div class="toolbar"><button onclick="window.print()">打印 / 另存为 PDF</button><button onclick="document.querySelector('#quickstart').scrollIntoView()">直接看快速开始</button></div>
     </header>
 
     <div class="content">
-      <div class="quick">
-        <section id="quickstart">
-          <h2>2. 五分钟开始</h2>
-          <p class="lead">第一次使用时，先完成设置，再用一个普通行业问题走通研究流程。暂时不要从复杂事件或多标的报价开始。</p>
-          <div class="steps">
-            <div class="step"><strong>打开设置并完成连接测试</strong>至少配置 DeepSeek 和 iFinD；事件搜索再配置 Tavily；需要报价时再配置 OptionHelper。</div>
-            <div class="step"><strong>输入一个明确问题</strong>例如：“分析未来一个月机器人行业的投资机会。”</div>
-            <div class="step"><strong>确认研究取数目标</strong>在标准行业、人工主题篮子和主题 ETF 中选择一条路径。</div>
-            <div class="step"><strong>审核候选论点</strong>勾选真正回答客户问题、且有数据或材料支持的 2—3 条论点。</div>
-            <div class="step"><strong>检查报告并导出</strong>预览一页通，必要时编辑文字或删除图表，再导出 PDF。</div>
-            <div class="step"><strong>需要产品时再进入报价</strong>选择挂钩标的和结构，完成 OptionHelper 正式报价；研究报告本身不依赖报价成功。</div>
-          </div>
-          <div class="callout good"><b>建议的第一次测试问题：</b>“分析未来一个月机器人行业的投资机会。”它能覆盖需求解析、目标确认、行业取数、论点审核、报告预览和历史任务。</div>
-        </section>
-      </div>
-
       <section id="overview">
         <h2>1. 产品能做什么</h2>
         <p>Research Helper 是面向投研分析师的桌面应用。它把客户原始问题、市场数据、上传材料和公开证据整理为一份可复核的研究报告，并可在研究完成后接入 OptionHelper 生成场外衍生品结构候选和正式参考报价。</p>
@@ -248,15 +240,31 @@
           <div class="flow-node"><b>可选报价</b>画像、结构、正式报价</div>
         </div>
         <div class="grid">
-          <div class="card"><h3>适合</h3><ul><li>行业或主题未来一段时间的投资机会；</li><li>单只 ETF/指数的表现、风险和配置价值；</li><li>外部事件对 A 股行业、公司篮子或 ETF 的影响；</li><li>已有研究材料的归纳、数据验证和一页通交付；</li><li>研究完成后的挂钩标的筛选与结构报价。</li></ul></div>
+          <div class="card"><h3>适合</h3><ul><li>行业或主题未来一段时间的投资机会；</li><li>单只 ETF/指数的表现、风险和配置价值；</li><li>外部事件对 A 股行业、公司篮子或 ETF 的影响；</li><li>已有研究材料的归纳、数据验证和策略报告交付；</li><li>研究完成后的挂钩标的筛选与结构报价。</li></ul></div>
           <div class="card"><h3>不等于</h3><ul><li>自动替代分析师作出最终投资判断；</li><li>在没有数据和原文时补造事实；</li><li>把研究取数 ETF 自动当成最终产品标的；</li><li>绕过证券真实性、主题暴露、流动性或报价校验；</li><li>无需审核即可直接外发的全自动研报。</li></ul></div>
         </div>
         <div class="callout"><b>两个对象必须分清：</b>“研究取数目标”决定报告分析哪些数据；“挂钩标的”决定后续对哪个证券推荐产品和报价。它们可以相同，也可以不同，并且分别确认。</div>
       </section>
 
+      <div class="quick">
+        <section id="quickstart">
+          <h2>2. 五分钟开始</h2>
+          <p class="lead">第一次使用时，先完成设置，再用一个普通行业问题走通研究流程。暂时不要从复杂事件或多标的报价开始。</p>
+          <div class="steps">
+            <div class="step"><strong>打开设置并完成连接测试</strong>至少配置 DeepSeek 和 iFinD；事件搜索再配置 Tavily；需要报价时再配置 OptionHelper。</div>
+            <div class="step"><strong>输入一个明确问题</strong>例如：“分析未来一个月机器人行业的投资机会。”</div>
+            <div class="step"><strong>确认研究取数目标</strong>在标准行业、人工主题篮子和主题 ETF 中选择一条路径。</div>
+            <div class="step"><strong>审核候选论点</strong>勾选真正回答客户问题、且有数据或材料支持的 2—3 条论点。</div>
+            <div class="step"><strong>检查报告并导出</strong>预览研究报告，必要时编辑文字、调整图表或删除低价值图表，再按实际内容自然分页导出 PDF。</div>
+            <div class="step"><strong>需要产品时再进入报价</strong>选择挂钩标的和结构，完成 OptionHelper 正式报价；研究报告本身不依赖报价成功。</div>
+          </div>
+          <div class="callout good"><b>建议的第一次测试问题：</b>“分析未来一个月机器人行业的投资机会。”它能覆盖需求解析、目标确认、行业取数、论点审核、报告预览和历史任务。</div>
+        </section>
+      </div>
+
       <section id="setup">
         <h2>3. 首次设置</h2>
-        <p class="lead">首次启动向导只需要填写你有权限使用的服务。没有配置的可选能力会保持不可用，不影响其它已配置功能。</p>
+        <p class="lead">首次启动向导只需要填写你有权限使用的服务。进入应用后可随时点击右上角“设置”，统一管理全部模型、搜索、数据源和报价配置。</p>
         <table>
           <thead><tr><th>能力</th><th>是否必需</th><th>作用</th><th>首次使用建议</th></tr></thead>
           <tbody>
@@ -267,25 +275,32 @@
           </tbody>
         </table>
         <h3>推荐设置顺序</h3>
-        <ol><li>在“LLM 设置”刷新实时模型目录，测试快速档与质量档；</li><li>在“iFinD 凭证”填写授权信息并运行环境检查；</li><li>在“搜索设置”填写 Tavily Key、语言/地区，点击测试连接；</li><li>确实需要产品报价时再配置 OptionHelper；</li><li>保存设置后重启应用，再运行环境检查。</li></ol>
-        <div class="callout warn"><b>不要截图或外发设置页面中的秘密。</b>API Key、iFinD 账号密码、Refresh Token 和内部路径都属于本机配置。说明书截图时请先遮挡。</div>
-        <div class="shot"><div class="shot-head"><span>建议截图 01</span><span>首次设置向导</span></div><div class="shot-body"><div><b>待加入真实截图</b>展示字段位置和“测试连接”，所有凭证必须打码。</div></div></div>
+        <ol><li>点击主界面右上角“设置”；</li><li>在“模型与 API”中填写 DeepSeek Key、接口地址并刷新模型目录；</li><li>在“iFinD 设置”中填写授权信息、SDK 路径或 HTTP Refresh Token；</li><li>事件研究需要更完整的网页资料时，在“搜索与 API”中配置 Tavily；</li><li>需要产品报价时再填写 OptionHelper Skill 与独立 Python 路径；</li><li>最后运行环境检查，确认所需能力均已就绪。</li></ol>
+        <div class="callout warn"><b>不要截图或外发设置页面中的秘密。</b>API Key、iFinD 账号密码、Refresh Token 和内部路径都属于本机配置。</div>
+        <figure class="manual-shot">
+          <img src="images/user-guide/02-settings-redacted.png" alt="应用设置总览" loading="lazy">
+          <figcaption><b>应用设置总览。</b>四类外部能力统一从这里进入配置；修改后点击“运行环境检查”。</figcaption>
+        </figure>
       </section>
 
       <section id="screen">
         <h2>4. 界面说明</h2>
         <div class="app-map" role="img" aria-label="Research Helper界面分区示意图">
-          <div class="history"><b>历史任务</b><div class="fake-input">搜索任务</div><div class="fake-run">最近运行 1</div><div class="fake-run">最近运行 2</div><div class="fake-run">更早任务</div><small>搜索 · 打开 · 重命名</small></div>
-          <div class="workspace"><b>研究工作台</b><div class="fake-input big"></div><div class="fake-line"></div><div class="fake-line"></div><div class="fake-line"></div><p>输入需求、约束、材料和事件模式，启动研究。</p></div>
-          <div class="delivery"><b>交付与内部复核</b><div class="fake-input big"></div><div class="fake-input big"></div><p>查看报告、运行摘要、底稿、报价任务和编辑入口。</p></div>
+          <div class="history"><b>A　历史任务</b><div class="fake-input">搜索历史任务</div><div class="fake-run">最近运行</div><div class="fake-run">本周任务</div><div class="fake-run">更早任务</div><small>搜索 · 打开 · 重命名</small></div>
+          <div class="workspace"><b>B　研究工作台</b><div class="fake-input big">客户需求输入框<br>填写研究主题、事件、期限和点名证券</div><div class="fake-line">期限与风险约束</div><div class="fake-line">补充材料与事件模式</div><div class="fake-line">取数目标与运行控制</div><p>完成输入后启动研究，并在弹窗中确认实际取数范围。</p></div>
+          <div class="delivery"><b>C　交付与内部复核</b><div class="fake-input big">报告预览与运行状态<br>查看当前进度和最终交付物</div><div class="fake-input big">内部摘要与报价任务<br>进入报告编辑和 OptionHelper</div><p>研究结果、编辑入口和报价状态集中在这里。</p></div>
         </div>
+        <p class="figure-note"><b>示意图说明：</b>左侧用于查找和管理历史任务；中间完成研究输入与启动；右侧查看本次结果并进入报告编辑或正式报价。设置与使用说明位于页面右上角。</p>
         <h3>三个主要区域</h3>
         <div class="grid three">
           <div class="card"><div class="card-number">A</div><h4>历史任务</h4><p>搜索过去的客户问题，打开报告和底稿，或把长问题重命名为便于识别的标题。</p></div>
           <div class="card"><div class="card-number">B</div><h4>研究工作台</h4><p>粘贴客户原始需求，填写期限与风险约束，上传材料，选择是否为事件驱动型。</p></div>
-          <div class="card"><div class="card-number">C</div><h4>交付与内部复核</h4><p>跟踪进度，预览报告，查看研究与报价状态，进入报告编辑和导出。</p></div>
+          <div class="card"><div class="card-number">C</div><h4>交付与内部复核</h4><p>跟踪进度，预览报告，查看本次研究与报价状态，进入报告编辑和导出。右上角可随时打开设置和本说明书。</p></div>
         </div>
-        <div class="shot"><div class="shot-head"><span>建议截图 02</span><span>应用主界面全景</span></div><div class="shot-body"><div><b>待加入真实截图</b>最好使用空白任务或虚构问题，避免客户信息。</div></div></div>
+        <figure class="manual-shot">
+          <img src="images/user-guide/01-research-input.png" alt="Research Helper研究输入页面" loading="lazy">
+          <figcaption><b>研究输入页面。</b>顶部用于切换研究、交付和内部复核；正文依次填写客户需求、期限、风险约束、补充材料及事件模式。右上角可随时打开本说明书和设置。</figcaption>
+        </figure>
       </section>
 
       <section id="question">
@@ -319,7 +334,10 @@
           <tr><td>“锂电池和固态电池，并研究客户点名的五家公司”</td><td>人工主题篮子</td><td>只采用分析师确认的客户点名公司，ETF 留到后续报价确认。</td></tr>
         </tbody></table>
         <div class="callout"><b>ETF 暴露等级：</b>直接暴露可以继续；部分暴露需要分析师核对跟踪指数和主要成分、填写映射理由；不相关会停止该 ETF 路径。流动性最低要求与优选水平分别显示。</div>
-        <div class="shot"><div class="shot-head"><span>建议截图 03</span><span>确认研究市场与取数目标</span></div><div class="shot-body"><div><b>待加入真实截图</b>最好分别提供标准行业、人工篮子、主题 ETF 三种选中状态。</div></div></div>
+        <figure class="manual-shot">
+          <img src="images/user-guide/03-scope-confirmation.png" alt="确认研究市场与取数目标界面" loading="lazy">
+          <figcaption><b>确认研究市场与取数目标。</b>先核对系统对客户问题的理解，再选择处理方式和唯一的研究取数路径。图中的主题 ETF 只决定研究篮子，正式挂钩标的会在研究完成后另行确认。</figcaption>
+        </figure>
       </section>
 
       <section id="normal">
@@ -332,9 +350,13 @@
           <div class="step"><strong>确认取数路径</strong>选择标准行业、人工主题篮子或主题 ETF，并核对映射理由。</div>
           <div class="step"><strong>等待取数与候选论点</strong>运行进度会显示当前阶段；外部接口较慢不等于程序卡死。</div>
           <div class="step"><strong>勾选正文论点</strong>优先选择直接回答客户问题、有明确数据日期和来源的 2—3 条。</div>
-          <div class="step"><strong>检查一页通</strong>检查标题、结论、图表、来源、数据日期和一页校验，再决定是否进入产品报价。</div>
+          <div class="step"><strong>检查研究报告</strong>检查标题、结论、图表、来源和数据日期，再决定是否进入产品报价。</div>
         </div>
         <div class="callout warn"><b>看到缺口时：</b>不要为了让流程通过而随便补数字。可返回调整取数目标、补充有来源的材料，或保留缺口并停止不可靠结论。</div>
+        <figure class="manual-shot">
+          <img src="images/user-guide/05-logic-selection.png" alt="候选研究逻辑选择界面" loading="lazy">
+          <figcaption><b>候选逻辑审核。</b>每条候选都会显示名称、类别、方向、来源类型和依据。通常选择2—3条互相补充的逻辑；“采用系统建议”只是快速勾选，仍应由分析师核对。</figcaption>
+        </figure>
       </section>
 
       <section id="event">
@@ -349,7 +371,10 @@
         <h3>操作步骤</h3>
         <ol><li>在主界面勾选事件驱动型；</li><li>点击“管理事件证据”，可先自动查找候选；</li><li>逐条核对原文、日期、来源和对象，勾选可采用内容；</li><li>先确认研究取数目标，系统再针对本次行业、篮子或 ETF 补搜 A 股暴露；</li><li>检查组合传导链是否真正解释“为什么影响本次研究对象”；</li><li>候选论点中至少选择一条由确认事件证据支持的事件主轴。</li></ol>
         <div class="callout stop"><b>“搜索到”不等于“证据完整”。</b>纯股价播报、走势图、搜索摘要和没有正文的网页不能代替事件事实或产业传导原文。系统不会自动采用任何候选。</div>
-        <div class="shot"><div class="shot-head"><span>建议截图 04</span><span>事件证据包与搜索进度</span></div><div class="shot-body"><div><b>待加入真实截图</b>展示事件事实、产业机制、A股暴露和勾选方式。</div></div></div>
+        <figure class="manual-shot">
+          <img src="images/user-guide/04-event-evidence.png" alt="事件证据包审核界面" loading="lazy">
+          <figcaption><b>事件证据包。</b>页签依次查看事件事实、产业机制、A股暴露和组合传导链。自动搜索完成后仍需逐条核对并勾选；保存证据后才会进入本次运行。</figcaption>
+        </figure>
       </section>
 
       <section id="materials">
@@ -364,16 +389,19 @@
 
       <section id="report">
         <h2>10. 报告、编辑与导出</h2>
-        <p>自动报告完成后先看“交付与报价”页。正式交付前应检查：标题是否回答客户问题、核心结论是否简洁、每张图是否有清楚标题和来源、数据日期是否明确、PDF 是否实测为一页。</p>
+        <p>自动报告完成后先看“报告交付”页。正式交付前应检查：标题是否回答客户问题、核心结论是否简洁、每张图是否有清楚标题和来源、数据日期是否明确，以及 PDF 是否完整导出。</p>
         <h3>可以编辑什么</h3>
         <div class="grid three">
           <div class="card"><h4>文字</h4><p>报告标题、核心结论、逻辑标题、正文和图表标题。</p></div>
           <div class="card"><h4>结构</h4><p>论点顺序、论点显隐、图表显隐和删除单张图表。</p></div>
-          <div class="card"><h4>交付</h4><p>保存修订版 HTML、重新导出 PDF、打开产物目录。</p></div>
+          <div class="card"><h4>交付</h4><p>保存修订版 HTML、按实际内容重新导出 PDF、打开产物目录。</p></div>
         </div>
-        <p>自动稿不会被直接覆盖。人工修改保存为修订版；删除图表后，剩余图表和文字会根据图形尺寸重新排版。每次导出 PDF 都会重新检查真实页数。</p>
-        <div class="callout warn"><b>一页校验失败时：</b>先精简重复文字和低价值图表，再检查字号与布局。不要通过极端缩小字体让内容勉强塞进一页。</div>
-        <div class="shot"><div class="shot-head"><span>建议截图 05</span><span>报告编辑器</span></div><div class="shot-body"><div><b>待加入真实截图</b>展示保存 HTML、导出 PDF、删除图表和打开输出文件夹。</div></div></div>
+        <p>自动稿不会被直接覆盖。人工修改保存为修订版；删除图表后，剩余图表和文字会根据图形尺寸重新排版。当前版本不限制 PDF 页数，内容会自然分页。</p>
+        <div class="callout warn"><b>页数明显偏多时：</b>优先精简重复文字和低价值图表，再检查图表尺寸与布局。不要通过极端缩小字体压缩报告。</div>
+        <figure class="manual-shot">
+          <img src="images/user-guide/08-report-editor.png" alt="报告编辑器与实时预览" loading="lazy">
+          <figcaption><b>报告编辑器。</b>左侧选择文字、论点顺序或图表，右侧实时预览。顶部可保存修订版 HTML、保存并导出 PDF，图表页签可调整尺寸、删除和恢复图表。</figcaption>
+        </figure>
       </section>
 
       <section id="optionhelper">
@@ -385,18 +413,27 @@
           <div class="flow-node"><b>结构候选</b>OptionHelper 独立推荐</div><div class="arrow">→</div>
           <div class="flow-node"><b>人工确认</b>逐标的选择结构</div><div class="arrow">→</div>
           <div class="flow-node"><b>正式报价</b>定价数据与条款</div><div class="arrow">→</div>
-          <div class="flow-node"><b>写入一页通</b>分析师勾选结果</div>
+          <div class="flow-node"><b>写入报告</b>分析师勾选结果</div>
         </div>
         <h3>注意事项</h3>
-        <ul><li>系统自动发现的同主题 ETF 不会全部默认弹出；需要时点击“比较其他同主题工具”；</li><li>每只标的独立推荐，某只“无候选”不影响其它标的；</li><li>产品画像用于推荐前审核，不替代 OptionHelper 的正式定价数据；</li><li>结构候选必须由分析师确认，正式报价失败不删除已完成的研究报告；</li><li>报价完成后，由分析师选择哪些产品写入一页通，不按胜率自动筛选。</li></ul>
+        <ul><li>系统自动发现的同主题 ETF 不会全部默认弹出；需要时点击“比较其他同主题工具”；</li><li>每只标的独立推荐，某只“无候选”不影响其它标的；</li><li>产品画像用于推荐前审核，不替代 OptionHelper 的正式定价数据；</li><li>结构候选必须由分析师确认，正式报价失败不删除已完成的研究报告；</li><li>报价完成后，由分析师选择哪些产品写入报告，不按胜率自动筛选。</li></ul>
         <div class="callout"><b>状态理解：</b><code>recommending</code> 表示结构推荐；<code>quoting</code> 表示正式定价；<code>finalizing</code> 表示报价已经返回，正在同步底稿、HTML 和 PDF。</div>
-        <div class="shot"><div class="shot-head"><span>建议截图 06</span><span>多标的 OptionHelper 审核</span></div><div class="shot-body"><div><b>待加入真实截图</b>展示产品画像、结构下拉框、加入报价队列和无候选状态。</div></div></div>
+        <div class="shot-grid">
+          <figure class="manual-shot">
+            <img src="images/user-guide/06-quote-underlying.png" alt="待报价标的确认界面" loading="lazy">
+            <figcaption><b>第一步：确认待报价标的。</b>默认只展示研究取数目标；需要多标的比较时再展开其他同主题工具。</figcaption>
+          </figure>
+          <figure class="manual-shot">
+            <img src="images/user-guide/07-optionhelper-review.png" alt="OptionHelper结构推荐确认界面" loading="lazy">
+            <figcaption><b>第二步：审核结构候选。</b>核对客户条件、产品画像、推荐理由、适用情形和风险，勾选确认后才加入正式报价队列。</figcaption>
+          </figure>
+        </div>
       </section>
 
       <section id="history">
         <h2>12. 历史任务</h2>
         <ul><li>在左侧搜索框输入主题、代码或客户问题关键词；</li><li>同一完整问题的重复运行会合并展示；</li><li>可把长问题重命名为简短标题，原始客户问题不会被修改；</li><li>打开历史任务可查看当次报告、运行摘要、底稿和交付文件；</li><li>历史报告默认只读，点击“编辑此报告”会创建独立修订版；</li><li>若最新一次运行失败但旧报告存在，界面会明确提示当前展示的是此前版本。</li></ul>
-        <div class="shot"><div class="shot-head"><span>建议截图 07</span><span>历史任务搜索与重命名</span></div><div class="shot-body"><div><b>待加入真实截图</b>使用虚构标题，避免展示客户名称。</div></div></div>
+        <div class="callout"><b>找不到历史任务时：</b>先清空搜索词，再确认当前使用的用户数据目录与创建任务时一致。历史任务的重命名只改变侧栏显示名称，不会修改客户原始需求。</div>
       </section>
 
       <section id="trouble">
@@ -408,35 +445,19 @@
         <details><summary>研究完成但没有正式报价</summary><div>检查是否勾选待报价标的、是否确认结构，以及 OptionHelper Skill、独立 Python、凭证和正式条款是否完整。报价失败不会影响研究报告。</div></details>
         <details><summary>一直显示正在重建最终 PDF</summary><div>先查看报价任务是否已进入 <code>finalizing</code>。若长时间不结束，保存 quote id 和运行记录，重启应用后从历史任务检查研究报告是否已生成。</div></details>
         <details><summary>安装版启动时报找不到 main.py、core 或 tool_entry</summary><div>确认使用最新版完整安装包。便携版必须完整解压，不能只复制 EXE。<code>tool_entry</code> 属于 OptionHelper Skill，需使用构建并验收后的 Skill，而不是源码仓库。</div></details>
-        <details><summary>报告超过一页</summary><div>在编辑器删除低价值图表、压缩重复论述并重新导出。以重新读取的真实 PDF 页数为准。</div></details>
+        <details><summary>报告页数明显偏多</summary><div>当前版本允许自然分页。若内容仍显冗长，可在编辑器删除低价值图表、压缩重复论述并重新导出；不要通过极端缩小字号强行压页。</div></details>
       </section>
 
       <section id="security">
         <h2>14. 安全与交付前检查</h2>
         <div class="grid">
           <div><h3>每次研究前</h3><ul class="checklist"><li>客户问题和研究期限完整</li><li>DeepSeek 与 iFinD 状态正常</li><li>事件型任务已确认搜索服务</li><li>材料具有使用权限与来源日期</li><li>需要报价时 OptionHelper 已就绪</li></ul></div>
-          <div><h3>外发报告前</h3><ul class="checklist"><li>研究对象与标题一致</li><li>数字有日期、单位和来源</li><li>结论没有内部审核术语</li><li>报告未显示内部证据编号或底稿提示</li><li>PDF 实测为一页</li><li>报价表只含分析师确认项目</li></ul></div>
+          <div><h3>外发报告前</h3><ul class="checklist"><li>研究对象与标题一致</li><li>数字有日期、单位和来源</li><li>结论没有内部审核术语</li><li>报告未显示内部证据编号或底稿提示</li><li>PDF 已完整导出且分页正常</li><li>报价表只含分析师确认项目</li></ul></div>
         </div>
         <div class="callout stop"><b>不要外发：</b>内部底稿、API Key、账号密码、Refresh Token、OptionHelper memory、客户原始材料目录、调试日志和未经确认的报价候选。</div>
       </section>
 
-      <section id="screenshots">
-        <h2>15. 需要补充的真实截图</h2>
-        <p>真实截图会显著提高说明书的可操作性。建议按下面清单提供 PNG，窗口尽量完整、分辨率不低于 1600×900。可以分批发送。</p>
-        <table><thead><tr><th>编号</th><th>截图内容</th><th>需要展示</th><th>注意事项</th></tr></thead><tbody>
-          <tr><td>01</td><td>首次设置向导</td><td>各配置项、保存/测试按钮</td><td>所有 Key、账号、Token 打码</td></tr>
-          <tr><td>02</td><td>主界面全景</td><td>历史任务、研究工作台、交付区</td><td>使用虚构客户问题</td></tr>
-          <tr><td>03A—C</td><td>取数目标确认</td><td>标准行业、人工篮子、主题 ETF 三种路径</td><td>最好使用同一个公开主题</td></tr>
-          <tr><td>04</td><td>事件证据包</td><td>三类证据、进度、勾选和保存</td><td>使用公开事件</td></tr>
-          <tr><td>05</td><td>候选论点审核</td><td>数据论点、材料论点、选择按钮</td><td>不要展示受限研报原文</td></tr>
-          <tr><td>06</td><td>报告预览和编辑器</td><td>编辑、删除图表、保存、导出</td><td>报告可用演示数据</td></tr>
-          <tr><td>07</td><td>OptionHelper 审核</td><td>产品画像、结构候选、无候选、报价队列</td><td>隐藏真实客户条款和正式价格</td></tr>
-          <tr><td>08</td><td>历史任务</td><td>搜索、重命名、历史报告入口</td><td>客户名称和问题匿名化</td></tr>
-        </tbody></table>
-        <div class="callout good"><b>最优先的四张：</b>主界面、取数目标确认、候选论点审核、报告编辑器。有这四张就能先完成第一版图文说明。</div>
-      </section>
-
-      <div class="footer">Research Helper 使用说明书 · 网页离线版 · 最后更新：2026-09-30</div>
+      <div class="footer">Research Helper 使用说明书 · 网页离线版 · 最后更新：2026-10-12</div>
     </div>
   </main>
 </div>

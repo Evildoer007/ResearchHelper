@@ -670,6 +670,47 @@ def _normalise_chart_specs(ma: MarketAnalysis, rc: ReportContent) -> None:
             spec.setdefault("单位", _chart_unit(spec))
 
 
+def _chart_data_fingerprint(spec: dict) -> str:
+    """识别同一组底层数据，忽略图型、标题和结论等展示差异。"""
+    data = spec.get("数据点") or []
+    series = spec.get("系列") or []
+    if not data and not series:
+        return ""
+    payload = {
+        "数据点": data,
+        "系列": series,
+        "x轴": spec.get("x轴") or "",
+        "y轴": spec.get("y轴") or "",
+        "柱标签": spec.get("柱标签") or "",
+        "线标签": spec.get("线标签") or "",
+    }
+    try:
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return repr(payload)
+
+
+def _deduplicate_chart_data(rc: ReportContent) -> None:
+    """跨论点去掉重复数据图，避免换个图题或图型重复表达同一件事。"""
+    seen: set[str] = set()
+    removed = 0
+    for logic in rc.logics:
+        unique: list[dict] = []
+        for spec in logic.图表规格列表 or []:
+            if not isinstance(spec, dict):
+                continue
+            fingerprint = _chart_data_fingerprint(spec)
+            if fingerprint and fingerprint in seen:
+                removed += 1
+                continue
+            if fingerprint:
+                seen.add(fingerprint)
+            unique.append(spec)
+        logic.图表规格列表 = unique
+    if removed:
+        rc.内部审核备注.append(f"已自动移除 {removed} 张跨论点重复数据图。")
+
+
 def write(ma: MarketAnalysis, client: DeepSeekClient | None = None) -> ReportContent:
     rc = ReportContent(主题=ma.plan.主题, 类型=ma.plan.类型)
     client = client or DeepSeekClient()
@@ -758,6 +799,7 @@ def write(ma: MarketAnalysis, client: DeepSeekClient | None = None) -> ReportCon
     # 图题、截止日、单位与样本口径必须同时进入 LLM 自拟图、研报已校验图和
     # 程序自动图；不能只要求某一条来源遵守图表规范。
     _normalise_chart_specs(ma, rc)
+    _deduplicate_chart_data(rc)
 
     # 补写后仍缺的，如实标记，绝不代笔编造内容。
     if "核心结论" in gaps and rc.核心结论:

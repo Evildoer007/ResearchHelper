@@ -281,58 +281,36 @@ def _finish(ma, title: str, *, tracker: RunTracker | None = None,
         if tracker:
             tracker.add_metadata("内部交互复核", f"未生成：{interactive_error}")
 
-    # PDF 页数是“一页通”正式交付的硬门：HTML 可无限滚动，不能替代真实打印结果。
-    # 不导出 PDF 的运行仍保留研究 HTML，但只能算内部草稿；绝不能把“没有测过”写成“一页”。
+    # PDF 页数只记录实际版面，不再作为交付阻断条件。内容完整性优先于强行压成一页。
     if _WANT_PDF:
         try:
             from render import pdf_out
             layout_audit: dict = {}
             if tracker:
-                with tracker.stage("pdf", "导出 PDF 并校验一页") as stage:
+                with tracker.stage("pdf", "导出 PDF 并记录页数") as stage:
                     pdf = pdf_out.html_to_pdf(out, layout_audit=layout_audit)
                     n = pdf_out.page_count(pdf)
-                    if n != 1:
-                        tracker.fail_stage(stage, f"PDF 实测 {n} 页，不满足一页通正式交付条件")
             else:
                 pdf = pdf_out.html_to_pdf(out, layout_audit=layout_audit)
                 n = pdf_out.page_count(pdf)
-            passed = n == 1
-            if passed:
-                print(f"  ✓ PDF：{pdf}（实测 1 页，已通过一页通交付校验）")
-            else:
-                print(f"  ⚠ PDF：{pdf}（实测 {n} 页，**不得作为正式一页通交付**；"
-                      "压缩建议已写入内部底稿）")
+            print(f"  ✓ PDF：{pdf}（实测 {n} 页；当前不限制报告页数）")
             gaps.append_delivery_check(gap_path, ma, rc, oh_result, pdf_pages=n,
                                        layout_audit=layout_audit)
             if tracker:
-                tracker.add_artifact("PDF（正式交付）" if passed else "PDF（超页，仅供内部复核）", pdf)
-                tracker.add_metadata("一页通交付校验", "通过：PDF 实测 1 页" if passed
-                                     else f"不通过：PDF 实测 {n} 页，禁止正式交付")
-                if not passed:
-                    overflow = (layout_audit.get("overflow") or [])
-                    labels = []
-                    for item in overflow:
-                        if isinstance(item, dict) and str(item.get("label") or "").strip():
-                            label = str(item["label"]).strip()
-                            if label not in labels:
-                                labels.append(label)
-                    if labels:
-                        tracker.add_metadata("超页区块（渲染定位）", "、".join(labels[:5]))
-                    tracker.add_recovery("压缩底稿“正式交付校验”列出的图表/正文后重新导出 PDF；"
-                                         "实测 1 页前不得对外发送。")
+                tracker.add_artifact("PDF（正式交付）", pdf)
+                tracker.add_metadata("一页通交付校验", f"通过：PDF 已导出，实测 {n} 页（当前不限页数）")
         except Exception as e:
             print(f"  ⚠ PDF 导出失败（不影响 HTML 与底稿）：{type(e).__name__}: {e}")
             gaps.append_delivery_check(gap_path, ma, rc, oh_result,
                                        pdf_error=f"{type(e).__name__}: {e}")
             if tracker:
-                tracker.add_metadata("一页通交付校验", "未通过：PDF 未成功导出，不能确认单页")
+                tracker.add_metadata("一页通交付校验", "未通过：PDF 未成功导出")
                 tracker.add_recovery("PDF 导出失败不影响 HTML；检查 Chromium/QtWebEngine 后可单独重试导出。")
     else:
-        print("  ⓘ 未导出 PDF：研究 HTML 已生成，但一页通正式交付状态为“未校验”。")
+        print("  ⓘ 未导出 PDF：研究 HTML 已生成，可按需另行导出 PDF。")
         gaps.append_delivery_check(gap_path, ma, rc, oh_result)
         if tracker:
-            tracker.add_metadata("一页通交付校验", "未校验：未导出 PDF，仅可作内部草稿")
-            tracker.add_recovery("正式交付前请用 --pdf 重跑并确认 PDF 实测为 1 页。")
+            tracker.add_metadata("一页通交付校验", "未校验：本次未导出 PDF")
     return out
 
 
@@ -831,11 +809,7 @@ def _run_tracked(tracker: RunTracker, work) -> object:
             if _prepare_llm_runtime(tracker):
                 result = work()
         status = "completed" if result else "failed"
-        delivery = str(tracker.metadata.get("一页通交付校验") or "")
-        if status == "completed" and delivery and not delivery.startswith("通过"):
-            # 研究已生成，但不是可发给客户的正式一页通；不能用笼统的 completed 掩盖它。
-            status = "completed_not_deliverable"
-        elif status == "completed" and tracker.recovery_actions:
+        if status == "completed" and tracker.recovery_actions:
             status = "completed_with_warnings"
         error = ""
         if status == "failed":

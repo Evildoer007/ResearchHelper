@@ -146,3 +146,19 @@ def test_hidden_chart_survives_revision_reapplication(tmp_path):
     apply_saved_revision(base)
     assert 'src="x"' not in final.read_text(encoding="utf-8")
     assert "9.9%" in final.read_text(encoding="utf-8")
+
+
+def test_chart_size_is_saved_and_applied(tmp_path):
+    base = tmp_path / "onepager.html"
+    base.write_text(LEGACY, encoding="utf-8")
+    final, sidecar, payload = save_revision(
+        base, fields={}, logic_order=["logic_1", "logic_2"], hidden_logic=[],
+        chart_sizes={"logic_1_chart_1": "medium"},
+    )
+    rendered = final.read_text(encoding="utf-8")
+    assert 'class="rh-chart-size rh-chart-size--medium"' in rendered
+    assert "rh-chart-size-overrides" in rendered
+    assert payload["version"] == 3
+    assert json.loads(sidecar.read_text(encoding="utf-8"))["chart_sizes"] == {
+        "logic_1_chart_1": "medium"
+    }

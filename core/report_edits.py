@@ -249,6 +249,9 @@ def field_label(key: str) -> str:
 
 def _reflow_single_compact_chart(block: str) -> str:
     """两图删至一张后，仅将已知适合半栏的图移到正文旁边。"""
+    # 分析师显式选择尺寸时尊重人工排版，不再自动把图移到半栏。
+    if "rh-chart-size--" in block:
+        return block
     row = re.search(r'<div class="chart-row">', block)
     if row is None or 'class="logic-split"' in block:
         return block
@@ -279,10 +282,19 @@ def _reflow_single_compact_chart(block: str) -> str:
     return block[:body.start()] + split + block[row_end:]
 
 
+_CHART_SIZE_CSS = """<style id="rh-chart-size-overrides">
+.rh-chart-size{box-sizing:border-box;margin-left:auto;margin-right:auto;max-width:100%}
+.rh-chart-size--small{width:48%}.rh-chart-size--medium{width:72%}.rh-chart-size--large{width:100%}
+.rh-chart-size img,.rh-chart-size svg,.rh-chart-size canvas{max-width:100%;height:auto}
+</style>"""
+_VALID_CHART_SIZES = {"small", "medium", "large"}
+
+
 def apply_edits(source: str, *, fields: Mapping[str, object] | None = None,
                 logic_order: list[str] | None = None,
                 hidden_logic: list[str] | None = None,
-                hidden_charts: list[str] | None = None) -> str:
+                hidden_charts: list[str] | None = None,
+                chart_sizes: Mapping[str, object] | None = None) -> str:
     marked = ensure_edit_markers(source)
     changes = dict(fields or {})
 
@@ -296,6 +308,28 @@ def apply_edits(source: str, *, fields: Mapping[str, object] | None = None,
     rendered = _CHART_SECTION_PATTERN.sub(
         lambda match: "" if match.group("key") in hidden_chart_keys else match.group(0), rendered,
     )
+    size_map = {
+        str(key): str(value) for key, value in dict(chart_sizes or {}).items()
+        if str(value) in _VALID_CHART_SIZES
+    }
+    if size_map:
+        def size_chart(match: re.Match[str]) -> str:
+            key = match.group("key")
+            size = size_map.get(key)
+            if not size:
+                return match.group(0)
+            return (
+                SECTION_START.format(key=key)
+                + f'<div class="rh-chart-size rh-chart-size--{size}">'
+                + match.group("body") + "</div>"
+                + SECTION_END.format(key=key)
+            )
+        rendered = _CHART_SECTION_PATTERN.sub(size_chart, rendered)
+        if "rh-chart-size-overrides" not in rendered:
+            if "</head>" in rendered:
+                rendered = rendered.replace("</head>", _CHART_SIZE_CSS + "</head>", 1)
+            else:
+                rendered = _CHART_SIZE_CSS + rendered
     matches = list(_SECTION_PATTERN.finditer(rendered))
     if not matches:
         return rendered
@@ -363,13 +397,14 @@ def load_revision(base_html: str | Path) -> dict[str, Any]:
 
 def save_revision(base_html: str | Path, *, fields: Mapping[str, object],
                   logic_order: list[str], hidden_logic: list[str],
-                  hidden_charts: list[str] | None = None) -> tuple[Path, Path, dict[str, Any]]:
+                  hidden_charts: list[str] | None = None,
+                  chart_sizes: Mapping[str, object] | None = None) -> tuple[Path, Path, dict[str, Any]]:
     base = Path(base_html).resolve()
     source = base.read_text(encoding="utf-8")
     previous = load_revision(base)
     revision = int(previous.get("revision") or 0) + 1
     payload: dict[str, Any] = {
-        "version": 2,
+        "version": 3,
         "active": True,
         "revision": revision,
         "edited_at": datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -379,10 +414,15 @@ def save_revision(base_html: str | Path, *, fields: Mapping[str, object],
         "logic_order": list(logic_order),
         "hidden_logic": list(hidden_logic),
         "hidden_charts": list(hidden_charts or []),
+        "chart_sizes": {
+            str(key): str(value) for key, value in dict(chart_sizes or {}).items()
+            if str(value) in _VALID_CHART_SIZES
+        },
     }
     final = final_html_path(base)
     rendered = apply_edits(source, fields=payload["fields"], logic_order=logic_order,
-                           hidden_logic=hidden_logic, hidden_charts=hidden_charts)
+                           hidden_logic=hidden_logic, hidden_charts=hidden_charts,
+                           chart_sizes=payload["chart_sizes"])
     final.write_text(rendered, encoding="utf-8")
     target = sidecar_path(base)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -412,6 +452,7 @@ def apply_saved_revision(base_html: str | Path) -> Path | None:
         logic_order=list(payload.get("logic_order") or []),
         hidden_logic=list(payload.get("hidden_logic") or []),
         hidden_charts=list(payload.get("hidden_charts") or []),
+        chart_sizes=payload.get("chart_sizes") if isinstance(payload.get("chart_sizes"), Mapping) else {},
     )
     final = final_html_path(base)
     final.write_text(rendered, encoding="utf-8")

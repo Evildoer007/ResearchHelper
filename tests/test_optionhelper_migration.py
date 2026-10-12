@@ -22,7 +22,7 @@ def test_explicit_quote_dates_are_preserved_without_mutating_inputs():
     request = build_project_request(body)
     assert request["pricing_config"]["valuation_date"] == "2026-09-15"
     assert request["quote_variants"][0]["pricing_config"]["valuation_date"] == "2026-09-14"
-    assert request["quote_variants"][0]["pricing_config"]["path_count"] == 100_000
+    assert request["quote_variants"][0]["pricing_config"]["path_count"] == 10_000
     assert request["term_overrides"] == {"T": 0.25}
     assert body == original
 
@@ -32,7 +32,7 @@ def test_each_underlying_has_independent_request_and_no_invented_date():
                                   "pricing_config": {"valuation_date": "2026-09-15"}})
     second = build_project_request({"selection": {"underlyings": ["561910.SH"]}})
     assert second["selection"]["underlyings"] == ["561910.SH"]
-    assert second["pricing_config"] == {"path_count": 100_000}
+    assert second["pricing_config"] == {"path_count": 10_000}
     assert first["pricing_config"]["valuation_date"] == "2026-09-15"
 
 
@@ -54,11 +54,11 @@ def test_quote_variants_receive_independent_defaults_without_mutating_input():
     }
     original = deepcopy(body)
     request = apply_formal_quote_pricing_defaults(body)
-    assert request["quote_variants"][0]["pricing_config"]["path_count"] == 100_000
+    assert request["quote_variants"][0]["pricing_config"]["path_count"] == 10_000
     assert "path_count" not in request["quote_variants"][1]["pricing_config"]
     assert request["quote_variants"][2]["pricing_config"]["path_count"] == 50_000
     assert request["pricing_config"] == {"valuation_date": "2026-09-15"}
-    assert FORMAL_QUOTE_MONTE_CARLO_PATH_COUNT == 100_000
+    assert FORMAL_QUOTE_MONTE_CARLO_PATH_COUNT == 10_000
     assert body == original
 
 

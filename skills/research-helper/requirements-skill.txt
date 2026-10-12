@@ -1,0 +1,11 @@
+# Install iFinDPy separately from the official iFinD SDK on supported Windows systems.
+requests>=2.31,<3
+matplotlib>=3.8,<4
+seaborn>=0.13,<1
+pyecharts>=2.0,<3
+akshare>=1.14
+pypdf>=4,<7
+python-docx>=1.1,<2
+pandas>=2,<3
+numpy>=1.26,<3
+PySide6>=6.7,<7

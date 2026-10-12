@@ -40,7 +40,10 @@ def ensure_skill_read_access(skill: Path, project: Path, *, platform_name: str |
         encoding="utf-8", errors="replace", timeout=30,
     )
     owner = str(owner_check.stdout or "").strip()
-    if owner_check.returncode or not owner:
+    explicit_owner = str(os.environ.get("RESEARCH_HELPER_ACL_PRINCIPAL") or "").strip()
+    if not owner and explicit_owner and not any(char in explicit_owner for char in "\r\n\0"):
+        owner = explicit_owner
+    if not owner:
         raise ValueError("无法确认 Research Helper 工作区所有者，未激活新版 OptionHelper")
     commands = (
         ["icacls", str(skill), "/inheritance:e", "/T", "/C", "/Q"],
@@ -88,7 +91,7 @@ def activate(skill: Path, source_commit: str, *, project: Path = ROOT) -> Path:
                OPTIONHELPER_RESULT_ROOT=str(project / "result"),
                RESEARCH_HELPER_OPTIONHELPER_SKILL=str(skill))
     for relative, args in (
-        ("scripts/environment_check.py", ["--check-readiness", "--skill-root", str(skill),
+        ("scripts/environment_check.py", ["--check-readiness", "--force-dependencies", "--skill-root", str(skill),
                                           "--project-root", str(project)]),
         ("scripts/tool_entry.py", ["--list"]),
         ("__module_import__", []),
@@ -102,7 +105,7 @@ def activate(skill: Path, source_commit: str, *, project: Path = ROOT) -> Path:
             else [sys.executable, str(skill / relative), *args]
         )
         check = subprocess.run(command, cwd=project, env=env, capture_output=True, text=True,
-                               encoding="utf-8", errors="replace", timeout=120)
+                               encoding="utf-8", errors="replace", timeout=300)
         if check.returncode:
             # Do not echo full readiness output: local paths/config may be private.
             label = "tool_entry 模块导入" if relative == "__module_import__" else relative

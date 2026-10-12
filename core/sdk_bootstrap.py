@@ -12,9 +12,16 @@ import os
 import platform
 import site
 import sys
+import sysconfig
+from contextlib import contextmanager
 from pathlib import Path
+from threading import RLock
 
-from .app_paths import CONFIG_PATH
+from .app_paths import CONFIG_PATH, IS_FROZEN, USER_DATA_ROOT
+
+
+_IMPORT_LOCK = RLock()
+_PURELIB_ENV = "RESEARCH_HELPER_IFIND_PURELIB"
 
 
 def _config_sdk_path() -> str:
@@ -61,6 +68,7 @@ def configure_ifind_sdk() -> list[str]:
         except OSError:
             continue
     added: list[str] = []
+    sdk_roots: list[Path] = []
     for value in dict.fromkeys(candidates):
         path = Path(value).expanduser()
         if not path.exists():
@@ -74,4 +82,62 @@ def configure_ifind_sdk() -> list[str]:
         except (AttributeError, OSError):
             pass
         added.append(resolved)
+        if (target / "iFinDPy.py").is_file() and (target / "ShellExport.dll").is_file():
+            sdk_roots.append(target.resolve())
+
+    # iFinD 的 Windows 版 Python 文件会在导入时通过
+    # ``sysconfig.get_paths()['purelib']/iFinDPy.pth`` 寻找原生 DLL。冻结后的
+    # purelib 位于安装目录的 ``_internal``，与用户真实 Python 环境无关。
+    # 在可写的用户数据目录生成一个只含 SDK 路径的桥接 .pth，导入期间再临时
+    # 将 purelib 指向这里，避免把 .pth 误当作 DLL 加载。
+    if IS_FROZEN and sdk_roots:
+        bridge = USER_DATA_ROOT / "sdk_bridge"
+        try:
+            bridge.mkdir(parents=True, exist_ok=True)
+            (bridge / "iFinDPy.pth").write_text(
+                str(sdk_roots[0]), encoding="utf-8"
+            )
+            os.environ[_PURELIB_ENV] = str(bridge.resolve())
+        except OSError:
+            # 企业终端若禁止写桥接目录，后续仍会尝试用户 Python 环境中已有的
+            # iFinDPy.pth，并由正常的 SDK 可用性检查给出明确结果。
+            pass
     return added
+
+
+def _ifind_purelib() -> Path | None:
+    configured = str(os.environ.get(_PURELIB_ENV) or "").strip()
+    if configured:
+        path = Path(configured).expanduser()
+        if (path / "iFinDPy.pth").is_file():
+            return path.resolve()
+    for pth in _pth_candidates():
+        try:
+            if pth.is_file():
+                return pth.parent.resolve()
+        except OSError:
+            continue
+    return None
+
+
+@contextmanager
+def ifind_sdk_import_context():
+    """让旧版 iFinD SDK 在冻结程序中读取真实的 ``iFinDPy.pth``。"""
+    purelib = _ifind_purelib()
+    if purelib is None:
+        yield
+        return
+
+    with _IMPORT_LOCK:
+        original = sysconfig.get_paths
+
+        def patched_get_paths(*args, **kwargs):
+            values = dict(original(*args, **kwargs))
+            values["purelib"] = str(purelib)
+            return values
+
+        sysconfig.get_paths = patched_get_paths
+        try:
+            yield
+        finally:
+            sysconfig.get_paths = original

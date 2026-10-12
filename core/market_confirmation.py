@@ -39,6 +39,10 @@ _THEME_BASKET_MAX = 20
 _ETF_SEARCH_ALIASES: dict[str, tuple[str, ...]] = {
     "机器人": ("机器人",),
     "人形机器人": ("人形机器人", "机器人"),
+    "风电": ("风电", "风能", "新能源", "电力设备"),
+    "风力发电": ("风力发电", "风电", "风能", "新能源"),
+    "券商": ("券商", "证券公司", "证券"),
+    "证券": ("证券", "证券公司", "券商"),
     "消费电子": ("消费电子", "智能终端", "电子"),
     "汽车电子": ("汽车电子", "智能驾驶", "智能汽车", "车联网", "汽车智能化"),
     "智能驾驶": ("智能驾驶", "智能汽车", "汽车电子", "车联网"),
@@ -51,6 +55,17 @@ _ETF_SEARCH_ALIASES: dict[str, tuple[str, ...]] = {
     "创新药": ("创新药", "港股创新药", "医药"),
     "白酒": ("白酒", "酒"),
     "酒": ("白酒", "酒"),
+}
+
+# 一个主题可以对应多个真实标准行业层级。确认页逐项走 iFinD 行业校验，只展示
+# 当前可取数的选项；分析师仍决定使用标准行业、主题篮子还是 ETF 真实成分。
+_STANDARD_SCOPE_CANDIDATES: dict[str, tuple[str, ...]] = {
+    "机器人": ("自动化设备", "机械设备"),
+    "人形机器人": ("自动化设备", "机械设备"),
+    "风电": ("风电设备", "电力设备"),
+    "风力发电": ("风电设备", "电力设备"),
+    "风能": ("风电设备", "电力设备"),
+    "券商": ("证券",),
 }
 
 
@@ -871,6 +886,11 @@ def _scope_options(brief, theme: str) -> list[str]:
     mapped_theme = _THEME_TO_SECTOR.get(normalized_theme)
     if mapped_theme:
         options.append(mapped_theme)
+    for key in sorted(_STANDARD_SCOPE_CANDIDATES, key=len, reverse=True):
+        if key in normalized_theme:
+            for candidate in _STANDARD_SCOPE_CANDIDATES[key]:
+                if candidate not in options:
+                    options.append(candidate)
 
     raw_scopes = list(getattr(brief, "宽口径成分行业", []) or
                       getattr(brief, "涉及板块", []) or [])
@@ -1043,6 +1063,22 @@ _EXPOSURE_RULES: dict[str, dict[str, tuple[str, ...]]] = {
     },
     "人形机器人": {"direct": ("人形机器人",), "partial": ("机器人", "智能制造", "自动化设备")},
     "机器人": {"direct": ("机器人",), "partial": ("智能制造", "自动化设备", "机械设备")},
+    "风电": {
+        "direct": ("风电", "风力发电", "风能"),
+        "partial": ("新能源", "清洁能源", "电力设备", "新能源发电"),
+    },
+    "风力发电": {
+        "direct": ("风力发电", "风电", "风能"),
+        "partial": ("新能源", "清洁能源", "电力设备", "新能源发电"),
+    },
+    "券商": {
+        "direct": ("券商", "证券公司", "证券"),
+        "partial": ("非银金融", "金融"),
+    },
+    "证券": {
+        "direct": ("证券公司", "证券", "券商"),
+        "partial": ("非银金融", "金融"),
+    },
     "互联网": {"direct": ("互联网", "中概互联"), "partial": ("恒生科技", "科技")},
     "创新药": {"direct": ("创新药",), "partial": ("医药", "医疗")},
     "医药": {"direct": ("医药", "医疗"), "partial": ("创新药",)},

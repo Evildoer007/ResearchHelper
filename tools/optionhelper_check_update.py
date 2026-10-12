@@ -282,8 +282,9 @@ def _candidate_checks(audit: Audit, project: Path, skill: Path, python: Path) ->
         OPTIONHELPER_RESULT_ROOT=str(project / "result"),
     )
     readiness = [str(python), str(skill / "scripts" / "environment_check.py"),
-                 "--check-readiness", "--skill-root", str(skill), "--project-root", str(project)]
-    code, text, elapsed = _run(readiness, cwd=project, timeout=180, env=env)
+                 "--check-readiness", "--force-dependencies",
+                 "--skill-root", str(skill), "--project-root", str(project)]
+    code, text, elapsed = _run(readiness, cwd=project, timeout=600, env=env)
     ready = False
     if code == 0:
         ready = _extract_json(text).get("ok") is True
@@ -323,7 +324,12 @@ def _project_tests(audit: Audit, project: Path, python: Path, skip: bool) -> Non
     else:
         command = [str(python), "-m", "unittest", "discover", "-s", "tests", "-v"]
         label = "unittest 回归（pytest 不可用，覆盖不完整）"
-    code, text, elapsed = _run(command, cwd=project, timeout=900)
+    test_temp = project / ".test-tmp" / "optionhelper-update-check"
+    test_temp.mkdir(parents=True, exist_ok=True)
+    code, text, elapsed = _run(
+        command, cwd=project, timeout=900,
+        env={"TEMP": str(test_temp), "TMP": str(test_temp)},
+    )
     status = "pass" if code == 0 and label.startswith("pytest") else "warn" if code == 0 else "fail"
     detail = (text.splitlines()[-1] if text.splitlines() else label)
     if status == "warn":

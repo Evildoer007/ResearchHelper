@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
 import re
@@ -36,7 +37,7 @@ from core.app_paths import (
 from core.process_launcher import (
     apply_to_qprocess, external_worker_path, internal_worker_command, research_command,
 )
-from core.run_history import load_history_tasks, primary_run_files, save_history_title
+from core.run_history import load_history_tasks, save_history_title
 from core.quote_diagnostics import last_worker_stage, safe_error_tail
 from gui.history_sidebar import HistorySidebar
 from gui.history_view import HistoryView
@@ -1995,6 +1996,10 @@ class LlmSettingsDialog(QDialog):
         self.key = QLineEdit()
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
         self.key.setPlaceholderText("已配置；留空则不修改")
+        self.base_url = QLineEdit(
+            str(self.config.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com")
+        )
+        self.base_url.setPlaceholderText("https://api.deepseek.com")
         self.status = QLabel(self._initial_status())
         self.status.setWordWrap(True)
         self.status.setProperty("kind", "callout")
@@ -2017,6 +2022,7 @@ class LlmSettingsDialog(QDialog):
         form.addRow("质量档模型", self.quality)
         form.addRow("备用模型", self.fallback)
         form.addRow("DeepSeek API key", self.key)
+        form.addRow("DeepSeek API 地址", self.base_url)
         form.addRow("", ResearchHelperWindow._row(refresh, test))
         form.addRow("模型目录状态", self.status)
         form.addRow("", hint)
@@ -2055,6 +2061,7 @@ class LlmSettingsDialog(QDialog):
         program, arguments = internal_worker_command("model-catalog")
         process.start(program, arguments)
         payload = {"action": action, "model": model}
+        payload["base_url"] = self.base_url.text().strip() or "https://api.deepseek.com"
         if self.key.text().strip():
             payload["api_key"] = self.key.text().strip()
         process.write(json.dumps(payload, ensure_ascii=True).encode("ascii"))
@@ -2120,6 +2127,10 @@ class LlmSettingsDialog(QDialog):
         if not fast or not quality or not fallback:
             QMessageBox.information(self, "模型配置不完整", "快速档、质量档和备用模型均不能为空。")
             return
+        base_url = self.base_url.text().strip().rstrip("/")
+        if not base_url.startswith(("https://", "http://")):
+            QMessageBox.information(self, "API 地址无效", "DeepSeek API 地址必须以 http:// 或 https:// 开头。")
+            return
         live_models = ([str(item) for item in self.last_result.get("models", [])]
                        if self.last_result.get("source") == "live" else [])
         invalid = [model for model in (fast, quality, fallback)
@@ -2136,6 +2147,7 @@ class LlmSettingsDialog(QDialog):
         config["DEEPSEEK_FALLBACK_MODEL"] = fallback
         # 旧版 worker/OptionHelper 继续读取该键；含义统一为质量档。
         config["DEEPSEEK_MODEL"] = quality
+        config["DEEPSEEK_BASE_URL"] = base_url
         if self.config.get("DEEPSEEK_MODELS_VALIDATED_AT"):
             config["DEEPSEEK_MODELS_VALIDATED_AT"] = self.config["DEEPSEEK_MODELS_VALIDATED_AT"]
         if self.key.text().strip():
@@ -2343,7 +2355,8 @@ class IFindCredentialsDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("iFinD 数据与报价凭证（仅本机）")
-        self.resize(570, 260)
+        self.resize(660, 340)
+        self.config = _load_json(LOCAL_CONFIG)
         self.account = QLineEdit()
         self.account.setPlaceholderText("已配置；留空则不修改")
         self.password = QLineEdit()
@@ -2352,6 +2365,13 @@ class IFindCredentialsDialog(QDialog):
         self.refresh_token = QLineEdit()
         self.refresh_token.setEchoMode(QLineEdit.EchoMode.Password)
         self.refresh_token.setPlaceholderText("已配置；留空则不修改")
+        self.sdk_path = QLineEdit(str(self.config.get("IFIND_SDK_PATH") or ""))
+        self.sdk_path.setPlaceholderText("Windows：iFinDPy.py 与 ShellExport.dll 所在目录")
+        choose_sdk = QPushButton("选择目录")
+        choose_sdk.clicked.connect(self._choose_sdk_path)
+        self.api_base_url = QLineEdit(
+            str(self.config.get("IFIND_API_BASE_URL") or "https://quantapi.51ifind.com/api/v1")
+        )
         hint = QLabel(
             "Windows研究取数可使用iFinD账号、密码和官方SDK；macOS/Linux研究取数使用"
             "官方HTTP接口与Refresh Token。Refresh Token也会在OptionHelper已配置时同步给其"
@@ -2365,8 +2385,16 @@ class IFindCredentialsDialog(QDialog):
         form.addRow("研究数据 iFinD 账号", self.account)
         form.addRow("研究数据 iFinD 密码", self.password)
         form.addRow("iFinD HTTP / OptionHelper Refresh Token", self.refresh_token)
+        form.addRow("Windows iFinD SDK 路径", ResearchHelperWindow._row(self.sdk_path, choose_sdk))
+        form.addRow("iFinD HTTP API 地址", self.api_base_url)
         form.addRow("", hint)
         form.addRow("", ResearchHelperWindow._row(save, cancel))
+
+    def _choose_sdk_path(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self, "选择 iFinD SDK 目录", self.sdk_path.text().strip() or str(Path.home()))
+        if selected:
+            self.sdk_path.setText(selected)
 
     def _save_refresh_token(self, token: str) -> tuple[bool, str]:
         """沿用 Skill 自己的原子保存入口，避免 GUI 了解或重写 memory.md 格式。"""
@@ -2404,6 +2432,16 @@ class IFindCredentialsDialog(QDialog):
             config["IFIND_PASSWORD"] = password
         if token:
             config["IFIND_REFRESH_TOKEN"] = token
+        sdk_path = self.sdk_path.text().strip()
+        if sdk_path:
+            config["IFIND_SDK_PATH"] = sdk_path
+        else:
+            config.pop("IFIND_SDK_PATH", None)
+        api_base_url = self.api_base_url.text().strip().rstrip("/")
+        if not api_base_url.startswith(("https://", "http://")):
+            QMessageBox.information(self, "API 地址无效", "iFinD HTTP API 地址必须以 http:// 或 https:// 开头。")
+            return
+        config["IFIND_API_BASE_URL"] = api_base_url
         try:
             LOCAL_CONFIG.write_text(json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8")
         except OSError as error:
@@ -2417,6 +2455,221 @@ class IFindCredentialsDialog(QDialog):
 
         root = Path(config.OPTIONHELPER_SKILL_ROOT) if config.OPTIONHELPER_SKILL_ROOT else None
         return bool(root and (root / "scripts" / "environment_check.py").is_file())
+
+
+class OptionHelperSettingsDialog(QDialog):
+    """集中管理 Research Helper 调用 OptionHelper 所需的本机路径。"""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("OptionHelper 集成设置（仅本机）")
+        self.resize(680, 270)
+        values = _load_json(LOCAL_CONFIG)
+        from core import config as runtime_config
+
+        self.skill_root = QLineEdit(
+            str(values.get("OPTIONHELPER_SKILL_ROOT") or runtime_config.OPTIONHELPER_SKILL_ROOT or ""))
+        self.skill_root.setPlaceholderText("包含 SKILL.md 与 scripts/tool_entry.py 的目录")
+        choose_root = QPushButton("选择目录")
+        choose_root.clicked.connect(self._choose_skill_root)
+
+        self.python = QLineEdit(
+            str(values.get("OPTIONHELPER_PYTHON") or runtime_config.OPTIONHELPER_PYTHON or ""))
+        self.python.setPlaceholderText("OptionHelper 独立环境的 python.exe / python3")
+        choose_python = QPushButton("选择 Python")
+        choose_python.clicked.connect(self._choose_python)
+
+        self.host_url = QLineEdit(str(values.get("OPTIONHELPER_HOST_URL") or ""))
+        self.host_url.setPlaceholderText("可选：远程 Host 地址；本地 Skill 模式留空")
+        hint = QLabel(
+            "正式推荐与报价使用经过兼容性检查的 OptionHelper Skill 和独立 Python 环境。"
+            "路径保存在当前用户配置中，不会写入报告或发布包。"
+        )
+        hint.setWordWrap(True)
+        hint.setProperty("kind", "caption")
+        save, cancel = QPushButton("保存设置"), QPushButton("取消")
+        save.clicked.connect(self.save)
+        cancel.clicked.connect(self.reject)
+        form = QFormLayout(self)
+        form.addRow("OptionHelper Skill 根目录", ResearchHelperWindow._row(self.skill_root, choose_root))
+        form.addRow("OptionHelper Python", ResearchHelperWindow._row(self.python, choose_python))
+        form.addRow("OptionHelper Host URL", self.host_url)
+        form.addRow("", hint)
+        form.addRow("", ResearchHelperWindow._row(save, cancel))
+
+    def _choose_skill_root(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self, "选择 OptionHelper Skill 根目录",
+            self.skill_root.text().strip() or str(Path.home()))
+        if selected:
+            self.skill_root.setText(selected)
+
+    def _choose_python(self) -> None:
+        selected, _ = QFileDialog.getOpenFileName(
+            self, "选择 OptionHelper Python", self.python.text().strip() or str(Path.home()),
+            "Python (python.exe python3 python);;所有文件 (*)")
+        if selected:
+            self.python.setText(selected)
+
+    def save(self) -> None:
+        root_text = self.skill_root.text().strip()
+        python_text = self.python.text().strip()
+        if root_text:
+            root = Path(root_text)
+            required = (root / "SKILL.md", root / "scripts" / "tool_entry.py",
+                        root / "scripts" / "environment_check.py")
+            if not all(path.is_file() for path in required):
+                QMessageBox.information(
+                    self, "OptionHelper 目录无效",
+                    "所选目录必须包含 SKILL.md、scripts/tool_entry.py 和 scripts/environment_check.py。",
+                )
+                return
+        if python_text and not Path(python_text).is_file():
+            QMessageBox.information(self, "Python 路径无效", "请选择实际存在的 Python 解释器文件。")
+            return
+        host_url = self.host_url.text().strip().rstrip("/")
+        if host_url and not host_url.startswith(("https://", "http://")):
+            QMessageBox.information(self, "Host URL 无效", "Host URL 必须以 http:// 或 https:// 开头。")
+            return
+        values = _load_json(LOCAL_CONFIG)
+        for key, value in (
+            ("OPTIONHELPER_SKILL_ROOT", root_text),
+            ("OPTIONHELPER_PYTHON", python_text),
+            ("OPTIONHELPER_HOST_URL", host_url),
+        ):
+            if value:
+                values[key] = value
+            else:
+                values.pop(key, None)
+        try:
+            LOCAL_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+            LOCAL_CONFIG.write_text(json.dumps(values, ensure_ascii=False, indent=2), encoding="utf-8")
+        except OSError as error:
+            QMessageBox.warning(self, "保存失败", str(error))
+            return
+        from core import config as runtime_config
+        runtime_config.OPTIONHELPER_SKILL_ROOT = root_text
+        runtime_config.OPTIONHELPER_PYTHON = python_text
+        runtime_config.OPTIONHELPER_HOST_URL = host_url
+        self.accept()
+
+
+class ApplicationSettingsDialog(QDialog):
+    """桌面端统一设置入口；各专业设置页仍独立负责校验与连接测试。"""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("应用设置 - Research Helper")
+        self.setMinimumWidth(720)
+        self.setMinimumHeight(500)
+        layout = QVBoxLayout(self)
+        title = QLabel("应用设置")
+        title.setProperty("kind", "section")
+        intro = QLabel(
+            f"模型、搜索、数据源和报价集成均在这里配置。所有凭证只保存在当前用户目录：{DATA_ROOT}"
+        )
+        intro.setWordWrap(True)
+        intro.setProperty("kind", "caption")
+        layout.addWidget(title)
+        layout.addWidget(intro)
+
+        self.status_labels: dict[str, QLabel] = {}
+        self._add_setting(
+            layout, "分析模型", "DeepSeek API Key、API 地址、快速/质量/备用模型与实时连接测试。",
+            "模型与 API", lambda: self._open_child(LlmSettingsDialog), "llm")
+        self._add_setting(
+            layout, "公开资料检索", "Tavily API Key、搜索深度、语言/地区偏好和 Bing RSS 备用入口。",
+            "搜索与 API", lambda: self._open_child(SearchSettingsDialog), "search")
+        self._add_setting(
+            layout, "iFinD 数据源", "账号密码、HTTP Refresh Token、Windows SDK 路径与接口地址。",
+            "iFinD 设置", lambda: self._open_child(IFindCredentialsDialog), "ifind")
+        self._add_setting(
+            layout, "OptionHelper 集成", "Skill 根目录、独立 Python 环境和可选 Host 地址。",
+            "OptionHelper 设置", lambda: self._open_child(OptionHelperSettingsDialog), "optionhelper")
+        environment_callback = getattr(parent, "run_environment_check", lambda: None)
+        self._add_setting(
+            layout, "本机环境", "检查用户目录、DeepSeek、Tavily、iFinD、OptionHelper 与离线图表资源。",
+            "运行环境检查", environment_callback, "environment")
+        layout.addStretch(1)
+        close = QPushButton("完成")
+        close.setProperty("role", "primary")
+        close.clicked.connect(self.accept)
+        layout.addWidget(close, alignment=Qt.AlignmentFlag.AlignRight)
+        self._refresh_statuses()
+
+    def _add_setting(self, layout: QVBoxLayout, title: str, description: str,
+                     button_text: str, callback, key: str) -> None:
+        card = QFrame()
+        card.setObjectName("card")
+        row = QHBoxLayout(card)
+        row.setContentsMargins(16, 12, 16, 12)
+        copy = QVBoxLayout()
+        heading = QLabel(title)
+        heading.setProperty("kind", "field-title")
+        detail = QLabel(description)
+        detail.setWordWrap(True)
+        detail.setProperty("kind", "caption")
+        status = QLabel()
+        status.setProperty("kind", "caption")
+        self.status_labels[key] = status
+        copy.addWidget(heading)
+        copy.addWidget(detail)
+        copy.addWidget(status)
+        button = QPushButton(button_text)
+        button.setMinimumWidth(150)
+        button.clicked.connect(callback)
+        row.addLayout(copy, 1)
+        row.addWidget(button)
+        layout.addWidget(card)
+
+    def _open_child(self, dialog_type) -> None:
+        if dialog_type(self).exec():
+            # core.config 在应用启动时加载。保存后立即刷新同一模块对象，确保环境检查、
+            # OptionHelper 就绪判断及本次后续任务看到新配置，不要求用户重启应用。
+            from core import config as runtime_config
+            importlib.reload(runtime_config)
+        self._refresh_statuses()
+
+    def _refresh_statuses(self) -> None:
+        values = _load_json(LOCAL_CONFIG)
+        self.status_labels["llm"].setText(
+            "已配置 API Key" if values.get("DEEPSEEK_API_KEY") else "待配置 DeepSeek API Key")
+        provider = str(values.get("SEARCH_PROVIDER") or "tavily")
+        search_ready = bool(values.get("TAVILY_API_KEY")) if provider == "tavily" else True
+        self.status_labels["search"].setText(
+            f"当前入口：{provider}｜{'已就绪' if search_ready else '待配置 Tavily API Key'}")
+        ifind_ready = bool(
+            (values.get("IFIND_ACCOUNT") and values.get("IFIND_PASSWORD"))
+            or values.get("IFIND_REFRESH_TOKEN"))
+        self.status_labels["ifind"].setText("已配置认证" if ifind_ready else "待配置 iFinD 认证")
+        option_ready = bool(values.get("OPTIONHELPER_SKILL_ROOT") and values.get("OPTIONHELPER_PYTHON"))
+        self.status_labels["optionhelper"].setText("已配置本机集成" if option_ready else "未配置（仅研究时可暂不配置）")
+        self.status_labels["environment"].setText("修改设置后建议运行一次完整检查")
+
+
+class UserGuideDialog(QDialog):
+    """在应用内打开随发布包分发的单文件网页说明书。"""
+
+    def __init__(self, guide_path: Path, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.guide_path = guide_path
+        self.setWindowTitle("Research Helper 使用说明书")
+        self.resize(1180, 820)
+        layout = QVBoxLayout(self)
+        if QWebEngineView is not None:
+            viewer = QWebEngineView()
+            viewer.setUrl(QUrl.fromLocalFile(str(guide_path.resolve())))
+        else:
+            viewer = QTextBrowser()
+            viewer.setOpenExternalLinks(True)
+            viewer.setSource(QUrl.fromLocalFile(str(guide_path.resolve())))
+        layout.addWidget(viewer, 1)
+        browser = QPushButton("在系统浏览器中打开")
+        browser.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(guide_path.resolve()))))
+        close = QPushButton("关闭")
+        close.clicked.connect(self.accept)
+        layout.addWidget(ResearchHelperWindow._row(browser, close))
 
 
 class ThemeAssociationDialog(QDialog):
@@ -3064,7 +3317,7 @@ class ResearchHelperWindow(QMainWindow):
             "勾选后本次运行必须确认事件事实、产业机制、A股暴露及组合传导链。"
             "科技回调、风格轮动等市场状态型问题不要勾选，它们使用行情和历史区间验证。"
         )
-        self.pdf = QCheckBox("导出 PDF 并校验一页（正式交付必需）")
+        self.pdf = QCheckBox("导出 PDF（按实际内容自然分页）")
         self.pdf.setChecked(True)
         self.source_label = QLabel("未添加补充材料（可选；支持 PDF 上传或粘贴文字）")
         self.source_label.setWordWrap(True)
@@ -3079,10 +3332,6 @@ class ResearchHelperWindow(QMainWindow):
         self.evidence_label.setWordWrap(True)
         edit_evidence = QPushButton("管理事件证据")
         clear_evidence = QPushButton("清空")
-        llm_settings = QPushButton("LLM 设置")
-        search_settings = QPushButton("搜索设置")
-        ifind_settings = QPushButton("iFinD 凭证")
-        environment_check = QPushButton("运行环境检查")
         choose_override.clicked.connect(self.choose_override)
         edit_override.clicked.connect(self.edit_override)
         upload_sources.clicked.connect(self.upload_sources)
@@ -3091,10 +3340,6 @@ class ResearchHelperWindow(QMainWindow):
         edit_evidence.clicked.connect(self.edit_event_evidence)
         clear_evidence.clicked.connect(self.clear_event_evidence)
         self.force_event.toggled.connect(self._refresh_evidence_summary)
-        llm_settings.clicked.connect(self.edit_llm_settings)
-        search_settings.clicked.connect(self.edit_search_settings)
-        ifind_settings.clicked.connect(self.edit_ifind_credentials)
-        environment_check.clicked.connect(self.run_environment_check)
         self.run_button = QPushButton("开始生成")
         self.run_button.setProperty("role", "primary")
         self.run_button.clicked.connect(self.start_run)
@@ -3127,7 +3372,7 @@ class ResearchHelperWindow(QMainWindow):
         self.quote_preview.setOpenExternalLinks(False)
         self.preview_tabs.addTab(self.report_preview, "一页通预览")
         self.preview_tabs.addTab(self.quote_preview, "报价表预览")
-        self.delivery_status = QLabel("交付校验：等待运行。正式交付需导出 PDF 并实测为 1 页。")
+        self.delivery_status = QLabel("PDF 状态：等待运行。报告可按实际内容自然分页。")
         self.delivery_status.setWordWrap(True)
         self.edit_report_button = QPushButton("编辑报告")
         self.edit_report_button.setEnabled(False)
@@ -3135,15 +3380,6 @@ class ResearchHelperWindow(QMainWindow):
         self.artifacts = QListWidget()
         self.artifacts.setMinimumHeight(142)  # 常规 5-6 条交付物无需滚动即可辨认。
         self.artifacts.itemDoubleClicked.connect(self.open_artifact)
-        self.history = QComboBox()
-        self.history.currentIndexChanged.connect(self.show_selected_history)
-        self.history_hint = QLabel("用于查看旧运行的内部底稿或把旧需求带回输入框；不会覆盖当前结果。")
-        self.history_hint.setWordWrap(True)
-        self.review = QPlainTextEdit(); self.review.setReadOnly(True)
-        rerun = QPushButton("按本次需求重跑")
-        rerun.clicked.connect(self.rerun_selected)
-        refresh = QPushButton("刷新运行记录")
-        refresh.clicked.connect(self.refresh_history)
         self.quote_review_button = QPushButton("审核产品并加入正式报价队列")
         self.quote_review_button.setProperty("role", "primary")
         self.quote_review_button.setEnabled(False)
@@ -3165,12 +3401,12 @@ class ResearchHelperWindow(QMainWindow):
 
         # 按钮保持紧凑单行高度，窄屏时由左栏滚动承接，避免高按钮叠压相邻控件。
         for button in (upload_sources, paste_sources, open_sources, choose_override, edit_override,
-                       edit_evidence, clear_evidence, llm_settings, search_settings, ifind_settings, environment_check,
+                       edit_evidence, clear_evidence,
                        self.run_button, self.stop_run_button, self.quote_review_button, self.cancel_quote_job_button,
                        self.retry_quote_job_button, self.include_quote_button, self.edit_report_button):
             button.setMinimumHeight(24)
         for button in (upload_sources, paste_sources, open_sources, choose_override, edit_override,
-                       edit_evidence, llm_settings, search_settings, ifind_settings, environment_check):
+                       edit_evidence):
             button.setMinimumWidth(138)
         self.quote_review_button.setMinimumWidth(270)
 
@@ -3229,10 +3465,6 @@ class ResearchHelperWindow(QMainWindow):
         override_layout.addWidget(self.override_label)
         override_layout.addWidget(self._row(choose_override, edit_override))
         form.addRow("人工数据补充", override_box)
-        form.addRow("分析模型", self._row(llm_settings))
-        form.addRow("公开资料检索", self._row(search_settings))
-        form.addRow("数据与报价凭证", self._row(ifind_settings))
-        form.addRow("本机环境", self._row(environment_check))
         form.addRow(_section_label("3. 运行与交付"))
         form.addRow("", self._row(self.run_button, self.stop_run_button))
         research_progress_box = QWidget()
@@ -3287,7 +3519,7 @@ class ResearchHelperWindow(QMainWindow):
         delivery_box.setContentsMargins(12, 12, 12, 12)
         delivery_box.setSpacing(8)
         delivery_box.addWidget(_section_label("报告交付"))
-        preview_hint = QLabel("预览只读取本次运行生成的报告；正式 PDF 仍需通过单页校验。")
+        preview_hint = QLabel("预览只读取本次运行生成的报告；正式 PDF 按实际内容自然分页。")
         preview_hint.setProperty("kind", "caption")
         preview_hint.setWordWrap(True)
         delivery_box.addWidget(preview_hint)
@@ -3311,11 +3543,10 @@ class ResearchHelperWindow(QMainWindow):
         review_box.addWidget(self.summary, 1)
         review_box.addWidget(QLabel("审核与交接（内部复核用）"))
         review_box.addWidget(self.handoff, 2)
-        review_box.addWidget(QLabel("历史运行与内部底稿"))
-        review_box.addWidget(self._row(self.history, refresh))
-        review_box.addWidget(self.history_hint)
-        review_box.addWidget(self.review, 3)
-        review_box.addWidget(rerun)
+        history_note = QLabel("历史任务、旧报告和再次使用入口已统一放在左侧历史任务栏。")
+        history_note.setWordWrap(True)
+        history_note.setProperty("kind", "caption")
+        review_box.addWidget(history_note)
         review_tab = QWidget(); review_tab.setLayout(review_box)
 
         # One full-width work page at a time. The old two-pane splitter plus two
@@ -3362,6 +3593,14 @@ class ResearchHelperWindow(QMainWindow):
             topbar_layout.addWidget(button)
             self.nav_buttons[key] = button
         topbar_layout.addStretch(1)
+        guide_button = QPushButton("使用说明")
+        guide_button.setToolTip("打开 Research Helper 网页使用说明书")
+        guide_button.clicked.connect(self.open_user_guide)
+        settings_button = QPushButton("设置")
+        settings_button.setToolTip("统一管理模型、搜索、iFinD、OptionHelper 和本机环境")
+        settings_button.clicked.connect(self.open_application_settings)
+        topbar_layout.addWidget(guide_button)
+        topbar_layout.addWidget(settings_button)
         main_area = QWidget()
         main_layout = QVBoxLayout(main_area)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -4700,10 +4939,10 @@ class ResearchHelperWindow(QMainWindow):
         process.start(config.OPTIONHELPER_PYTHON, [str(external_worker_path("optionhelper_quote_watchdog.py"))])
         process.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
         process.closeWriteChannel()
-        # Worker watchdog 在 180 秒返回明确的 timeout JSON；GUI 在 195 秒兜底，
-        # 避免两只 180 秒计时器竞态导致 timeout 被误报为 ProcessError.Crashed。
+        # Worker watchdog 默认在 900 秒返回明确的 timeout JSON；GUI 稍后兜底，
+        # 避免复杂蒙卡结构在正常计算期间被误杀。
         self.quote_slow_timer.start(60_000)
-        self.quote_timeout_timer.start(195_000)
+        self.quote_timeout_timer.start(930_000)
 
     def _stop_quote_timers(self) -> None:
         self.quote_slow_timer.stop()
@@ -4713,7 +4952,7 @@ class ResearchHelperWindow(QMainWindow):
         job = self.active_quote_job
         if job is None or self.option_process is None:
             return
-        job.message = "报价超过 60 秒，仍在等待 OptionHelper/iFinD 响应（180 秒后由报价监控停止）"
+        job.message = "报价超过 60 秒，仍在计算；10,000 条模拟路径的复杂结构可能仍需数分钟（最长等待 15 分钟）"
         self._sync_quote_runtime_to_summary(job)
         self._refresh_quote_queue()
         self.status.setText(f"{job.job_id}：{job.message}")
@@ -4722,7 +4961,7 @@ class ResearchHelperWindow(QMainWindow):
         job = self.active_quote_job
         if job is None or self.option_process is None:
             return
-        job.forced_stop_reason = "正式报价超过 195 秒，界面安全兜底已停止；请检查 OptionHelper 报价诊断。"
+        job.forced_stop_reason = "正式报价超过 930 秒，界面安全兜底已停止；请检查 OptionHelper 报价诊断。"
         job.failure_reason = "gui_timeout"
         self.status.setText(f"{job.job_id}：报价超时，正在停止进程…")
         self.option_process.kill()
@@ -4959,16 +5198,11 @@ class ResearchHelperWindow(QMainWindow):
                 for name in [key for key in artifacts if "PDF" in str(key)]:
                     artifacts.pop(name, None)
                 if pages is not None:
-                    if pages == 1:
-                        artifacts["PDF（正式交付）"] = pdf
-                        metadata["一页通交付校验"] = "通过：PDF 实测 1 页"
-                        job.message = "正式报价完成；HTML、内部底稿和 PDF 已同步更新并通过一页校验"
-                    else:
-                        artifacts["PDF（超页，仅供内部复核）"] = pdf
-                        metadata["一页通交付校验"] = f"不通过：PDF 实测 {pages} 页，禁止正式交付"
-                        job.message = f"正式报价完成；HTML、内部底稿已更新，但 PDF 实测 {pages} 页"
+                    artifacts["PDF（正式交付）"] = pdf
+                    metadata["一页通交付校验"] = f"通过：PDF 已导出，实测 {pages} 页（当前不限页数）"
+                    job.message = f"正式报价完成；HTML、内部底稿和 {pages} 页 PDF 已同步更新"
                 else:
-                    metadata["一页通交付校验"] = "未通过：正式报价后的 PDF 未成功导出，不能确认单页"
+                    metadata["一页通交付校验"] = "未通过：正式报价后的 PDF 未成功导出"
                     job.message = "正式报价完成；HTML、内部底稿已更新，但最终 PDF 导出失败"
                 job.status = "completed"
             except Exception as error:
@@ -4976,7 +5210,7 @@ class ResearchHelperWindow(QMainWindow):
                 # 已停止而状态永久停在 finalizing。保留 HTML/报价，明确降级交付。
                 for name in [key for key in artifacts if "PDF" in str(key)]:
                     artifacts.pop(name, None)
-                metadata["一页通交付校验"] = "未通过：正式报价后的底稿或 PDF 同步失败，禁止正式交付"
+                metadata["一页通交付校验"] = "未通过：正式报价后的底稿或 PDF 同步失败"
                 job.status = "failed"
                 job.failure_reason = "delivery_sync_error"
                 job.message = f"正式报价已返回，但交付同步失败：{type(error).__name__}: {error}"[:220]
@@ -4993,7 +5227,7 @@ class ResearchHelperWindow(QMainWindow):
             return
 
         self._quote_pdf_exporting = True
-        self.status.setText(f"{job.job_id}：正式报价完成，正在重建最终 PDF 并校验页数…")
+        self.status.setText(f"{job.job_id}：正式报价完成，正在重建最终 PDF 并记录页数…")
         pdf_path = str(report_file.with_suffix(".pdf"))
 
         def after_load(ok: bool) -> None:
@@ -5128,6 +5362,20 @@ class ResearchHelperWindow(QMainWindow):
         if dialog.exec():
             QMessageBox.information(self, "LLM 设置已保存", "新设置会在下一次分析任务启动时生效。")
 
+    def open_application_settings(self) -> None:
+        """统一入口；研究页不再散落各类 API 和运行环境按钮。"""
+        ApplicationSettingsDialog(self).exec()
+
+    def open_user_guide(self) -> None:
+        guide = ROOT / "docs" / "user-guide.html"
+        if not guide.is_file():
+            QMessageBox.warning(
+                self, "使用说明不可用",
+                f"当前安装缺少说明书文件：\n{guide}\n\n请重新安装完整发布包。",
+            )
+            return
+        UserGuideDialog(guide, self).exec()
+
     def _apply_run_model_environment(self, process: QProcess) -> None:
         """把分析师确认的本次模型覆盖传给后续产品子进程。"""
         if not self._run_model_overrides:
@@ -5154,6 +5402,8 @@ class ResearchHelperWindow(QMainWindow):
             )
 
     def run_environment_check(self) -> None:
+        from core import config as runtime_config
+        importlib.reload(runtime_config)
         from core.release_health import write_report
         try:
             path = write_report()
@@ -5383,7 +5633,6 @@ class ResearchHelperWindow(QMainWindow):
                 if missing:
                     text += "\n\n缺少：\n• " + "\n• ".join(str(item) for item in missing)
                 self.status.setText("未生成报告：事件证据不足")
-                self.review.setPlainText(text)
                 answer = QMessageBox.question(
                     self, "缺少事件传导证据，未生成报告", text + "\n\n现在打开“管理事件证据”吗？",
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -5531,7 +5780,7 @@ class ResearchHelperWindow(QMainWindow):
         else:
             self.report_preview.setHtml("")
         self.quote_preview.setHtml("<p>等待正式报价结果…</p>")
-        self.delivery_status.setText("交付校验：等待运行。正式交付需导出 PDF 并实测为 1 页。")
+        self.delivery_status.setText("PDF 状态：等待运行。报告可按实际内容自然分页。")
         self.delivery_status.setStyleSheet("color:#555;")
         self.edit_report_button.setEnabled(False)
 
@@ -5613,12 +5862,10 @@ class ResearchHelperWindow(QMainWindow):
             artifacts["PDF（修订前，仅供归档）"] = old_path
         if pdf:
             artifacts["人工修订版 PDF"] = pdf
-        if pages == 1:
-            metadata["一页通交付校验"] = "通过：人工修订版 PDF 实测 1 页"
-        elif isinstance(pages, int):
-            metadata["一页通交付校验"] = f"不通过：人工修订版 PDF 实测 {pages} 页，禁止正式交付"
+        if isinstance(pages, int):
+            metadata["一页通交付校验"] = f"通过：人工修订版 PDF 已导出，实测 {pages} 页（当前不限页数）"
         else:
-            metadata["一页通交付校验"] = "未校验：人工修订后尚未导出 PDF，仅可作为内部草稿"
+            metadata["一页通交付校验"] = "未校验：人工修订后尚未导出 PDF"
 
     def _comparison_quote_preview(self, data: dict) -> str:
         """呈现多标的冻结报价事实，仅用于人工横向复核。"""
@@ -5812,47 +6059,8 @@ class ResearchHelperWindow(QMainWindow):
 
     def refresh_history(self) -> None:
         RUNS.mkdir(parents=True, exist_ok=True)
-        current = self.history.currentData()
-        current_run_path = str(RUNS / f"{self.run_id}.json") if self.run_id else ""
-        self.history.blockSignals(True)
-        self.history.clear()
-        self.history.addItem("选择一条历史运行以查看内部底稿…", "")
-        for path in primary_run_files(RUNS):
-            data = _load_json(path)
-            self.history.addItem(f"{data.get('run_id', path.stem)} · {data.get('status', '—')}", str(path))
-        # 运行完成后保持当前 run 的选中态，但绝不自动把历史内容盖到当前结果页；
-        # 首次启动则停留在占位项，须由分析师显式选择一条旧运行。
-        desired = current_run_path or str(current or "")
-        index = self.history.findData(desired) if desired else 0
-        if index >= 0:
-            self.history.setCurrentIndex(index)
-        self.history.blockSignals(False)
         self.history_tasks = load_history_tasks(RUNS, DATA_ROOT / "history_titles.json")
         self.history_sidebar.set_tasks(self.history_tasks)
-
-    def show_selected_history(self) -> None:
-        path = self.history.currentData()
-        if path and path != str(RUNS / f"{self.run_id}.json"):
-            data = _load_json(Path(path))
-            draft = next((value for name, value in (data.get("artifacts") or {}).items() if "内部底稿" in name), "")
-            try:
-                detail = Path(draft).read_text(encoding="utf-8") if draft else "该运行未生成内部底稿。"
-                self.review.setPlainText(
-                    f"【历史运行复核】{data.get('run_id', '—')}｜{data.get('status', '—')}\n"
-                    "下方仅展示该次内部底稿；当前报告预览、交付文件和正式报价审核保持为本次结果。\n\n"
-                    + detail)
-            except OSError:
-                self.review.setPlainText("内部底稿文件不可读取或已移动。")
-
-    def rerun_selected(self) -> None:
-        path = self.history.currentData()
-        data = _load_json(Path(path)) if path else {}
-        request = str(data.get("request") or "").strip()
-        if not request:
-            QMessageBox.information(self, "无法重跑", "所选运行没有可用的原始需求。")
-            return
-        self.prompt.setPlainText(request)
-        self.start_run()
 
 
 def main() -> None:

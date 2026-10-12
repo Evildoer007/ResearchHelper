@@ -23,6 +23,8 @@ datas = [
     (str(root / "underlying_map.json"), "."),
     (str(root / "VERSION"), "."),
     (str(root / "README.md"), "."),
+    (str(root / "docs" / "user-guide.html"), "docs"),
+    (str(root / "docs" / "images"), "docs/images"),
     (str(root / "assets"), "assets"),
 ]
 datas += py_tree("core", "core")

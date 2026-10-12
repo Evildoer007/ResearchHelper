@@ -8,7 +8,7 @@ from typing import Any, Mapping
 # 正式参考报价的 Monte Carlo 默认路径数。OptionHelper 刻意不替调用方选择
 # 精度，因此由 Research Helper 在正式报价边界明确给出；分析师显式填写的
 # path_count 始终优先。
-FORMAL_QUOTE_MONTE_CARLO_PATH_COUNT = 100_000
+FORMAL_QUOTE_MONTE_CARLO_PATH_COUNT = 10_000
 
 
 def _needs_default_path_count(pricing: Mapping[str, Any],
