@@ -20,6 +20,7 @@ WORKERS = {
     "event-evidence": "event_evidence_worker.py",
     "model-catalog": "model_catalog_worker.py",
     "search-test": "search_test_worker.py",
+    "ifind-test": "ifind_connection_worker.py",
     "product-profile": "product_profile_worker.py",
 }
 

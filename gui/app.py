@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import importlib
-import importlib.util
 import json
 import re
 import shutil
@@ -37,6 +36,7 @@ from core.app_paths import (
 from core.process_launcher import (
     apply_to_qprocess, external_worker_path, internal_worker_command, research_command,
 )
+from core.optionhelper_token_sync import sync_optionhelper_refresh_token
 from core.run_history import load_history_tasks, save_history_title
 from core.quote_diagnostics import last_worker_stage, safe_error_tail
 from gui.history_sidebar import HistorySidebar
@@ -385,6 +385,17 @@ class FirstRunDialog(QDialog):
         except OSError as error:
             QMessageBox.critical(self, "无法保存设置", str(error))
             return
+        # 首次向导发生在主窗口创建前；刷新已经可能被其他 GUI 模块导入的配置，
+        # 保证本次会话立即使用刚保存的模型、数据源和 OptionHelper 路径。
+        from core import config as runtime_config
+        importlib.reload(runtime_config)
+        token = str(config.get("IFIND_REFRESH_TOKEN") or "").strip()
+        skill_root = str(config.get("OPTIONHELPER_SKILL_ROOT") or "").strip()
+        if token and skill_root:
+            synced = sync_optionhelper_refresh_token(token, DATA_ROOT, skill_root)
+            if not synced.ok:
+                QMessageBox.warning(self, "OptionHelper 凭证未同步", synced.message)
+                return
         self.accept()
 
 
@@ -2352,11 +2363,16 @@ class SearchSettingsDialog(QDialog):
 class IFindCredentialsDialog(QDialog):
     """管理iFinD SDK、HTTP及OptionHelper凭证，且从不回显既有秘密。"""
 
+    RESULT_PREFIX = "IFIND_CONNECTION_RESULT="
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("iFinD 数据与报价凭证（仅本机）")
         self.resize(660, 340)
         self.config = _load_json(LOCAL_CONFIG)
+        self.test_process: QProcess | None = None
+        self.test_output = ""
+        self.test_error = ""
         self.account = QLineEdit()
         self.account.setPlaceholderText("已配置；留空则不修改")
         self.password = QLineEdit()
@@ -2378,9 +2394,15 @@ class IFindCredentialsDialog(QDialog):
             "凭证组件。所有字段均为本机秘密，不会进入运行日志或发布包。"
         )
         hint.setWordWrap(True)
+        self.status = QLabel("尚未验证 Refresh Token。连接测试不会取行情或保存 Access Token。")
+        self.status.setWordWrap(True)
+        self.status.setProperty("kind", "caption")
+        self.test_button = QPushButton("测试 Refresh Token")
         save, cancel = QPushButton("安全保存"), QPushButton("取消")
+        self.test_button.clicked.connect(self.test_connection)
         save.clicked.connect(self.save)
         cancel.clicked.connect(self.reject)
+        self.save_button = save
         form = QFormLayout(self)
         form.addRow("研究数据 iFinD 账号", self.account)
         form.addRow("研究数据 iFinD 密码", self.password)
@@ -2388,7 +2410,78 @@ class IFindCredentialsDialog(QDialog):
         form.addRow("Windows iFinD SDK 路径", ResearchHelperWindow._row(self.sdk_path, choose_sdk))
         form.addRow("iFinD HTTP API 地址", self.api_base_url)
         form.addRow("", hint)
-        form.addRow("", ResearchHelperWindow._row(save, cancel))
+        form.addRow("连接状态", self.status)
+        form.addRow("", ResearchHelperWindow._row(self.test_button, save, cancel))
+
+    def _connection_settings(self) -> dict:
+        return {
+            "refresh_token": self.refresh_token.text().strip()
+            or str(self.config.get("IFIND_REFRESH_TOKEN") or "").strip(),
+            "base_url": self.api_base_url.text().strip(),
+        }
+
+    def test_connection(self) -> None:
+        if self.test_process is not None:
+            return
+        settings = self._connection_settings()
+        if not settings["refresh_token"]:
+            QMessageBox.information(self, "缺少 Refresh Token", "请先填写 Refresh Token，再测试连接。")
+            return
+        self.test_output = ""
+        self.test_error = ""
+        process = QProcess(self)
+        process.setWorkingDirectory(str(DATA_ROOT))
+        apply_to_qprocess(process)
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+        process.readyReadStandardOutput.connect(
+            lambda: self._read_test_stream(standard_output=True))
+        process.readyReadStandardError.connect(
+            lambda: self._read_test_stream(standard_output=False))
+        process.finished.connect(self._finish_test)
+        process.errorOccurred.connect(self._test_process_error)
+        self.test_process = process
+        self.test_button.setEnabled(False)
+        self.save_button.setEnabled(False)
+        self.status.setText("正在连接 iFinD 官方接口验证 Refresh Token…")
+        program, arguments = internal_worker_command("ifind-test")
+        process.start(program, arguments)
+        process.write(json.dumps(settings, ensure_ascii=False).encode("utf-8"))
+        process.closeWriteChannel()
+
+    def _read_test_stream(self, *, standard_output: bool) -> None:
+        if not self.test_process:
+            return
+        raw = (self.test_process.readAllStandardOutput() if standard_output
+               else self.test_process.readAllStandardError())
+        value = bytes(raw).decode("utf-8", errors="replace")
+        if standard_output:
+            self.test_output += value
+        else:
+            self.test_error += value
+
+    def _finish_test(self, _exit_code: int, _status) -> None:
+        self._read_test_stream(standard_output=True)
+        self._read_test_stream(standard_output=False)
+        self.test_process = None
+        self.test_button.setEnabled(True)
+        self.save_button.setEnabled(True)
+        try:
+            line = next(item for item in reversed(self.test_output.splitlines())
+                        if item.startswith(self.RESULT_PREFIX))
+            result = json.loads(line[len(self.RESULT_PREFIX):])
+        except (StopIteration, json.JSONDecodeError):
+            self.status.setText("连接测试失败：" + (self.test_error.strip()[-300:] or "未返回测试结果"))
+            return
+        if result.get("ok"):
+            self.status.setText(str(result.get("message") or "Refresh Token 验证通过。"))
+        else:
+            self.status.setText("连接失败：" + str(result.get("error") or "未返回原因"))
+
+    def _test_process_error(self, _error) -> None:
+        self.test_process = None
+        self.test_button.setEnabled(True)
+        self.save_button.setEnabled(True)
+        self.status.setText("连接测试进程无法启动；请检查运行环境。")
 
     def _choose_sdk_path(self) -> None:
         selected = QFileDialog.getExistingDirectory(
@@ -2401,22 +2494,10 @@ class IFindCredentialsDialog(QDialog):
         from core import config
 
         skill_root = Path(config.OPTIONHELPER_SKILL_ROOT) if config.OPTIONHELPER_SKILL_ROOT else None
-        script = skill_root / "scripts" / "environment_check.py" if skill_root else None
-        if not skill_root or not script or not script.is_file():
+        if not skill_root or not (skill_root / "scripts" / "environment_check.py").is_file():
             return False, "未找到最新版 OptionHelper Skill；请先配置 Skill 根目录。"
-        try:
-            # CLI 入口使用 getpass() 从 Windows 控制台读取，子进程 stdin 不可靠：它会继续等待
-            # CONIN$，导致 GUI 虽已取得 Token 仍超时。直接载入同一 Skill 的保存函数，保留其
-            # 格式校验、权限控制和原子替换，不把 Token 写入任何 GUI 自己管理的文件。
-            spec = importlib.util.spec_from_file_location("optionhelper_environment_check", script)
-            if spec is None or spec.loader is None:
-                return False, "无法载入 OptionHelper 的 Refresh Token 保存组件。"
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            module.save_ifind_refresh_token(token, ROOT, skill_root=skill_root)
-        except (OSError, ValueError, AttributeError, ImportError) as error:
-            return False, f"OptionHelper 未接受该 Refresh Token：{error}"
-        return True, ""
+        result = sync_optionhelper_refresh_token(token, DATA_ROOT, skill_root)
+        return result.ok, result.message
 
     def save(self) -> None:
         account, password, token = (self.account.text().strip(), self.password.text(), self.refresh_token.text().strip())
@@ -2447,6 +2528,11 @@ class IFindCredentialsDialog(QDialog):
         except OSError as error:
             QMessageBox.warning(self, "保存失败", str(error))
             return
+        from core import config as runtime_config
+        runtime_config.IFIND_ACCOUNT = str(config.get("IFIND_ACCOUNT") or "")
+        runtime_config.IFIND_PASSWORD = str(config.get("IFIND_PASSWORD") or "")
+        runtime_config.IFIND_REFRESH_TOKEN = str(config.get("IFIND_REFRESH_TOKEN") or "")
+        runtime_config.IFIND_API_BASE_URL = str(config.get("IFIND_API_BASE_URL") or "").rstrip("/")
         self.accept()
 
     @staticmethod

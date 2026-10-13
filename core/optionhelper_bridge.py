@@ -21,6 +21,7 @@ from typing import Any, Mapping
 from . import config
 from .app_paths import USER_DATA_ROOT
 from .client_constraints import ClientConstraints
+from .optionhelper_token_sync import sync_configured_optionhelper_refresh_token
 from .optionhelper_pricing import apply_formal_quote_pricing_defaults
 from .run_tracker import record_external
 from .viewpoint import ViewPackage
@@ -339,6 +340,19 @@ def _json_stdout(proc: subprocess.CompletedProcess[str]) -> dict[str, Any]:
 
 def _readiness(project_root: Path) -> tuple[bool, dict[str, Any], str]:
     skill_root = Path(config.OPTIONHELPER_SKILL_ROOT).resolve()
+    token_sync = sync_configured_optionhelper_refresh_token(
+        project_root,
+        token=config.IFIND_REFRESH_TOKEN,
+        skill_root=skill_root,
+    )
+    if not token_sync.ok:
+        report = {
+            "ok": False,
+            "next_action": "configure_data_api",
+            "token_sync": "failed",
+        }
+        record_external("OptionHelper credential sync", status="failed", error=token_sync.message)
+        return False, report, token_sync.message
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUTF8"] = "1"
