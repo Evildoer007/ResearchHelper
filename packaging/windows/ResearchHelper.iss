@@ -1,6 +1,6 @@
 #define MyAppName "Research Helper"
 #ifndef MyAppVersion
-#define MyAppVersion "0.9.0"
+#define MyAppVersion "0.9.1"
 #endif
 #define MyAppPublisher "Research Helper"
 #define MyAppExeName "ResearchHelper.exe"

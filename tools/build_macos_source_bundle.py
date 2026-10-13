@@ -24,6 +24,7 @@ EXCLUDED_FILES = {
     "config.local.json", ".env", "DESIGN.md", "history_titles.json",
 }
 EXCLUDED_SUFFIXES = {".pyc", ".pyo", ".key", ".pem", ".p12", ".pfx"}
+EXCLUDED_GENERATED_DIRS = {"__pycache__", ".pytest_cache", "build", "dist"}
 
 
 def included_files(root: Path = ROOT) -> list[Path]:
@@ -32,7 +33,7 @@ def included_files(root: Path = ROOT) -> list[Path]:
         relative = path.relative_to(root)
         if not relative.parts or relative.parts[0] in EXCLUDED_TOP_LEVEL:
             continue
-        if "__pycache__" in relative.parts or path.is_dir():
+        if any(part in EXCLUDED_GENERATED_DIRS for part in relative.parts[:-1]) or path.is_dir():
             continue
         if path.name in EXCLUDED_FILES or path.suffix.lower() in EXCLUDED_SUFFIXES:
             continue

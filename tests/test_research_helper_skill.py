@@ -46,7 +46,7 @@ def test_tool_list_is_machine_readable():
     payload = json.loads(result.stdout)
     assert payload["ok"] is True
     assert payload["skill"] == "research-helper"
-    assert payload["version"] == "0.3.1"
+    assert payload["version"] == "0.3.2"
     assert "run-research" in payload["actions"]
     assert "prepare-viewpoints" in payload["actions"]
 

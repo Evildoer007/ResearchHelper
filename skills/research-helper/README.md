@@ -25,7 +25,7 @@ Windows 用户如需通过桌面 SDK 取数，还需安装官方 iFinD Python SD
 
 ```powershell
 New-Item -ItemType Directory -Force "$env:USERPROFILE\.codex\skills"
-Expand-Archive -LiteralPath ".\research-helper-0.3.1.zip" -DestinationPath "$env:USERPROFILE\.codex\skills" -Force
+Expand-Archive -LiteralPath ".\research-helper-0.3.2.zip" -DestinationPath "$env:USERPROFILE\.codex\skills" -Force
 ```
 
 安装完成后，应存在以下文件：
@@ -38,7 +38,7 @@ C:\Users\<用户名>\.codex\skills\research-helper\SKILL.md
 
 ```bash
 mkdir -p ~/.codex/skills
-unzip -o research-helper-0.3.1.zip -d ~/.codex/skills
+unzip -o research-helper-0.3.2.zip -d ~/.codex/skills
 ```
 
 安装完成后，应存在：

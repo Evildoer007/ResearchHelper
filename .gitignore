@@ -12,6 +12,10 @@ data_cache/
 # ==== 生成物 / 预览 ====
 output/
 tmp/
+.docx-work/
+.publish/
+.test-tmp/
+.pytest_cache/
 _preview_*
 # 只忽略**根目录**的下划线临时脚本（_run*.py / _dbg*.py 这类一次性诊断脚本）。
 # 不能写成 `_*.py`——那会连 `core/__init__.py` 一起误伤（它也以下划线开头），
