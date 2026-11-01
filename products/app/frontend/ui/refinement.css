@@ -1,0 +1,3185 @@
+/* Density and hierarchy refinements layered over the established OptionHelper system. */
+:root {
+  --oh-copy: 13px;
+  --oh-copy-small: 12px;
+}
+
+html { font-size: 14px; }
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] {
+  --report-width: 320px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail {
+  padding-right: 14px;
+  padding-left: 14px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-brand {
+  width: 252px;
+  height: 84px;
+  min-height: 84px;
+  max-height: 84px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  border-radius: 13px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-brand .workspace-brand__full {
+  display: block;
+  width: 250px;
+  height: 82px;
+  max-width: 250px;
+  flex: 0 0 82px;
+  object-fit: contain;
+  object-position: center;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-brand .workspace-brand__compact {
+  display: none;
+}
+
+/* Keep the latest transparent horizontal brand artwork large without turning
+   either Chat or Desk into a white logo tile. The rail control itself retains
+   one fixed box in both modes. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-brand {
+  background: transparent;
+  border-color: transparent;
+  overflow: visible;
+}
+
+/* In the macOS App, the native title-bar button remains the sole recovery
+   control. A collapsed rail therefore releases all workspace width. */
+@media (min-width: 701px) {
+  html[data-native-shell="macos"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] {
+    --rail-effective-width: 0px;
+    --rail-splitter-width: 0px;
+  }
+
+  html[data-native-shell="macos"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-rail,
+  html[data-native-shell="macos"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-splitter--rail {
+    visibility: hidden;
+    pointer-events: none;
+  }
+}
+
+/* LibreChat component ports. React and Tailwind are removed, while the source
+   component geometry and interaction states remain in the native App shell. */
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task__icon {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  fill: currentColor;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task__label {
+  overflow: hidden;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-list {
+  gap: 2px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item {
+  position: relative;
+  min-height: 36px;
+  grid-template-columns: minmax(0, 1fr) auto 18px;
+  gap: 8px;
+  padding: 0 5px 0 8px;
+  border-radius: 9px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--red);
+  content: "";
+  opacity: 0;
+  transform: scaleY(.35);
+  transition: opacity 150ms ease, transform 180ms var(--oh-panel-ease);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item[aria-current="true"]::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item__chat {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  color: #8B8B8B;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item__chat svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-footer {
+  position: relative;
+  padding-top: 8px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger {
+  display: grid;
+  min-height: 44px;
+  grid-template-columns: 30px minmax(0, 1fr) 18px;
+  gap: 9px;
+  padding: 5px 7px;
+  border-radius: 11px;
+  text-align: left;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__mark {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid #d0cdca;
+  border-radius: 999px;
+  background: #fff;
+  color: #6f6964;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__mark svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__copy strong,
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__copy strong {
+  color: #35302d;
+  font-size: 12.5px;
+  font-weight: 640;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__copy small {
+  color: #928b86;
+  font-size: 10px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__chevron {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+  transition: transform 180ms ease;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger[aria-expanded="true"] .rail-account-trigger__chevron {
+  transform: rotate(180deg);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu {
+  right: auto;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: min(244px, calc(var(--rail-effective-width) - 16px));
+  min-width: 190px;
+  padding: 7px;
+  border: 1px solid #DBDBDB;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 14px 34px rgba(32, 32, 32, .14), 0 2px 8px rgba(32, 32, 32, .07);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__identity {
+  display: grid;
+  gap: 2px;
+  padding: 8px 9px 7px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__identity strong {
+  color: #302b28;
+  font-size: 12.5px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__identity span {
+  color: #8b847f;
+  font-size: 10.5px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__separator {
+  height: 1px;
+  margin: 2px 5px 5px;
+  background: #ece9e6;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item {
+  min-height: 36px;
+  gap: 10px;
+  padding: 0 9px;
+  border-radius: 9px;
+  font-size: 12.5px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .send-control:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .send-control {
+  box-shadow: none;
+  transition: background-color .18s ease, color .18s ease, opacity .18s ease, transform .24s cubic-bezier(.16, 1, .3, 1);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .send-control:hover {
+  transform: none;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .send-control:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .send-control:active:not(:disabled) {
+  opacity: .9;
+  transform: scale(.92);
+}
+
+.composer:has(#workspace-status.notice--error:not([hidden])) form:not(.is-generating) {
+  border-color: var(--danger);
+}
+
+@media (min-width: 701px) {
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-new-task {
+    justify-content: center;
+    padding-inline: 0 !important;
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-trigger {
+    min-height: 42px;
+    grid-template-columns: 30px;
+    justify-content: center;
+    padding-inline: 0;
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-trigger__copy,
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-trigger__chevron {
+    display: none;
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-menu {
+    bottom: 8px;
+    left: calc(100% + 9px);
+    width: 220px;
+  }
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-mode-area {
+  margin-top: 10px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch button {
+  min-height: 30px;
+  font-size: 11px;
+}
+
+.workspace-shell.workspace-shell--desk[data-has-desk="false"] .rail-mode-area {
+  display: none;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task {
+  min-height: 36px;
+  margin-top: 12px;
+  font-size: 11px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-rail {
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item {
+  min-height: 48px;
+  padding: 8px 10px;
+  border-radius: 9px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item__title {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item small {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: .01em;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .work-area {
+  grid-template-rows: 62px minmax(0, 1fr) var(--assistant-height);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .workbench-head {
+  min-height: 62px;
+  padding: 0 24px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .workbench-head h1 {
+  font-size: 19px;
+  letter-spacing: -.025em;
+}
+
+.button-secondary--head,
+.report-drawer-toggle {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.conversation-start {
+  width: min(820px, calc(100% - 48px));
+  padding-top: 24px;
+  padding-bottom: 20px;
+}
+
+.conversation-start__mark {
+  width: 54px;
+  height: 54px;
+}
+
+.conversation-start h2 {
+  margin-top: 18px;
+  font-size: clamp(25px, 3vw, 34px);
+  letter-spacing: -.035em;
+}
+
+.conversation-start__copy {
+  margin-top: 7px;
+  font-size: 13px;
+}
+
+.conversation-starters {
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.conversation-starter {
+  min-height: 96px;
+  padding: 15px 16px;
+  border-radius: 12px;
+}
+
+.conversation-starter strong { font-size: 13px; }
+.conversation-starter span { font-size: 12px; }
+.conversation-start__note { margin-top: 12px; color: var(--muted); font-size: 12px; }
+
+.message-stream {
+  padding-right: max(24px, calc((100% - 820px) / 2));
+  padding-left: max(24px, calc((100% - 820px) / 2));
+}
+
+.message { font-size: 14px; }
+.message__meta { font-size: 11px; }
+.message__body { line-height: 1.65; }
+
+.composer {
+  width: min(820px, calc(100% - 48px));
+}
+
+.composer form {
+  padding: 13px 14px 10px;
+  border-radius: 18px;
+}
+
+.composer textarea {
+  min-height: 30px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.composer-actions { margin-top: 7px; }
+.model-picker__label { font-size: 10px; }
+.model-picker .choice-trigger { min-height: 32px; font-size: 11px; }
+.model-picker .optionhelper-choice .choice-menu { padding: 4px; }
+.model-picker .optionhelper-choice .choice-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.send-control { width: 36px; height: 36px; flex-basis: 36px; }
+
+.desk-module-tabs {
+  min-height: 46px;
+  padding: 0 18px;
+}
+
+.desk-module-tabs button {
+  min-height: 34px;
+  padding: 0 15px;
+  font-size: 12px;
+}
+
+.assistant-panel {
+  width: min(380px, 36vw);
+  height: min(520px, calc(100dvh - 132px));
+}
+
+.assistant-panel__head { padding: 14px 16px 12px; }
+.assistant-panel__head strong { font-size: 14px; }
+.assistant-panel__head span { color: var(--muted); font-size: 12px; }
+.assistant-panel__transcript { padding: 0; }
+.assistant-panel .message { font-size: 13px; }
+.assistant-panel .conversation-start { width: 100%; padding: 12px 0; }
+.assistant-panel .conversation-start__mark { width: 38px; height: 38px; }
+.assistant-panel .conversation-start h2 { margin-top: 12px; font-size: 19px; }
+.assistant-panel .conversation-starters { grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 14px; }
+.assistant-panel .conversation-starter { min-height: 72px; padding: 11px 12px; }
+.assistant-panel .conversation-starter strong { font-size: 11px; }
+.assistant-panel .conversation-starter span { margin-top: 3px; font-size: 11px; }
+.assistant-panel .conversation-start__note { font-size: 11px; }
+
+.assistant-toggle,
+.assistant-panel__close {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.choice-trigger { min-height: 38px; font-size: 13px; }
+.choice-option { min-height: 32px; font-size: 12px; }
+.choice-trigger[aria-invalid="true"] {
+  border-color: #b71b36;
+  background: #fff7f8;
+  box-shadow: 0 0 0 3px rgba(183, 27, 54, .08);
+}
+
+.setup-page .topbar { min-height: 58px; }
+.setup-page .setup {
+  min-height: calc(100dvh - 58px);
+  padding: 26px 24px 40px;
+}
+.setup-page .setup-card {
+  display: flex;
+  max-width: 1040px;
+  min-height: min(720px, calc(100dvh - 124px));
+  flex-direction: column;
+  overflow: hidden;
+  border-color: #e5dfe0;
+  border-radius: 16px;
+  box-shadow: 0 18px 46px rgba(48, 35, 38, .07);
+}
+
+.setup-page .setup-card h1 {
+  font-size: 22px;
+  letter-spacing: -.025em;
+}
+
+.setup-page .setup-layout {
+  display: grid;
+  grid-template-columns: 188px minmax(0, 1fr);
+  flex: 1;
+  gap: 0;
+  min-height: 0;
+  padding: 0;
+}
+.setup-page .configured-models {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  padding: 18px 12px 14px;
+  border: 0;
+  border-right: 1px solid #ece7e6;
+  border-radius: 0;
+  background: #faf9f8;
+}
+.setup-page .connection-editor {
+  min-width: 0;
+  padding: 26px 32px 34px;
+  overflow-y: auto;
+}
+.setup-page .connection-editor h2 {
+  font-size: 19px;
+  letter-spacing: -.02em;
+}
+.setup-page .setting-section > p {
+  max-width: 70ch;
+  margin: 4px 0 22px;
+  color: #746b6d;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.setup-page .setting-section__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+.setup-page .setting-section__head p {
+  margin: 3px 0 0;
+  color: #807678;
+  font-size: 11.5px;
+}
+.setup-page .connection-status {
+  flex: none;
+  padding: 4px 9px;
+  border: 1px solid #e2dcdd;
+  border-radius: 999px;
+  background: #f8f6f6;
+  color: #847a7c;
+  font-size: 10.5px;
+  font-weight: 650;
+}
+.setup-page .connection-status.is-ready {
+  border-color: #cfe0d4;
+  background: #f3f8f4;
+  color: #477257;
+}
+.setup-page .storage-location {
+  display: grid;
+  gap: 4px;
+  max-width: 580px;
+  margin: 0 0 22px;
+  padding: 12px 14px;
+  border: 1px solid #eadcdf;
+  border-radius: 10px;
+  background: #fdfafb;
+  color: #695e60;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.setup-page .storage-location strong { color: var(--ink); font-size: 12px; }
+.setup-page .storage-location small { color: #877b7d; }
+.setup-page .setup-form {
+  grid-template-columns: minmax(0, 580px);
+  gap: 18px;
+}
+.setup-page .setup-form > * { grid-column: 1; }
+.setup-page .setup-form .field label { font-size: 12px; }
+.setup-page .setup-form .field input,
+.setup-page .setup-form .field select,
+.setup-page .setup-form .field .choice-trigger { min-height: 40px; font-size: 13px; }
+.setup-page .setup-form .field-note { font-size: 11px; }
+.setup-page .connection-list.settings-nav {
+  display: grid;
+  gap: 4px;
+}
+
+.setup-page .settings-nav .connection-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #4c4546;
+  text-decoration: none;
+  transition: background-color .16s ease, color .16s ease;
+}
+
+.setup-page .settings-nav .connection-item:hover {
+  border-color: transparent;
+  background: #f7f4f4;
+  color: #342e2f;
+}
+
+.setup-page .settings-nav .connection-item[aria-current] {
+  background: var(--color-ground);
+  box-shadow: none;
+  color: var(--color-ink);
+}
+
+.setup-page .settings-nav .connection-item::before { content: none; }
+
+.setup-page .settings-nav__icon {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.65;
+}
+
+.setup-page .settings-nav .connection-item strong {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.setup-page .settings-nav .connection-item small {
+  display: none;
+}
+
+.setup-page .settings-nav .connection-item:focus-visible {
+  outline: none;
+  background: var(--color-paper);
+}
+
+.setup-page .settings-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 260px);
+  align-items: center;
+  gap: 26px;
+  min-height: 72px;
+  padding: 14px 0;
+  border-bottom: 1px solid #ece7e6;
+}
+.setup-page .settings-row--stack {
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  gap: 12px;
+}
+.setup-page .settings-row__copy {
+  display: grid;
+  gap: 3px;
+}
+.setup-page .settings-row__copy label {
+  color: #332d2e;
+  font-size: 13px;
+  font-weight: 650;
+}
+.setup-page .settings-row__copy .field-spec {
+  margin: 0;
+  color: #83797b;
+  font-size: 11px;
+}
+.setup-page .settings-row > [data-choice-root] { width: 100%; }
+.setup-page .theme-preference {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+}
+.setup-page .theme-preference button {
+  display: grid;
+  min-height: 74px;
+  place-content: center;
+  gap: 5px;
+  border: 1px solid #e3dcdd;
+  border-radius: 12px;
+  background: #fff;
+  color: #5e5557;
+  font-size: 11.5px;
+  transition: border-color .16s ease, background-color .16s ease, color .16s ease;
+}
+.setup-page .theme-preference button svg {
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+.setup-page .theme-preference button:first-child svg path { fill: currentColor; stroke: none; }
+.setup-page .theme-preference button:hover {
+  border-color: #d6c7ca;
+  background: #fdfafa;
+}
+.setup-page .theme-preference button[aria-pressed="true"] {
+  border-color: #dbaeb7;
+  background: #fbf0f2;
+  color: var(--red-deep);
+}
+.setup-page .theme-preference button:focus-visible {
+  outline: 2px solid rgba(200, 16, 46, .35);
+  outline-offset: 2px;
+}
+.setup-page .form-foot {
+  align-items: center;
+  margin-top: 4px;
+  padding-top: 16px;
+  border-top: 1px solid #ece7e6;
+}
+
+@media (max-width: 700px) {
+  .setup-page .setup { padding: 14px 12px 28px; }
+  .setup-page .setup-card { min-height: auto; }
+
+  .setup-page .setup-layout { grid-template-columns: 1fr; }
+  .setup-page .configured-models {
+    padding: 12px 14px;
+    border-right: 0;
+    border-bottom: 1px solid #ece7e6;
+  }
+  .setup-page .connection-list.settings-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+  }
+
+  .setup-page .connection-editor { padding: 22px 20px 28px; }
+  .setup-page .settings-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 10px;
+  }
+}
+
+@media (min-width: 701px) {
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .work-area {
+    /* Reserve a real bottom dock for the fixed assistant affordance. The
+       36px control sits 18px above the viewport edge, so 58px keeps module
+       forms and report controls outside its hit area at every scroll offset. */
+    --assistant-height: 58px;
+    grid-template-rows: 62px minmax(0, 1fr) var(--assistant-height);
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .work-area {
+    --assistant-height: 0px;
+  }
+}
+
+/* One persistent workspace with exclusive painting. The outgoing surface is
+   hidden before the incoming surface moves into place, so WebKit never blends
+   two full-page layers during a mode switch. */
+.workspace-shell[data-workspace-shell] .chat-surface,
+.workspace-shell[data-workspace-shell] .desk-surface {
+  will-change: transform;
+}
+
+.workspace-shell[data-workspace-shell][data-mode="desk"] .chat-surface {
+  visibility: hidden;
+  opacity: 1;
+  transform: translateY(-6px) scale(.998);
+  transition: none;
+}
+
+.workspace-shell[data-workspace-shell][data-mode="desk"] .desk-surface {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+/* The reverse direction follows the same exclusive rule. */
+.workspace-shell[data-workspace-shell][data-mode="chat"] .chat-surface {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.workspace-shell[data-workspace-shell][data-mode="chat"] .desk-surface {
+  visibility: hidden;
+  opacity: 1;
+  transform: translateY(8px) scale(.998);
+  transition: none;
+}
+
+.workspace-shell[data-workspace-shell][data-switching="true"][data-mode="chat"] .work-area {
+  transition: background-color .42s ease;
+}
+
+.workspace-shell[data-workspace-shell][data-switching="true"][data-mode="chat"] .assistant-region {
+  border-top-color: transparent;
+  transition: background-color .42s ease;
+}
+
+/* The shared composer changes from an in-flow Chat row to a fixed Desk
+   affordance. Keep that one region out of the compositor during the hand-off
+   so WebKit cannot expose a transient panel or a falling composer. */
+.workspace-shell[data-workspace-shell][data-assistant-switching="true"] .assistant-region {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: none !important;
+}
+
+.workspace-shell[data-workspace-shell][data-switching="false"] .chat-surface,
+.workspace-shell[data-workspace-shell][data-switching="false"] .desk-surface {
+  will-change: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workspace-shell[data-workspace-shell],
+  .workspace-shell[data-workspace-shell] .work-area,
+  .workspace-shell[data-workspace-shell] .chat-surface,
+  .workspace-shell[data-workspace-shell] .desk-surface,
+  .workspace-shell[data-workspace-shell] .assistant-panel {
+    transition-duration: .01ms !important;
+  }
+}
+
+@media (max-width: 700px) {
+  .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-footer {
+    display: flex;
+    position: absolute;
+    right: 12px;
+    bottom: 10px;
+    z-index: 18;
+    margin: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .conversation-start,
+  .composer { width: calc(100% - 28px); }
+  .conversation-starters { grid-template-columns: 1fr; }
+  .assistant-panel { width: calc(100vw - 24px); }
+  .workspace-shell[data-workspace-shell][data-mode="desk"] .work-area {
+    --assistant-height: auto;
+    grid-template-rows: 62px minmax(0, 1fr) var(--assistant-height);
+  }
+  .workspace-shell[data-workspace-shell][data-mode="desk"] .assistant-panel { display: contents; }
+  .workspace-shell[data-workspace-shell][data-mode="desk"] .assistant-toggle,
+  .workspace-shell[data-workspace-shell][data-mode="desk"] .assistant-panel__head,
+  .workspace-shell[data-workspace-shell][data-mode="desk"] .assistant-panel__transcript { display: none; }
+  .setup-page .setup-layout { grid-template-columns: 1fr; }
+}
+
+/* The rail keeps identical geometry across modes. OptChat retains the original
+   red identity while OptDesk retains its original light workbench palette. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail {
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  min-height: 0;
+  padding: 12px 14px 16px;
+  border-right: 1px solid transparent;
+}
+
+/* The rail is a functional navigation surface. It starts with the existing
+   mode and task controls rather than repeating the product mark. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  padding-top: 20px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded .rail-mode-area {
+  margin-top: 0;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-has-desk="false"] .workspace-rail--unbranded {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-brand {
+  width: 198px;
+  height: 54px;
+  min-height: 54px;
+  max-height: 54px;
+  padding: 0;
+  border-radius: 13px;
+  background: #fff;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .workspace-rail {
+  border-right-color: transparent;
+  background: var(--red-rail);
+  color: #fff;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .workspace-brand {
+  border-color: rgba(255, 255, 255, .34);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch--rail {
+  border-color: transparent;
+  background: rgba(68, 7, 19, .28);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch--rail::before {
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(49, 4, 13, .16);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch--rail::before {
+  background: #a41630;
+  box-shadow: 0 5px 12px rgba(119, 24, 43, .17);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch button {
+  color: #f5dce0;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch button[aria-pressed="true"] {
+  color: var(--red-deep);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-rail,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .rail-footer {
+  border-top-color: rgba(255, 255, 255, .20);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .rail-new-task {
+  border-color: rgba(255, 255, 255, .26);
+  background: rgba(255, 255, 255, .11);
+  color: #fff;
+}
+
+/* The selectors above include the body class so they consistently outrank
+   legacy desk-only declarations without introducing mode-specific geometry. */
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-brand__compact { display: none; }
+
+@media (min-width: 701px) {
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-rail--unbranded {
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-rail--unbranded .rail-new-task {
+    grid-row: 1;
+    margin: 10px 0 0;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-brand .workspace-brand__full {
+    display: none;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-brand .workspace-brand__compact {
+    display: block;
+    width: 46px;
+    height: 46px;
+    max-width: 46px;
+    flex: 0 0 46px;
+    clip-path: none;
+    object-fit: contain;
+    object-position: center;
+    border-radius: 50%;
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, .92);
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"][data-rail-collapsed="true"] .rail-new-task {
+    border-color: rgba(255, 255, 255, .26);
+    background: rgba(255, 255, 255, .20);
+    color: #fff;
+    opacity: .84;
+  }
+}
+
+/* In compact mode there is no white tile or floating plus card: one circular
+   mark and one full-height, transparent new-task hit area share the rail. */
+@media (min-width: 701px) {
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-rail .workspace-brand {
+    width: 56px;
+    height: 56px;
+    min-height: 56px;
+    max-height: 56px;
+    border: 1px solid rgba(255, 255, 255, .86);
+    border-radius: 50%;
+    background: transparent;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-rail .rail-new-task {
+    width: 100%;
+    margin: 10px 0 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    opacity: 1;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-rail .rail-new-task:hover {
+    border-color: transparent;
+    background: rgba(255, 255, 255, .08);
+  }
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item {
+  color: rgba(255, 255, 255, .92);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item small {
+  color: rgba(255, 232, 236, .68);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item:hover,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item[aria-current="true"] {
+  background: rgba(255, 255, 255, .15);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .workspace-rail {
+  border-right-color: #E0E0E0;
+  background: #F7F7F7;
+  color: #404040;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .workspace-brand {
+  border-color: #E0E0E0;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch--rail {
+  border-color: #E0E0E0;
+  background: #EDEDED;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch button { color: #666666; }
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch button[aria-pressed="true"] { color: #fff; }
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-rail,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-footer { border-top-color: #E0E0E0; }
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item { color: #404040; }
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item small { color: #878787; }
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item:hover,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item[aria-current="true"] { background: #EBEBEB; }
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-new-task {
+  border-color: #D8D8D8;
+  background: #fff;
+  color: var(--red-deep);
+}
+
+/* Mode-specific rail rules may recolor the workspace, never the expanded
+   transparent horizontal logo container. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="false"] .workspace-brand,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell]:not([data-rail-collapsed]) .workspace-brand {
+  width: 252px;
+  height: 84px;
+  min-height: 84px;
+  max-height: 84px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="false"] .workspace-brand .workspace-brand__full,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell]:not([data-rail-collapsed]) .workspace-brand .workspace-brand__full {
+  width: 250px;
+  height: 82px;
+  max-width: 250px;
+  flex-basis: 82px;
+  object-fit: contain;
+  object-position: center;
+}
+
+/* Refined motion: active module selection is measured from the real button,
+   so the indicator follows labels of different widths without layout shifts. */
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs {
+  position: relative;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button {
+  position: relative;
+  z-index: 1;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button[aria-selected="true"]::after {
+  display: none;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs__indicator {
+  position: absolute;
+  z-index: 2;
+  bottom: 8px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--red);
+  pointer-events: none;
+  opacity: 0;
+  transform: translate3d(0, 0, 0);
+  transition:
+    width .25s cubic-bezier(.22, 1, .36, 1),
+    transform .25s cubic-bezier(.22, 1, .36, 1);
+  will-change: width, transform;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs__indicator[data-ready="true"] {
+  opacity: 1;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .message--process {
+  max-width: min(680px, 92%);
+  margin: 2px 0 4px;
+}
+
+.message--assistant .message__content {
+  display: grid;
+  width: min(760px, 100%);
+  max-width: 100%;
+  min-width: 0;
+  gap: 8px;
+}
+
+.message--assistant .message__content > .message__body {
+  width: 100%;
+  max-width: none;
+  margin: 0;
+}
+
+.message-prose { white-space: normal; }
+.message-prose p { margin: 0 0 12px; white-space: pre-wrap; }
+.message-prose p:last-child { margin-bottom: 0; }
+.message-prose :is(h3, h4) { margin: 20px 0 8px; font-size: 1em; line-height: 1.5; font-weight: 600; }
+.message-prose > :first-child { margin-top: 0; }
+.message-prose :is(ul, ol) { margin: 8px 0 14px; padding-inline-start: 22px; }
+.message-prose li { padding-inline-start: 3px; margin-block: 5px; }
+.message-prose pre { overflow: auto; padding: 12px; border-radius: 8px; background: var(--canvas); white-space: pre; }
+.message-prose__table { max-width: 100%; overflow-x: auto; margin-block: 12px; }
+.message-prose__table table { width: 100%; border-collapse: collapse; font-size: inherit; }
+.message-prose__table :is(th, td) { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.message-prose__table th { font-weight: 600; }
+
+.composer-attachment-area {
+  margin: 0 0 8px;
+  padding: 9px 10px;
+  border: 1px solid color-mix(in srgb, var(--line) 82%, var(--accent) 18%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 96%, var(--accent) 4%);
+}
+
+.composer-attachment-area__head,
+.composer-attachment {
+  display: flex;
+  align-items: center;
+}
+
+.composer-attachment-area__head {
+  justify-content: space-between;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.composer-attachment-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 7px;
+}
+
+.composer-attachment {
+  min-width: 0;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.composer-attachment__preview {
+  display: grid;
+  flex: 0 0 38px;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  font-weight: 700;
+}
+
+.composer-attachment__preview img { width: 100%; height: 100%; object-fit: cover; }
+
+.composer-attachment__text {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.composer-attachment__text strong,
+.composer-attachment__text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-attachment__text strong { font-size: 12px; font-weight: 620; }
+.composer-attachment__text small { color: var(--muted); font-size: 10px; }
+
+.composer-attachment__remove {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  margin-left: auto;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 18px;
+}
+
+.composer-attachment__remove:hover,
+.composer-attachment__remove:focus-visible { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+
+.composer-actions__leading,
+.composer-actions__trailing { display: flex; min-width: 0; align-items: center; gap: 9px; }
+
+.composer-actions__leading { flex: 1 1 180px; overflow: hidden; }
+.composer-actions__trailing { max-width: 100%; flex: 0 1 auto; justify-content: flex-end; margin-inline-start: auto; }
+
+.composer-attach-control {
+  display: inline-flex;
+  flex: 0 0 34px;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 5%, var(--surface));
+  cursor: default;
+  transition: background-color .18s ease, color .18s ease, opacity .18s ease, transform .24s cubic-bezier(.16, 1, .3, 1);
+}
+
+.composer-attach-control > svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+.composer-attach-control:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 10%, var(--surface)); }
+.composer-attach-control:disabled { opacity: .48; cursor: default; }
+.composer-attach-control:focus-visible { color: var(--ink); outline: 1px solid var(--muted); outline-offset: 2px; }
+.composer-attachment-input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
+.composer[data-dragging="true"] form { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 13%, transparent); }
+
+.message-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: min(560px, 86%);
+}
+
+.message--user .message-attachments { justify-content: flex-end; margin-left: auto; }
+
+.message-attachment {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 240px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
+  font-size: 11px;
+}
+
+.message-attachment__mark { color: var(--accent); font-weight: 700; }
+.message-attachment__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.message-attachment--pending { opacity: .7; }
+
+.message-question { width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; }
+
+.message-artifact {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  width: min(100%, 620px);
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.message-artifact__mark {
+  display: grid;
+  place-items: center;
+  color: var(--ink);
+}
+.message-artifact__mark svg { width: 28px; height: 28px; }
+@media (max-width: 540px) {
+  .message-artifact { grid-template-columns: 28px minmax(0, 1fr); gap: 10px; }
+  .message-artifact__actions { grid-column: 2; justify-self: start; }
+}
+.message-artifact__heading {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.message-artifact__heading strong {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.message-artifact__heading span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+.message-artifact__actions { display: flex; align-items: center; gap: 4px; }
+.message-artifact__actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 8px;
+  color: var(--ink);
+  background: transparent;
+  text-decoration: none;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+.message-artifact__actions a:hover { color: var(--ink); background: var(--surface-alt, var(--line)); }
+.message-artifact__actions a:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+.message-artifact__actions svg { width: 18px; height: 18px; }
+
+.message-payoff-image { margin: 16px 0; }
+.message-payoff-image figcaption { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.message__actions.has-image-download { opacity: 1; }
+.message__actions a.message-payoff-image__download,
+.message-downloads > summary {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 6px; box-sizing: border-box;
+  border: 0; border-radius: 6px; background: transparent; color: var(--muted);
+  text-decoration: none; cursor: default; list-style: none;
+}
+.message-downloads > summary::-webkit-details-marker { display: none; }
+.message-payoff-image__download svg, .message-downloads > summary svg { width: 18px; height: 18px; }
+.message-payoff-image__download:hover, .message-downloads > summary:hover { color: var(--ink); background: var(--surface-alt, var(--line)); }
+.message-payoff-image__download:focus-visible, .message-downloads > summary:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+.message-downloads { position: relative; }
+.message-downloads__menu { position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 5; min-width: 88px; padding: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 4px 14px rgb(0 0 0 / .12); }
+.message-downloads__item { display: block; padding: 6px 12px; border-radius: 4px; color: var(--ink); text-decoration: none; white-space: nowrap; }
+.message-downloads__item:hover { background: var(--surface-alt, var(--line)); }
+@media (pointer: coarse) { .message__actions a.message-payoff-image__download, .message-downloads > summary { width: 44px; height: 44px; } }
+
+.message-question__prompt { margin: 0 0 12px; color: var(--ink); line-height: 1.6; white-space: pre-wrap; }
+.message-question__choices { display: grid; gap: 8px; }
+
+.message-question__choice {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  text-align: left;
+}
+
+.message-question__choice:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+  transform: translateY(-1px);
+}
+
+.message-question__choice strong,
+.message-question__choice > span { display: block; }
+
+.message-question__choice strong span {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+  font-size: 10px;
+}
+
+.message-question__choice > span { color: var(--muted); font-size: 11px; }
+
+.attachment-lightbox {
+  width: min(920px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(20, 20, 24, .24);
+}
+
+.attachment-lightbox::backdrop { background: rgba(20, 20, 24, .52); backdrop-filter: blur(4px); }
+.attachment-lightbox__frame { display: grid; gap: 10px; padding: 12px; }
+.attachment-lightbox__head { display: flex; align-items: center; justify-content: space-between; }
+.attachment-lightbox__close { width: 32px; height: 32px; border: 0; border-radius: 999px; color: var(--muted); background: transparent; font-size: 22px; }
+.attachment-lightbox img { display: block; width: 100%; max-height: calc(100vh - 132px); border-radius: 10px; object-fit: contain; background: color-mix(in srgb, var(--ink) 4%, var(--surface)); }
+.attachment-lightbox p { margin: 0; color: var(--muted); font-size: 11px; text-align: center; }
+
+.message--streaming[hidden],
+.message--process[hidden] { display: none; }
+
+.assistant-reasoning {
+  width: 100%;
+  min-width: 0;
+  color: var(--muted);
+}
+
+.assistant-reasoning > summary {
+  display: flex;
+  width: fit-content;
+  min-height: 40px;
+  align-items: center;
+  gap: 9px;
+  padding: 2px 0;
+  cursor: default;
+  list-style: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+  user-select: none;
+}
+.assistant-reasoning > summary::-webkit-details-marker { display: none; }
+.assistant-reasoning > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+.assistant-reasoning__title { font-weight: 500; }
+.assistant-reasoning__chevron {
+  width: 5px;
+  height: 5px;
+  margin-inline: 3px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform .2s cubic-bezier(.16, 1, .3, 1);
+}
+.assistant-reasoning[open] .assistant-reasoning__chevron { transform: rotate(45deg); }
+
+.assistant-reasoning__body {
+  max-width: 72ch;
+  padding: 8px 0 10px 35px;
+  max-height: 260px;
+  overflow-y: auto;
+  color: color-mix(in srgb, var(--text) 62%, var(--muted));
+  font-size: 12.5px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.assistant-reasoning__notice {
+  margin: 0;
+  padding: 2px 0 4px 21px;
+  color: var(--danger);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.process-agent-reasoning {
+  grid-column: 1 / -1;
+  margin-top: 5px;
+}
+
+.process-agent-reasoning .assistant-reasoning__body {
+  max-height: 240px;
+  overflow: auto;
+}
+
+.message--process { width: min(100%, 640px); margin-block: 8px 32px; }
+.message--process details {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+}
+.message--process summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  list-style: none;
+  cursor: default;
+}
+.message--process summary::-webkit-details-marker { display: none; }
+.message--process summary:focus-visible { outline: 2px solid var(--red); outline-offset: 4px; }
+.message--process[data-outcome="failed"] summary { color: var(--danger); }
+.message--process[data-has-details="true"] > details > summary::after {
+  content: ""; width: 5px; height: 5px; margin-left: 4px;
+  border-right: 1px solid currentColor; border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg); transition: transform .16s ease;
+}
+.message--process[data-has-details="true"] > details[open] > summary::after { transform: rotate(45deg); }
+.process-detail-icon { display: inline-flex; }
+.process-detail-icon svg { width: 16px; height: 16px; }
+.process-detail-icon[hidden] { display: none; }
+.process-tool-section { margin-top: 10px; }
+.process-events:empty, .process-actions:has(button[hidden]) { display: none; }
+.process-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-block: 8px; }
+.process-cancel { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 32px; padding: 4px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: default; }
+.process-cancel svg { display: block; width: 16px; height: 16px; }
+.process-cancel:hover { color: var(--ink); background: var(--surface-hover, color-mix(in srgb, var(--ink) 5%, transparent)); }
+.process-cancel:focus-visible { outline: 1px solid var(--muted); outline-offset: 2px; }
+.process-cancel:disabled { opacity: .5; cursor: wait; }
+.process-token-usage { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; line-height: 1.5; }
+.process-token-values { display: flex; flex-wrap: wrap; gap: 8px 20px; font-variant-numeric: tabular-nums; }
+.process-token-values > span { display: inline-flex; align-items: baseline; gap: 6px; }
+.process-token-values b { color: var(--ink); font-size: inherit; font-weight: 500; }
+.assistant-reasoning[data-running="true"] > summary { color: var(--ink); }
+.task-item__running-dot[data-state="queued"],
+.task-item__running-dot[data-state="waiting"],
+.task-item__running-dot[data-state="cancelling"],
+.task-item__running-dot[data-state="uncertain"] { background: var(--muted); box-shadow: none; }
+.thinking-orbs { display: block; flex-shrink: 0; }
+
+.thinking-orbs[data-render-mode="static"] {
+  box-sizing: border-box;
+  border: 2px solid var(--muted);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+}
+
+.process-state {
+  display: inline-block;
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.process-events {
+  display: grid;
+  gap: 6px;
+  margin: 9px 0 0;
+  padding: 0 0 0 20px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.process-events li[data-status="failed"],
+.process-events li[data-status="cancelled"] { color: var(--danger); }
+
+.message--process[data-terminal="true"] .thinking-orbs,
+.message--process[data-terminal="true"] .process-state { display: none; }
+.process-failure {
+  margin: 0 0 8px;
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* All glyphs stay mounted. Interrupted transitions continue from their current
+   opacity and transform; no forced layout or display:none swap on sending. */
+.send-success { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2; }
+.send-control.is-sent:not(.is-generating) .send-arrow { opacity: 0; transform: translateY(-5px) scale(.7); }
+.send-control.is-sent:not(.is-generating) .send-success { opacity: 1; transform: scale(1); }
+
+/* Existing assistant-panel geometry is retained; the open state gets only the
+   short panel-reveal cross-blur needed to avoid a hard pop. */
+@media (min-width: 701px) {
+  .workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel {
+    filter: blur(1px);
+    transition: opacity .22s ease, transform .36s cubic-bezier(.16, 1, .3, 1), filter .22s ease;
+    will-change: opacity, transform, filter;
+  }
+
+  .workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-region.is-open .assistant-panel {
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-attach-control,
+  .workspace-shell.workspace-shell--desk[data-workspace-shell] .send-control,
+  .workspace-shell.workspace-shell--desk[data-workspace-shell] .send-control .stop-square {
+    transition: none !important;
+    animation: none !important;
+  }
+  .workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs__indicator,
+  .workspace-shell.workspace-shell--desk[data-workspace-shell] .send-control.is-sent .send-success {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .assistant-reasoning__chevron, .send-control, .send-control svg > * { transition: none !important; animation: none !important; }
+
+}
+
+@media (max-width: 680px) {
+  .message--assistant .message__content { width: 100%; }
+  .assistant-reasoning__body { padding-inline-start: 0; }
+  .assistant-reasoning__notice { padding-inline-start: 0; }
+}
+
+@media (max-width: 520px) {
+  .composer-actions__leading,
+  .composer-actions__trailing { width: 100%; }
+  .composer-actions__trailing { flex: 1 1 100%; }
+  .composer-actions__trailing .model-picker { min-width: 0; flex: 1 1 auto; }
+  .composer-actions__trailing .model-picker :is(select, .choice, .choice-trigger) { width: 100%; max-width: 100%; }
+}
+
+/* Keep the OptionHelper palette while using a denser, calmer desktop rhythm:
+   the conversation and floating composer carry hierarchy, not a large logo. */
+.workspace-shell.workspace-shell--desk[data-workspace-shell] {
+  --conversation-column-max: 1040px;
+  --conversation-column-reserve: 56px;
+  --oh-panel-open-duration: 320ms;
+  --oh-panel-close-duration: 200ms;
+  --oh-panel-ease: cubic-bezier(.22, 1, .36, 1);
+  --oh-tabs-duration: 250ms;
+  background: #fff;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .workspace-rail--unbranded {
+  padding: 14px 12px 12px;
+  border-right-color: transparent;
+  background: var(--red-rail);
+  color: #fff;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .workspace-rail--unbranded {
+  padding: 14px 12px 12px;
+  border-right-color: #E5E5E5;
+  background: #F7F7F7;
+  color: #464646;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-has-desk="false"] .workspace-rail--unbranded {
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-mode-area { margin: 0; }
+.workspace-shell.workspace-shell--desk[data-has-desk="false"] .rail-mode-area { display: block; }
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch--rail {
+  padding: 2px;
+  border-color: transparent;
+  border-radius: 9px;
+  background: rgba(68, 7, 19, .28);
+  box-shadow: none;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch--rail::before {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(49, 4, 13, .16);
+}
+
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .mode-switch--rail::before {
+  background: var(--red);
+  box-shadow: 0 2px 5px rgba(130, 11, 35, .18);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch button {
+  min-height: 30px;
+  font-size: 12px;
+  color: #f5dce0;
+}
+
+.workspace-shell.workspace-shell--desk[data-mode="chat"] .mode-switch button[aria-pressed="true"] { color: var(--red-deep); }
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .mode-switch button[aria-pressed="true"] { color: #fff; }
+
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .mode-switch--rail {
+  border-color: #E3E3E3;
+  background: #EEEEEE;
+}
+
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .mode-switch button { color: #757575; }
+
+.workspace-shell.workspace-shell--desk[data-has-desk="false"] .mode-switch--rail {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.workspace-shell.workspace-shell--desk[data-has-desk="false"] .mode-switch--rail::before { display: none; }
+.workspace-shell.workspace-shell--desk[data-has-desk="false"] .mode-switch--rail button {
+  width: 100%;
+  justify-content: flex-start;
+  padding: 0 7px;
+  color: #f5dce0;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task {
+  min-height: 38px !important;
+  margin-top: 10px !important;
+  justify-content: flex-start !important;
+  padding: 0 8px !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  background: transparent !important;
+  color: #fff !important;
+  font-weight: 580;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task > span:first-child {
+  width: 18px;
+  color: var(--red);
+  font-size: 19px;
+  font-weight: 420;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task__label { font-size: 12px; }
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task:hover {
+  border-color: transparent;
+  background: rgba(255, 255, 255, .12);
+  color: #fff;
+  transform: none;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-new-task {
+  color: var(--red-deep) !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-new-task:hover {
+  background: #EBEBEB;
+  color: var(--red-deep);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-rail {
+  margin-top: 16px;
+  padding: 10px 2px 0 0;
+  border-top: 0;
+}
+
+.rail-section-label {
+  margin: 0 8px 7px;
+  color: rgba(255, 236, 239, .66);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .01em;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-list { gap: 2px; }
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: transparent;
+  color: rgba(255, 255, 255, .92);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item::before {
+  content: none;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item__title {
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 480;
+  line-height: 1.25;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item small,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item small,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item small {
+  margin: 0;
+  color: rgba(255, 232, 236, .65);
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item:hover,
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item[aria-current="true"],
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item:hover,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item[aria-current="true"],
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item:hover,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item[aria-current="true"] {
+  background: rgba(255, 255, 255, .14);
+  color: #fff;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item {
+  color: #585858;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item small,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-section-label {
+  color: #938b85;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item:hover,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item[aria-current="true"] {
+  background: #E9E9E9;
+  color: #322d29;
+}
+
+/* Task history is text-first: the current task gets a precise one-pixel rule,
+   while inactive rows stay free of decorative status markers. */
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item[aria-current="true"] {
+  box-shadow: inset 1px 0 0 currentColor;
+  font-weight: 620;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item[aria-current="true"] {
+  box-shadow: inset 1px 0 0 #ffd3db;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item[aria-current="true"] {
+  box-shadow: inset 1px 0 0 var(--red);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-footer,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .rail-footer,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-footer {
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, .19);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-footer {
+  border-top-color: #E4E4E4;
+}
+
+/* Account actions stay tucked into the rail rather than becoming a second
+   navigation surface. The menu opens upward so it does not disturb the task
+   list or the fixed composer. */
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-footer {
+  position: relative;
+  z-index: 24;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  gap: 8px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: rgba(255, 232, 236, .82);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 620;
+  text-align: left;
+  transition: background-color .16s ease, color .16s ease;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger:hover,
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger[aria-expanded="true"] {
+  background: rgba(255, 255, 255, .11);
+  color: #fff;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger:focus-visible,
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item:focus-visible {
+  outline: 1px solid var(--muted);
+  outline-offset: 2px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__mark {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, .48);
+  border-radius: 50%;
+  color: currentColor;
+  font-size: 10px;
+  font-weight: 760;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__label { flex: 1 1 auto; }
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  transition: transform .16s ease;
+}
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  width: min(184px, calc(100vw - 28px));
+  padding: 5px;
+  border: 1px solid rgba(38, 38, 38, .15);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 14px 34px rgba(45, 24, 28, .18);
+  transform-origin: bottom right;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu[hidden] { display: none; }
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 34px;
+  gap: 9px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #404040;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 630;
+  text-align: left;
+  text-decoration: none;
+  transition: background-color .14s ease, color .14s ease;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item:hover {
+  background: #F2F2F2;
+  color: var(--red-deep);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item:disabled {
+  cursor: wait;
+  opacity: .56;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item > svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item--logout { color: #a71530; }
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-account-trigger { color: #7d7670; }
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-account-trigger__mark { border-color: #C6C6C6; }
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-account-trigger:hover,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-account-trigger[aria-expanded="true"] { background: #EBEBEB; color: var(--red-deep); }
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-account-trigger:focus-visible,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-account-menu__item:focus-visible { outline-color: var(--muted); }
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .workbench-head {
+  min-height: 56px;
+  padding: 0 28px;
+  border-bottom-color: #ECECEC;
+  background: rgba(255, 255, 255, .92);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .workbench-head h1 {
+  font-size: 16px;
+  font-weight: 610;
+  letter-spacing: -.015em;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .work-area { grid-template-rows: 56px minmax(0, 1fr) var(--assistant-height); }
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .work-area { grid-template-rows: 56px minmax(0, 1fr); }
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-region { padding: 12px 20px 18px; }
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .composer,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-region .composer {
+  width: min(var(--conversation-column-max), calc(100% - 18px));
+}
+
+@media (min-width: 701px) {
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-rail--unbranded .rail-new-task {
+    width: 100%;
+    min-height: 100%;
+    margin: 10px 0 0;
+    justify-content: center;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-rail--unbranded .rail-new-task:hover {
+    background: rgba(130, 12, 37, .06);
+  }
+}
+
+/* transitions.dev panel-reveal: the rail contracts as one surface rather than
+   hiding its contents at once. The persistent new-task action remains in place. */
+@media (min-width: 701px) {
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-layout-ready="true"] .rail-mode-area,
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-layout-ready="true"] .task-rail,
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-layout-ready="true"] .rail-footer {
+    filter: blur(0);
+    transition:
+      opacity var(--oh-panel-open-duration) var(--oh-panel-ease),
+      transform var(--oh-panel-open-duration) var(--oh-panel-ease),
+      filter var(--oh-panel-open-duration) var(--oh-panel-ease),
+      visibility 0s linear 0s;
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-layout-ready="true"][data-rail-collapsed="true"] .rail-mode-area,
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-layout-ready="true"][data-rail-collapsed="true"] .task-rail,
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-layout-ready="true"][data-rail-collapsed="true"] .rail-footer {
+    filter: blur(1px);
+    transition:
+      opacity var(--oh-panel-close-duration) var(--oh-panel-ease),
+      transform var(--oh-panel-close-duration) var(--oh-panel-ease),
+      filter var(--oh-panel-close-duration) var(--oh-panel-ease),
+      visibility 0s linear var(--oh-panel-close-duration);
+  }
+}
+
+/* transitions.dev input-clear-dissolve: only the submitted text briefly owns
+   the composer while its durable bubble is already entering the message flow. */
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .composer form { position: relative; }
+.composer-send-echo {
+  position: absolute;
+  z-index: 3;
+  top: 12px;
+  right: 16px;
+  left: 14px;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: inherit;
+  line-height: 1.55;
+  pointer-events: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0;
+}
+
+.composer-send-echo.is-running { animation: composer-input-dissolve .32s var(--oh-panel-ease) both; }
+
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .composer-send-echo {
+  top: 10px;
+  right: min(212px, 45%);
+}
+
+@keyframes composer-input-dissolve {
+  0% { opacity: .92; filter: blur(0); transform: translateY(0); }
+  100% { opacity: 0; filter: blur(2px); transform: translateY(9px); }
+}
+
+/* The module rail is intentionally flat: the red rule, rather than a raised
+   card, identifies the active research step. The measured indicator keeps the
+   transitions.dev slide continuous even when the Chinese labels differ. */
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs {
+  align-items: stretch;
+  gap: 0;
+  min-height: 54px;
+  padding: 0 26px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button,
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button:first-child {
+  min-height: 54px;
+  margin: 0;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #707070;
+  font-size: 13px;
+  font-weight: 620;
+  letter-spacing: -.01em;
+  box-shadow: none;
+  transition:
+    color 160ms ease,
+    background-color 160ms ease;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button:hover:not([aria-selected="true"]) {
+  background: rgba(35, 35, 35, .035);
+  color: #414141;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button[aria-selected="true"] {
+  color: #232323;
+  font-weight: 700;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button:focus-visible {
+  z-index: 3;
+  outline: 2px solid rgba(200, 16, 46, .26);
+  outline-offset: -6px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs__indicator {
+  z-index: 2;
+  bottom: 0;
+  height: 2px;
+  background: var(--red);
+  box-shadow: none;
+  transition: transform var(--oh-tabs-duration) var(--oh-panel-ease);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-surface {
+  grid-template-rows: 54px minmax(0, 1fr);
+  background: #F8F8F8;
+}
+
+/* The report library is a compact utility, not a competing headline action. */
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .report-drawer-toggle {
+  display: inline-grid;
+  width: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  place-items: center;
+  border-color: transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: #67605b;
+  line-height: 1;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .report-drawer-toggle > svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.65;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .report-drawer-toggle:hover {
+  border-color: transparent;
+  background: #F1F1F1;
+  color: var(--red-deep);
+  transform: none;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .report-drawer-toggle:focus-visible {
+  outline: 2px solid var(--color-blue-gray);
+  outline-offset: 2px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .report-drawer-toggle.is-active {
+  border-color: transparent;
+  background: var(--canvas);
+  color: var(--ink);
+}
+
+/* Unified workspace surface. Chat and Desk share one quiet navigation rail;
+   the OptionHelper red is reserved for active state and primary action. */
+.workspace-shell.workspace-shell--desk[data-workspace-shell] {
+  --conversation-column-max: 820px;
+  --conversation-column-reserve: 44px;
+  background: #fff;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .workspace-rail--unbranded,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .workspace-rail--unbranded {
+  padding: 14px 11px 12px;
+  border-right-color: #E5E5E5;
+  background: #F7F7F7;
+  color: #404040;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch--rail,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch--rail,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch--rail {
+  min-height: 40px;
+  padding: 3px;
+  border: 1px solid #E3E3E3;
+  border-radius: 12px;
+  background: #ECECEC;
+  box-shadow: none;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch--rail::before,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch--rail::before,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch--rail::before {
+  top: 3px;
+  bottom: 3px;
+  left: 3px;
+  width: calc(50% - 3px);
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(39, 39, 39, .11), 0 4px 12px rgba(39, 39, 39, .045);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch--rail::before {
+  background: var(--red);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch button,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch button,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch button {
+  min-height: 34px;
+  color: #6F6F6F;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch button[aria-pressed="true"] { color: var(--red-deep); }
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch button[aria-pressed="true"] { color: #fff; }
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .rail-new-task,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-new-task {
+  min-height: 38px !important;
+  margin-top: 10px !important;
+  padding: 0 9px !important;
+  border-radius: 9px !important;
+  color: var(--ink) !important;
+  font-weight: 590;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task > span:first-child {
+  color: var(--red);
+  font-size: 20px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task:hover,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .rail-new-task:hover,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-new-task:hover {
+  background: #ECECEC !important;
+  color: var(--red-deep) !important;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-rail {
+  margin-top: 15px;
+  padding-top: 10px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-section-label,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .rail-section-label,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-section-label {
+  color: #919191;
+  font-size: 10.5px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item {
+  min-height: 38px;
+  grid-template-columns: minmax(0, 1fr) auto 18px;
+  gap: 7px;
+  padding: 0 8px;
+  color: #4B4B4B;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item small,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item small,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item small { color: #948d87; }
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item:hover,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item[aria-current="true"],
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item:hover,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item[aria-current="true"],
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item:hover,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item[aria-current="true"] {
+  background: var(--task-row-state-surface);
+  color: var(--ink);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item[aria-current="true"],
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item[aria-current="true"],
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item[aria-current="true"] {
+  box-shadow: inset 2px 0 0 var(--red);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-footer,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .rail-footer,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-footer { border-top-color: #DDDDDD; }
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .rail-account-trigger,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-account-trigger { color: #716a65; }
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__mark { border-color: #C6C6C6; }
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger:hover,
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger[aria-expanded="true"] { background: #ECECEC; color: var(--red-deep); }
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .workbench-head,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .workbench-head {
+  min-height: 54px;
+  padding: 0 24px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .workbench-head { border-bottom-color: var(--color-rule); }
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .workbench-head h1 { font-size: 15px; }
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .work-area { grid-template-rows: 54px minmax(0, 1fr) var(--assistant-height); }
+
+@media (min-width: 701px) {
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .work-area {
+    --chat-composer-clearance: 0px;
+    position: relative;
+    grid-template-rows: 54px minmax(0, 1fr);
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .conversation-scroll-stage {
+    grid-row: 2;
+    margin-bottom: 16px;
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .message-stream {
+    padding-bottom: max(12px, calc(var(--chat-composer-clearance) - 16px));
+    scroll-padding-bottom: max(12px, calc(var(--chat-composer-clearance) - 16px));
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .chat-surface--empty .conversation-start:not(.is-leaving) {
+    transform: none;
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-region {
+    position: absolute;
+    z-index: 12;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    grid-row: auto;
+    min-height: 0;
+    padding: 0 24px 16px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    pointer-events: none;
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-panel,
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-panel > .desk-command-dock__body,
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-region .composer {
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-panel > .desk-command-dock__body {
+    pointer-events: none;
+  }
+
+  .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-region .composer {
+    pointer-events: auto;
+  }
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .conversation-start {
+  width: min(760px, calc(100% - 42px));
+  padding: 12px 0 18px;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .conversation-start__mark { display: none; }
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .conversation-start h2 {
+  margin-top: 0;
+  font-size: clamp(24px, 2.6vw, 30px);
+  font-weight: 650;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .conversation-start__copy { margin-top: 8px; color: #7e7772; }
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .conversation-starters { gap: 9px; margin-top: 20px; }
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .conversation-starter {
+  min-height: 84px;
+  padding: 13px 14px;
+  border-color: #E2E2E2;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .74);
+  box-shadow: none;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .conversation-starter:hover {
+  border-color: #d9c7ca;
+  background: #fff;
+  box-shadow: 0 7px 18px rgba(78, 47, 52, .055);
+  transform: translateY(-1px);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .message-stream {
+  padding-right: max(22px, calc((100% - 820px) / 2));
+  padding-left: max(22px, calc((100% - 820px) / 2));
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .composer,
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-region .composer { width: min(820px, calc(100% - 28px)); }
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .composer form {
+  min-height: 88px;
+  gap: 5px;
+  padding: 10px 12px 8px;
+  border-color: #DBDBDB;
+  border-radius: 18px;
+  box-shadow: 0 6px 24px rgba(38, 38, 38, .08);
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .composer textarea {
+  min-height: 30px;
+  max-height: 120px;
+  overflow-y: hidden;
+}
+
+.workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .composer textarea[data-overflow="true"] {
+  overflow-y: auto;
+}
+
+@media (min-width: 701px) {
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-rail--unbranded { padding-inline: 6px; }
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-rail--unbranded .rail-new-task {
+    margin-top: 8px !important;
+    border-radius: 10px !important;
+  }
+}
+
+/* Final cascade for the LibreChat ports. These selectors intentionally match
+   both modes so Chat and Desk preserve the same persistent rail geometry. */
+.workspace-body,
+.workspace-body button,
+.workspace-body input,
+.workspace-body select,
+.workspace-body textarea {
+  font-family: var(--font);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch--rail::before {
+  transform: translate3d(0, 0, 0);
+  transition:
+    transform 420ms cubic-bezier(.22, 1, .36, 1),
+    background-color 260ms ease,
+    box-shadow 260ms ease;
+  will-change: transform;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch--rail::before {
+  transform: translate3d(100%, 0, 0);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch button,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch button:hover,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch button[aria-pressed="true"] {
+  background: transparent !important;
+  box-shadow: none !important;
+  transform: none;
+  transition: color 220ms ease;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item {
+  position: relative;
+  min-height: 36px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 0 28px 0 8px;
+  border-radius: 9px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 2px;
+  border-radius: 999px;
+  background: var(--red);
+  content: "";
+  opacity: 0;
+  transform: scaleY(.35);
+  transition: opacity 150ms ease, transform 180ms var(--oh-panel-ease);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item[aria-current="true"]::before {
+  opacity: 1;
+  transform: scaleY(1);
+}
+
+/* Shared task actions are buttons in both OptChat and OptDesk. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-list__row .task-item {
+  padding-right: 46px;
+  cursor: default;
+}
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-list__row:is(:hover, :focus-within, :has(.task-menu-trigger[aria-expanded="true"])) .task-item { background: var(--task-row-state-surface); color: var(--ink); }
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-menu-trigger {
+  position: absolute;
+  top: 50%;
+  right: 2px;
+  z-index: 3;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: color-mix(in srgb, var(--ink) 72%, var(--muted));
+  place-items: center;
+  opacity: 0;
+  cursor: default;
+  transform: translateY(-50%);
+  transition: opacity 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-list__row:is(:hover, :focus-within) .task-menu-trigger,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-menu-trigger[aria-expanded="true"] { opacity: 1; }
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-menu-trigger:is(:hover, :focus-visible, [aria-expanded="true"]) { background: var(--task-menu-state-surface); }
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-menu-trigger svg { display: block; width: 12px; height: 12px; }
+body > .task-menu {
+  position: fixed;
+  top: auto;
+  right: auto;
+  z-index: 100;
+  box-sizing: border-box;
+  min-width: 218px;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(29, 29, 29, .18);
+}
+body > .task-menu .task-menu__action {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  cursor: default;
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  text-align: left;
+}
+body > .task-menu .task-menu__icon { display: inline-flex; width: 16px; height: 16px; flex: none; align-items: center; justify-content: center; color: var(--muted); }
+body > .task-menu .task-menu__icon svg { display: block; width: 16px; height: 16px; }
+body > .task-menu .task-menu__label { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+body > .task-menu .task-menu__action:hover,
+body > .task-menu .task-menu__action:focus-visible { background: var(--canvas); color: var(--red-deep); }
+body > .task-menu .task-menu__action--danger { color: var(--red-deep); }
+body > .task-menu .task-menu__action--danger .task-menu__icon { color: inherit; }
+body > .task-menu .task-menu__action--danger:hover,
+body > .task-menu .task-menu__action--danger:focus-visible { background: var(--red-pale); }
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  background: transparent;
+  color: #303030;
+  text-align: left;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__mark {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: #E8E8E8;
+  color: #363636;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__name {
+  margin-left: 4px;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu {
+  right: auto;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: min(244px, calc(var(--rail-effective-width) - 16px));
+  min-width: 190px;
+  padding: 7px;
+  border: 1px solid #DBDBDB;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .98);
+  box-shadow: 0 14px 34px rgba(32, 32, 32, .14), 0 2px 8px rgba(32, 32, 32, .07);
+}
+
+@media (min-width: 701px) {
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-trigger {
+    width: 42px;
+    min-width: 42px;
+    max-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-trigger__copy,
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-trigger__name {
+    display: none;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-menu {
+    bottom: 8px;
+    left: calc(100% + 9px);
+    width: 220px;
+  }
+}
+
+/* Let the account popover escape a narrow rail without changing the rail's
+   measured width or affecting the native collapse/report controls. */
+@media (min-width: 701px) {
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail[data-account-menu-open="true"] {
+    z-index: 20;
+    overflow: visible;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail .rail-footer {
+    filter: none;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell]:not([data-rail-collapsed="true"]) .rail-account-menu {
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    z-index: 21;
+  }
+}
+
+/* Keep the recent-task heading close to the new-task action, while reserving
+   a separate right-side column for each date before the overflow control. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-rail {
+  margin-top: 8px;
+  padding-top: 4px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-list__row .task-item {
+  grid-template-columns: minmax(0, 1fr) max-content;
+  column-gap: 10px;
+  padding-right: 38px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-list__row .task-item small {
+  align-self: center;
+  justify-self: end;
+  margin: 0;
+  font-size: 7.7px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Chat and Desk share the same workbench header. The legacy Desk-only grid
+   used a taller first row and wider padding, which made the task title jump
+   when data-mode changed. */
+@media (min-width: 701px) {
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .work-area {
+    /* The floating assistant does not occupy a layout row. */
+    grid-template-rows: 54px minmax(0, 1fr);
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .workbench-head {
+    min-height: 54px;
+    padding: 0 24px;
+  }
+}
+
+/* The macOS WKWebView extends beneath the transparent native title bar. Keep
+   the existing controls and routes intact while letting each App surface paint
+   its own title-bar material. */
+html[data-native-shell="macos"] {
+  --native-titlebar-height: 36px;
+  --native-titlebar-collapsed-leading-safe-area: 166px;
+}
+
+html[data-native-shell="macos"] .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded {
+  padding-top: calc(8px + var(--native-titlebar-height));
+}
+
+html[data-native-shell="macos"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .workbench-head {
+  border-top: 0;
+}
+
+html[data-native-shell="macos"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-report-open="true"] .task-context {
+  padding-top: calc(24px + var(--native-titlebar-height));
+}
+
+@media (min-width: 701px) {
+  html[data-native-shell="macos"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workbench-head {
+    padding-left: var(--native-titlebar-collapsed-leading-safe-area);
+  }
+}
+
+/* The account footer is a compact identity line, without a mode-specific rule. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-footer,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .rail-footer,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-footer {
+  padding-top: 8px;
+  border-top: 1px solid #DDDDDD;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger {
+  min-height: 36px;
+  gap: 8px;
+  padding: 3px 7px;
+  border-radius: 9px;
+  background: transparent !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger:hover,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger[aria-expanded="true"] {
+  background: #ECECEC !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__mark {
+  width: 26px;
+  height: 26px;
+  flex-basis: 26px;
+  font-size: 10px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__name {
+  font-size: 13px;
+}
+
+@media (min-width: 701px) {
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-trigger {
+    width: 36px;
+    min-width: 36px;
+    max-width: 36px;
+    height: 36px;
+    min-height: 36px;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-trigger__mark {
+    width: 26px;
+    height: 26px;
+    flex-basis: 26px;
+  }
+}
+
+/* A translucent segmented control keeps the mode switch visually attached to
+   the native shell without becoming a second opaque toolbar. This final rule
+   owns the material after the legacy density layers above. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch--rail,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch--rail,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch--rail {
+  min-height: 36px;
+  border-color: color-mix(in srgb, var(--color-ink) 12%, transparent);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--color-ink) 7%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 4px 14px rgba(22, 22, 22, .06);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  backdrop-filter: blur(14px) saturate(120%);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch--rail::before,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch--rail::before,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch--rail::before {
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-paper) 78%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .3), 0 2px 7px rgba(22, 22, 22, .1);
+  -webkit-backdrop-filter: blur(12px) saturate(118%);
+  backdrop-filter: blur(12px) saturate(118%);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch--rail button,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch--rail button,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch--rail button {
+  min-height: 30px;
+}
+
+/* Splitters keep a generous hit area but do not add a second permanent rule
+   beside the section boundary. The drag affordance appears only on intent. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] {
+  --rail-splitter-width: 0px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-report-open="true"] {
+  --context-splitter-width: 0px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] :is(.workspace-splitter--rail, .workspace-splitter--context) {
+  width: 10px;
+  justify-self: center;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-splitter::before {
+  top: 14px;
+  bottom: 14px;
+  width: 2px;
+  background: color-mix(in srgb, var(--color-ink) 36%, transparent);
+  opacity: 0;
+  transform: translateX(-50%) scaleX(.5);
+  transition: opacity .16s ease, transform .2s ease, background-color .16s ease;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-splitter:is(:hover, :focus-visible)::before,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-resizing="true"] .workspace-splitter::before {
+  background: var(--red);
+  opacity: 1;
+  transform: translateX(-50%) scaleX(1);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .mode-switch button[aria-pressed="true"],
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .mode-switch button[aria-pressed="true"] {
+  color: var(--red-deep);
+}
+
+/* A selected task is a quiet surface state, not a red status marker. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item::before {
+  display: none;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item[aria-current="true"],
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .task-item[aria-current="true"],
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item[aria-current="true"] {
+  box-shadow: none;
+}
+
+/* LibreChat compact rail. This final layer replaces the former full-height
+   new-task strip with two stable icon actions: new task above, account below. */
+@media (min-width: 701px) {
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .workspace-rail--unbranded {
+    display: grid;
+    grid-template-rows: 42px minmax(0, 1fr) 42px;
+    gap: 8px;
+    padding: 14px 6px 12px;
+    overflow: visible;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-mode-area,
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .task-rail {
+    position: absolute;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-new-task {
+    position: static;
+    grid-row: 1;
+    align-self: center;
+    justify-self: center;
+    width: 42px;
+    min-width: 42px;
+    max-width: 42px;
+    height: 42px;
+    min-height: 42px !important;
+    max-height: 42px;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0;
+    border-radius: 10px !important;
+    background: transparent !important;
+    color: #5B5B5B !important;
+    transform: none;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-new-task:hover,
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-new-task:focus-visible {
+    background: #E9E9E9 !important;
+    color: var(--red-deep) !important;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-footer {
+    display: none !important;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-trigger {
+    width: 42px;
+    min-width: 42px;
+    max-width: 42px;
+    height: 42px;
+    min-height: 42px;
+    padding: 0;
+  }
+}
+
+/* Codex-style rail icon family: one quiet outline weight for every utility
+   action, with the vertical ellipsis retained as the single filled glyph. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task__icon,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item__chat svg,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item > svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task__icon,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item > svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item > svg {
+  stroke-width: 1.8;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item--logout > svg {
+  transform: scale(1.16);
+  transform-origin: center;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item__chat svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* Final compact account geometry: one quiet identity line in both modes. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-footer,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .rail-footer,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .rail-footer {
+  padding-top: 6px;
+  border-top: 1px solid #DDDDDD;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger {
+  min-height: 36px;
+  gap: 6px;
+  padding: 1px 7px;
+  border-radius: 7px;
+  background: transparent !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger:hover,
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger[aria-expanded="true"] {
+  background: var(--task-row-state-surface) !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__mark {
+  width: 22px;
+  height: 22px;
+  flex-basis: 22px;
+  border-radius: 50%;
+  background: #62666D;
+  color: #FFFFFF;
+  font-size: 9px;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__name { font-size: 12.5px; }
+
+@media (min-width: 701px) {
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-trigger {
+    width: 36px;
+    min-width: 36px;
+    max-width: 36px;
+    height: 36px;
+    min-height: 36px;
+    padding: 0;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell][data-rail-collapsed="true"] .rail-account-trigger__mark {
+    width: 22px;
+    height: 22px;
+    flex-basis: 22px;
+  }
+}
+
+@media (pointer: coarse) {
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-menu-trigger {
+    width: 44px;
+    height: 44px;
+  }
+
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger {
+    min-height: 44px;
+  }
+}
+
+/* Streaming visibility must win over component display declarations. */
+.message--process[hidden], .message--streaming[hidden],
+.assistant-reasoning[hidden], .thinking-orbs[hidden] { display: none !important; }
+
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel > * { min-width: 0; }
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel .message--process { max-width: 100%; }
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel .process-collaboration { width: 100%; min-width: 0; box-sizing: border-box; }
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel .workflow-network { width: 100%; min-width: 0; min-height: 210px; }
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel .workflow-node { width: 20%; max-width: 155px; }
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel__transcript .message-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 18px;
+  padding-bottom: var(--desk-composer-clearance, 172px);
+  scroll-padding-bottom: var(--desk-composer-clearance, 172px);
+  align-items: stretch;
+}
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel__transcript .message {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  min-height: auto;
+}
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel__transcript .message--user .message__body {
+  padding: 8px 12px;
+  border-radius: 14px;
+  max-width: 90%;
+}
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel > .desk-command-dock__body {
+  background: var(--surface);
+  border-top: 0;
+}
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel .model-picker {
+  flex: 0 1 auto;
+  max-width: calc(100% - 44px);
+}
+.workspace-shell.workspace-shell--desk[data-mode="desk"] .assistant-panel .composer-actions__trailing {
+  justify-content: flex-end;
+}
+
+/* Tool lifecycle events update one compact, inspectable row per call. */
+.process-tool-cards { display: grid; gap: 2px; }
+.process-tool-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 2px 16px;
+  padding: 2px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.process-tool-card [data-process-card-title] { font-weight: 400; }
+.process-tool-card [data-process-card-status] {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px;
+  color: var(--muted); background: transparent; opacity: 1;
+}
+.process-tool-card [data-process-card-status] svg { width: 16px; height: 16px; }
+.process-tool-card [data-state="complete"] { color: var(--success); }
+.process-tool-card [data-state="failed"] { color: var(--red); cursor: default; }
+.process-tool-card [data-state="failed"]:hover { background: var(--red-pale); }
+.process-tool-card [data-process-card-status]:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+.process-tool-card [data-state="running"] svg { animation: process-status-spin 1.2s linear infinite; }
+.process-tool-card [data-process-card-detail] { grid-column: 1 / -1; margin: 2px 0 6px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.process-tool-card [hidden] { display: none; }
+@keyframes process-status-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .process-tool-card [data-state="running"] svg { animation: none; } }
+
+.message-question__answered { color: var(--muted); font-size: 12px; }
+
+[data-process-card-status][data-state="uncertain"] { color: var(--muted); }
+
+/* Clarifications share the chat composer and its single send action. */
+.composer-question { padding: 4px 2px 12px; }
+.composer-question[hidden] { display: none; }
+.composer-question__prompt { margin: 0 0 12px; font-weight: 600; line-height: 1.6; }
+.composer-question__choices { display: grid; gap: 6px; max-height: 32vh; overflow-y: auto; }
+.composer-question__option { display: flex; align-items: flex-start; gap: 10px; padding: 9px 10px; border-radius: 10px; cursor: default; }
+.composer-question__option:hover, .composer-question__option:has(input:checked) { background: var(--surface-muted, #f4f4f4); }
+.composer-question__option input { accent-color: var(--accent, #c8102e); margin: 4px 0 0; flex: 0 0 auto; }
+.composer-question__option span { display: grid; gap: 3px; min-width: 0; }
+.composer-question__option strong { font-size: 13px; font-weight: 500; }
+.composer-question__option small { color: var(--text-muted, #737373); font-size: 12px; line-height: 1.5; }
+
+/* Running-turn follow-ups share the composer, with explicit queue/interrupt actions. */
+.composer-followup-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: default;
+}
+.composer-followup-control[hidden], .composer-followups[hidden] { display: none; }
+.composer-followup-control svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.composer-followup-control:hover { background: var(--surface-hover, #8882); }
+.composer-followup-control:disabled { opacity: .4; cursor: default; }
+.composer-followup-control:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.composer-followups { max-height: 120px; overflow-y: auto; padding: 4px 0 8px; }
+.composer-followup-row { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; }
+.composer-followup-row .composer-followup-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-followup-row button { flex: none; padding: 4px 8px; border: 0; background: transparent; color: inherit; cursor: default; }
+
+/* Keep the reply footer to one disclosure; its body is the actual breakdown. */
+.message--process[data-usage-only="true"] .process-token-values > span,
+.message--process[data-usage-only="true"] .process-token-usage { border-top: 0; margin-top: 0; padding-top: 0; }
+.composer-followup-state { flex: 0 0 auto; color: var(--muted); font-size: 11px; }
+.composer-followup-state[data-state="running"] { color: var(--ink); }
+.composer-followup-state::before { content: ""; display: inline-block; width: 5px; height: 5px; margin-right: 6px; border: 1px solid currentColor; border-radius: 50%; vertical-align: 1px; }
+.composer-followup-state[data-state="running"]::before { background: currentColor; }
+.composer-followup-row button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 5px; border-radius: 7px; }
+.composer-followup-row button svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.7; fill: none; stroke-linecap: round; }
+.composer-followup-row button:hover { background: var(--surface-hover, #8882); }
+.composer-followup-row button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.composer-question__option { border: 1px solid transparent; transition: border-color .15s ease, background-color .15s ease; }
+.composer-question__option:has(input:checked) { border-color: color-mix(in srgb, var(--accent) 36%, var(--line)); background: color-mix(in srgb, var(--accent) 5%, var(--surface)); }
+.composer-question__option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { .composer-question__option { transition: none; } }
+
+/* Observed Agent runs share a request root; only running branches move. */
+.process-collaboration { margin: 10px 0 14px; padding: 14px 16px 8px; border: 1px solid var(--line); border-radius: 16px; background: color-mix(in srgb, var(--ink) 2%, var(--surface)); overflow-x: auto; }
+.process-collaboration[hidden] { display: none; }
+.process-collaboration > header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; font-size: 12px; }
+.process-collaboration > header > span { color: var(--muted); font-size: 11px; }
+.workspace-shell .composer-actions__leading { position: relative; }
+@media (prefers-reduced-motion: reduce) {
+  .workspace-shell .composer-attach-control, .workspace-shell .composer-attach-control::before { transition: none; }
+}
+
+/* Preset hierarchy and compact composer layout. */
+.optionhelper-choice .choice-group { display: block; border-top: 1px solid var(--color-rule); margin-top: 4px; padding-top: 4px; }
+.optionhelper-choice .choice-group__label { display: block; padding: 5px 11px 3px; font-size: 11px; font-weight: 500; color: var(--color-muted); }
+.composer .choice[data-open="true"] { z-index: 60; }
+.optionhelper-choice .choice-trigger__value { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 9px; white-space: normal; min-width: 0; }
+.optionhelper-choice .choice-label { min-width: 0; overflow-wrap: anywhere; }
+
+.message--process .process-usage-summary { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.message--process > details[hidden] { display: none !important; }
+
+.assistant-reasoning--compact > summary { min-height: 28px; gap: 7px; }
+.assistant-reasoning--compact > summary [hidden] { display: none; }
+
+/* Group repeated calls without merging their lifecycle records. */
+.process-tool-group { container-type: inline-size; border-bottom: 1px solid var(--line); padding: 5px 0; }
+.process-tool-group > summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 6px; gap: 8px 14px; min-height: 36px; }
+.process-tool-group__title { color: var(--ink); font-size: 12px; font-weight: 500; overflow-wrap: anywhere; }
+.process-tool-group__counts { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+.process-tool-group > summary::after { content: ""; width: 5px; height: 5px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(-45deg); }
+.process-tool-group[open] > summary::after { transform: rotate(45deg); }
+.process-tool-group__calls { padding: 4px 0 8px 12px; border-left: 1px solid var(--line); margin: 4px 0 8px; }
+.process-tool-group__calls[hidden], .process-tool-group__calls > [hidden] { display: none; }
+.process-tool-group__history { display: block; margin: 4px 0 8px; padding: 6px 0; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: default; }
+.process-tool-group__history[hidden] { display: none; }
+.process-tool-group__history:hover { color: var(--ink); }
+.process-tool-group__history:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
+.process-tool-group__issue { margin: 4px 0 8px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.process-tool-group[data-has-failures="true"] .process-tool-group__counts { color: var(--red); }
+@media (max-width: 620px) {
+  .process-tool-group > summary { grid-template-columns: minmax(0, 1fr) 6px; }
+  .process-tool-group__counts { grid-column: 1; grid-row: 2; }
+  .process-tool-group > summary::after { grid-column: 2; grid-row: 1 / 3; }
+}
+
+@container (max-width: 520px) {
+  .process-tool-group > summary { grid-template-columns: minmax(0, 1fr) 6px; }
+  .process-tool-group__counts { grid-column: 1; grid-row: 2; }
+  .process-tool-group > summary::after { grid-column: 2; grid-row: 1 / 3; }
+}
+
+/* macOS exposes the sidebar action in its native titlebar and menu. */
+html[data-native-shell="macos"] [data-rail-collapse-toggle] { display: none !important; }

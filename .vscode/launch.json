@@ -2,10 +2,10 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Research Helper：启动桌面端",
+      "name": "ResearchHelper：开发工作区",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/gui/start.py",
+      "program": "${workspaceFolder}/products/app/backend/development.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}"
     }

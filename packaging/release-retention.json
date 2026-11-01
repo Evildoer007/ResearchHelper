@@ -1,0 +1,5 @@
+{
+  "schema": "researchhelper.release-retention.v1",
+  "macos": "current_candidate_only",
+  "recovery": "trash"
+}

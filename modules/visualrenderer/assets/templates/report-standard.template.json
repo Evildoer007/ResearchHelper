@@ -1,0 +1,8 @@
+{
+  "schema": "researchhelper.report-template",
+  "id": "report-standard",
+  "version": 1,
+  "output_type": "report",
+  "profile": "standard",
+  "shell": "report.html"
+}

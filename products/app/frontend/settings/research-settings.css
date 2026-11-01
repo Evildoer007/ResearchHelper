@@ -1,0 +1,44 @@
+/* RH forms use the copied OH shell; only business-specific fields live here. */
+html[data-settings-embedded],html[data-settings-embedded] body.setup-page{min-width:0}
+.setup-page .setting-section{padding-top:12px}
+.setup-page .setting-section h2{margin:0 0 20px}
+.setup-page .setup-form{display:flex;flex-direction:column;gap:14px;margin-top:20px}
+.setup-page .setup-form .field{display:flex;flex-direction:column;gap:7px;min-width:0}
+.setup-page .model-effort-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr));gap:var(--space-4)}
+.setup-page .setup-form .field input{width:100%;box-sizing:border-box;min-height:44px;font-size:14px}
+.setup-page .settings-check{display:flex;align-items:center;gap:9px;font-size:14px;line-height:22px;min-height:44px}
+.setup-page .settings-check input{flex:none;width:17px;height:17px;accent-color:var(--color-brand-red)}
+.setup-page .form-foot{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px}
+html[data-settings-section="model"] .setup-page .settings-options{display:flex;flex-direction:column;overflow:hidden}
+html[data-settings-section="model"] .setup-page #settings-content{display:flex;flex:1;min-height:0}
+html[data-settings-section="model"] .setup-page #model{display:flex;flex-direction:column;flex:1;min-height:0}
+.setup-page #model>h2{flex:none}
+.setup-page #model-form{flex:1;min-height:0;margin-top:0;gap:0}
+/* The field scroller has its own focus gutter; actions never overlay it. */
+.setup-page .model-form-fields{display:flex;flex-direction:column;flex:1;min-height:0;overflow-y:auto;gap:14px;margin-inline:calc(-1 * var(--space-2));padding:var(--space-2);scroll-padding-block:var(--space-2)}
+.setup-page #model-form>.form-foot{flex:none;padding-block:var(--space-3)}
+.setup-page .form-result{font-size:14px;line-height:22px;overflow-wrap:anywhere;margin:0;max-width:100%}
+.setup-page .field-help,.setup-page .runtime-status-list span,.setup-page .optionhelper-scale-row p{font-size:13px;line-height:21px}
+.setup-page .field-help{color:var(--color-muted);margin:0}
+.setup-page .settings-actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:20px}
+.setup-page .storage-location{overflow-wrap:anywhere}
+.setup-page .source-capabilities{margin-top:20px}
+.setup-page .source-capabilities summary{min-height:44px;align-content:center}
+.setup-page .source-capabilities p,.setup-page .source-capabilities li{font-size:14px;line-height:22px;overflow-wrap:anywhere}
+.setup-page #settings-status:empty{display:none}
+.setup-page .settings-close{border:0;padding:0;background:transparent;cursor:pointer}
+.setup-page :is(button,a,input,select):focus-visible{outline:2px solid var(--color-brand-red);outline-offset:3px}
+@media(max-width:620px){
+  html[data-theme] body.setup-page :is(.optionhelper-scale-row,.setup-form) .optionhelper-choice>.choice-trigger{min-height:44px}
+  .setup-page .setup-form .form-foot .button-primary{min-height:44px}
+  .setup-page .setup-layout{flex-direction:column}
+  .setup-page .configured-models{flex:none;width:100%;padding:12px 12px 0;gap:8px}
+  .setup-page .connection-list.settings-nav{flex-direction:row;flex-wrap:wrap;gap:4px}
+  .setup-page .settings-nav .connection-item{width:auto;min-height:44px;height:auto;padding:8px 10px}
+  .setup-page .settings-nav__icon{display:none}
+  .setup-page .settings-content-header{height:44px;flex-basis:44px;padding:0 12px;align-items:center}
+  .setup-page .settings-close{width:44px;height:44px}
+  .setup-page .settings-options{padding:0 18px 24px}
+  .setup-page .settings-nav__title{padding:0 10px}
+  .setup-page .optionhelper-theme-cube{padding:16px 8px;min-height:72px}
+}

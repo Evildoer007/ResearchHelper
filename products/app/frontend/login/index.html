@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <!-- Login and startup directly adapted from the local OptionHelper reference; ResearchHelper identity and authentication remain independent. -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>登录ResearchHelper</title>
+    <script src="/login/theme-bootstrap.js"></script>
+    <link id="app-favicon" rel="icon" href="/app-icon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/ui/designer-token-vars.css">
+    <link rel="stylesheet" href="/ui/styles.css">
+    <link rel="stylesheet" href="/ui/refinement.css">
+    <link rel="stylesheet" href="/ui/theme-overrides.css">
+    <link rel="preload" href="/login/wordmark.svg" as="image" type="image/svg+xml">
+    <script type="module" src="/login/theme.js"></script>
+      <link rel="stylesheet" href="/login/login.css">
+  </head>
+  <body class="login-page">
+    <canvas id="login-vol-surface" aria-hidden="true"></canvas>
+
+    <div id="login-splash" class="login-splash" aria-hidden="true">
+      <div class="login-splash__stage">
+        <img class="login-splash__fallback-logo" src="/login/wordmark.svg" alt="">
+      </div>
+    </div>
+
+    <div class="login-theme" role="group" aria-label="主题" inert aria-hidden="true">
+      <button type="button" data-theme-set="auto" aria-pressed="false" title="跟随系统" aria-label="跟随系统">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 3.5v17M12 3.5a8.5 8.5 0 0 1 0 17Z" fill="currentColor" stroke="none"></path></svg>
+      </button>
+      <button type="button" data-theme-set="light" aria-pressed="true" title="浅色" aria-label="浅色">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.6"></circle><path d="M12 2.4v2.6M12 19v2.6M4.4 12H1.8M22.2 12h-2.6M6.4 6.4 4.6 4.6M19.4 19.4l-1.8-1.8M17.6 6.4l1.8-1.8M4.6 19.4l1.8 1.8"></path></svg>
+      </button>
+      <button type="button" data-theme-set="dark" aria-pressed="false" title="深色" aria-label="深色">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.4 8.4 0 0 1 9.8 4a8.5 8.5 0 1 0 10.2 10.2Z"></path></svg>
+      </button>
+    </div>
+    <main class="login-wrap" inert aria-hidden="true">
+      <div class="login-topbar">
+        <svg class="login-logo" xmlns="http://www.w3.org/2000/svg" width="1150.552" height="264" viewBox="236 116 1150.552 264" role="img" aria-label="ResearchHelper">
+  <title id="header-researchhelper-title">ResearchHelper</title>
+  <desc id="header-researchhelper-desc">ResearchHelper品牌标志</desc>
+  <defs><linearGradient id="header-researchhelper-red-gradient" x1="40.4210526316" y1="26.9473684211" x2="222.3157894737" y2="235.7894736842" gradientUnits="userSpaceOnUse"><stop stop-color="#A90022"/><stop offset="1" stop-color="#D41436"/></linearGradient></defs>
+  <g id="header-researchhelper-mark">
+    <g id="header-researchhelper-disc" transform="translate(240 120)"><circle cx="128" cy="128" r="128" fill="url(#header-researchhelper-red-gradient)"/></g>
+    <g id="header-researchhelper-arc" transform="translate(233.263158 113.263158) scale(6.736842)"><path d="M8.8 15.2A13.2 13.2 0 0 1 31.5 12" fill="none" stroke="#fff" stroke-width="1.4" stroke-linecap="round" opacity=".42"/></g>
+    <g id="header-researchhelper-payoff" transform="translate(233.263158 113.263158) scale(6.736842)"><path d="m10.5 26 7-8 5.2 3 7-9" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <g id="header-researchhelper-dot-0" transform="translate(233.263158 113.263158) scale(6.736842)"><circle cx="10.5" cy="26" r="2.1" fill="#fff"/></g>
+    <g id="header-researchhelper-dot-1" transform="translate(233.263158 113.263158) scale(6.736842)"><circle cx="17.5" cy="18" r="2.1" fill="#fff"/></g>
+    <g id="header-researchhelper-dot-2" transform="translate(233.263158 113.263158) scale(6.736842)"><circle cx="22.7" cy="21" r="2.1" fill="#fff"/></g>
+    <g id="header-researchhelper-dot-3" transform="translate(233.263158 113.263158) scale(6.736842)"><circle cx="29.7" cy="12" r="2.1" fill="#fff"/></g>
+  </g>
+  <g id="header-researchhelper-word-research" fill="#252525" transform="translate(560 274) scale(.112 -.112)"><path d="M78 708H324Q374 708 421.0 697.5Q468 687 504.5 663.0Q541 639 563.0 600.0Q585 561 585 505Q585 428 541.5 379.5Q498 331 423 314L612 0H460L296 300H204V0H78ZM307 403Q334 403 361.0 407.0Q388 411 409.5 422.0Q431 433 445.0 453.5Q459 474 459 506Q459 535 446.0 553.5Q433 572 413.0 583.0Q393 594 367.5 598.0Q342 602 318 602H204V403ZM1012 288Q1012 311 1005.5 332.0Q999 353 985.0 369.0Q971 385 949.5 394.5Q928 404 899 404Q845 404 807.5 371.5Q770 339 766 288ZM1132 234Q1132 226 1132.0 218.0Q1132 210 1131 202H766Q768 176 779.5 154.5Q791 133 810.0 117.5Q829 102 853.0 93.0Q877 84 903 84Q948 84 979.0 100.5Q1010 117 1030 146L1110 82Q1039 -14 904 -14Q848 -14 801.0 3.5Q754 21 719.5 53.0Q685 85 665.5 131.5Q646 178 646 237Q646 295 665.5 342.5Q685 390 719.0 423.5Q753 457 799.5 475.5Q846 494 900 494Q950 494 992.5 477.5Q1035 461 1066.0 428.5Q1097 396 1114.5 347.5Q1132 299 1132 234ZM1484 352Q1468 373 1440.0 388.5Q1412 404 1379 404Q1350 404 1326.0 392.0Q1302 380 1302 352Q1302 324 1328.5 312.5Q1355 301 1406 289Q1433 283 1460.5 273.0Q1488 263 1510.5 246.5Q1533 230 1547.0 205.5Q1561 181 1561 146Q1561 102 1544.5 71.5Q1528 41 1500.5 22.0Q1473 3 1436.5 -5.5Q1400 -14 1361 -14Q1305 -14 1252.0 6.5Q1199 27 1164 65L1243 139Q1263 113 1295.0 96.0Q1327 79 1366 79Q1379 79 1392.5 82.0Q1406 85 1417.5 91.5Q1429 98 1436.0 109.0Q1443 120 1443 136Q1443 166 1415.5 179.0Q1388 192 1333 205Q1306 211 1280.5 220.5Q1255 230 1235.0 245.5Q1215 261 1203.0 284.0Q1191 307 1191 341Q1191 381 1207.5 410.0Q1224 439 1251.0 457.5Q1278 476 1312.0 485.0Q1346 494 1382 494Q1434 494 1483.5 476.0Q1533 458 1562 421ZM1976 288Q1976 311 1969.5 332.0Q1963 353 1949.0 369.0Q1935 385 1913.5 394.5Q1892 404 1863 404Q1809 404 1771.5 371.5Q1734 339 1730 288ZM2096 234Q2096 226 2096.0 218.0Q2096 210 2095 202H1730Q1732 176 1743.5 154.5Q1755 133 1774.0 117.5Q1793 102 1817.0 93.0Q1841 84 1867 84Q1912 84 1943.0 100.5Q1974 117 1994 146L2074 82Q2003 -14 1868 -14Q1812 -14 1765.0 3.5Q1718 21 1683.5 53.0Q1649 85 1629.5 131.5Q1610 178 1610 237Q1610 295 1629.5 342.5Q1649 390 1683.0 423.5Q1717 457 1763.5 475.5Q1810 494 1864 494Q1914 494 1956.5 477.5Q1999 461 2030.0 428.5Q2061 396 2078.5 347.5Q2096 299 2096 234ZM2483 61H2480Q2462 29 2422.0 8.5Q2382 -12 2331 -12Q2302 -12 2270.5 -4.5Q2239 3 2212.5 20.5Q2186 38 2168.5 66.5Q2151 95 2151 137Q2151 191 2181.5 223.0Q2212 255 2260.0 272.0Q2308 289 2366.5 294.5Q2425 300 2481 300V312Q2481 357 2448.5 378.5Q2416 400 2371 400Q2333 400 2298.0 384.0Q2263 368 2240 345L2178 418Q2219 456 2272.5 475.0Q2326 494 2381 494Q2445 494 2486.5 476.0Q2528 458 2552.0 429.0Q2576 400 2585.5 364.0Q2595 328 2595 292V0H2483ZM2481 219H2454Q2425 219 2393.0 216.5Q2361 214 2334.0 205.5Q2307 197 2289.0 181.5Q2271 166 2271 139Q2271 122 2278.5 110.5Q2286 99 2298.0 92.0Q2310 85 2325.0 82.0Q2340 79 2355 79Q2417 79 2449.0 112.0Q2481 145 2481 202ZM2708 480H2823V400H2825Q2845 442 2881.0 468.0Q2917 494 2965 494Q2972 494 2980.0 493.5Q2988 493 2994 491V381Q2982 384 2973.5 385.0Q2965 386 2957 386Q2916 386 2891.0 371.0Q2866 356 2852.0 335.0Q2838 314 2833.0 292.0Q2828 270 2828 257V0H2708ZM3373 347Q3359 367 3331.0 380.5Q3303 394 3274 394Q3241 394 3216.0 380.5Q3191 367 3174.5 345.0Q3158 323 3150.0 295.5Q3142 268 3142 240Q3142 212 3150.5 184.5Q3159 157 3176.0 135.0Q3193 113 3218.5 99.5Q3244 86 3278 86Q3306 86 3334.0 97.0Q3362 108 3379 129L3454 53Q3424 21 3377.5 3.5Q3331 -14 3277 -14Q3224 -14 3176.5 3.0Q3129 20 3093.5 53.0Q3058 86 3037.5 133.0Q3017 180 3017 240Q3017 298 3037.5 345.0Q3058 392 3093.0 425.0Q3128 458 3174.5 476.0Q3221 494 3274 494Q3327 494 3376.5 474.0Q3426 454 3455 419ZM3773 494Q3820 494 3853.5 477.5Q3887 461 3908.5 434.0Q3930 407 3940.0 372.0Q3950 337 3950 300V0H3830V264Q3830 285 3827.0 307.5Q3824 330 3814.5 348.5Q3805 367 3787.5 379.0Q3770 391 3741 391Q3712 391 3691.0 380.0Q3670 369 3656.0 350.5Q3642 332 3635.0 309.0Q3628 286 3628 262V0H3508V756H3628V413H3630Q3637 428 3650.5 442.5Q3664 457 3682.0 468.5Q3700 480 3723.0 487.0Q3746 494 3773 494Z"/></g>
+  <g id="header-researchhelper-word-helper" fill="#252525" transform="translate(1001.840 274) scale(.112 -.112)"><path d="M94 708H166V401H552V708H624V0H552V335H166V0H94ZM1138 270Q1135 336 1095.5 379.5Q1056 423 983 423Q949 423 920 410.5Q891 398 869 376.5Q847 355 834 327.5Q821 300 819 270ZM1207 248Q1207 241 1207 233Q1207 225 1206 216H818Q819 181 832 150Q845 119 868 96Q891 73 922 59.5Q953 46 989 46Q1042 46 1080.5 70.5Q1119 95 1139 127L1190 87Q1148 34 1097.5 11Q1047-12 989-12Q937-12 892.5 6.5Q848 25 816 58Q784 91 765.5 136Q747 181 747 234Q747 287 765 332Q783 377 815 410Q847 443 890 461.5Q933 480 983 480Q1038 480 1080 461.5Q1122 443 1150 411.5Q1178 380 1192.5 338Q1207 296 1207 248ZM1396 0H1328V756H1396ZM1619-240H1551V468H1619V387H1622Q1651 433 1699.5 456.5Q1748 480 1798 480Q1853 480 1897.5 461Q1942 442 1973.5 409Q2005 376 2022.5 331Q2040 286 2040 234Q2040 182 2022.5 137Q2005 92 1973.5 59Q1942 26 1897.5 7Q1853-12 1798-12Q1748-12 1699.5 11.5Q1651 35 1622 79H1619ZM1968 234Q1968 273 1956 307.5Q1944 342 1921.5 367.5Q1899 393 1866 408Q1833 423 1791 423Q1752 423 1719 408.5Q1686 394 1662 368.5Q1638 343 1624.5 308.5Q1611 274 1611 234Q1611 194 1624.5 159.5Q1638 125 1662 100Q1686 75 1719 60.5Q1752 46 1791 46Q1833 46 1866 60.5Q1899 75 1921.5 100.5Q1944 126 1956 160.5Q1968 195 1968 234ZM2516 270Q2513 336 2473.5 379.5Q2434 423 2361 423Q2327 423 2298 410.5Q2269 398 2247 376.5Q2225 355 2212 327.5Q2199 300 2197 270ZM2585 248Q2585 241 2585 233Q2585 225 2584 216H2196Q2197 181 2210 150Q2223 119 2246 96Q2269 73 2300 59.5Q2331 46 2367 46Q2420 46 2458.5 70.5Q2497 95 2517 127L2568 87Q2526 34 2475.5 11Q2425-12 2367-12Q2315-12 2270.5 6.5Q2226 25 2194 58Q2162 91 2143.5 136Q2125 181 2125 234Q2125 287 2143 332Q2161 377 2193 410Q2225 443 2268 461.5Q2311 480 2361 480Q2416 480 2458 461.5Q2500 443 2528 411.5Q2556 380 2570.5 338Q2585 296 2585 248ZM2704 365Q2704 384 2703 414Q2702 444 2700 468H2765Q2767 449 2768 426Q2769 403 2769 388H2771Q2791 429 2831 454.5Q2871 480 2921 480Q2934 480 2944.5 479Q2955 478 2966 475L2957 411Q2951 413 2937 415Q2923 417 2909 417Q2882 417 2857 407Q2832 397 2813.5 375.5Q2795 354 2783.5 320.5Q2772 287 2772 240V0H2704V365Z"/></g>
+  <g id="header-researchhelper-rule"><rect x="562.59" y="308" width="772.952" height="4" rx="2" fill="#C8102E"/></g>
+</svg>
+      </div>
+
+      <section class="login-card">
+        <div class="login-head">
+          <h1>登录ResearchHelper</h1>
+        </div>
+
+        <form id="login-form" method="post" aria-busy="true" novalidate>
+          <div class="login-field" id="login-account-field">
+            <div class="login-label"><label for="login-account">账号</label></div>
+            <input class="login-input" type="text" id="login-account" name="account" autocomplete="username"
+                   placeholder="请输入账号" spellcheck="false" autocapitalize="off" maxlength="128">
+          </div>
+
+          <div class="login-field" id="login-password-field">
+            <div class="login-label"><label for="login-password">密码</label></div>
+            <div class="login-password">
+              <input class="login-input" type="password" id="login-password" name="password"
+                     autocomplete="current-password" placeholder="请输入密码" maxlength="4096">
+              <button class="login-eye" type="button" id="login-eye" aria-pressed="false" aria-label="显示密码" title="显示密码">
+                <svg class="login-eye__on" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"></path><circle cx="12" cy="12" r="3.2"></circle></svg>
+                <svg class="login-eye__off" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4l16 16"></path><path d="M9.6 6.1A9.7 9.7 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3.3 4"></path><path d="M6.4 8A17 17 0 0 0 2.5 12S6 18.5 12 18.5c1.3 0 2.4-.3 3.5-.7"></path><path d="M9.9 9.9a3.2 3.2 0 0 0 4.3 4.3"></path></svg>
+              </button>
+            </div>
+          </div>
+
+          <label class="login-check" for="login-remember">
+            <input type="checkbox" id="login-remember" name="remember" checked>
+            保持登录
+          </label>
+
+          <button class="login-submit" type="submit" id="login-submit" disabled>正在连接</button>
+          <p class="login-status" id="login-status" role="status" aria-live="polite"></p>
+        </form>
+      </section>
+    </main>
+
+    <script src="/login/login-startup.js"></script>
+    <script type="module" src="/login/login.js"></script>
+  </body>
+</html>

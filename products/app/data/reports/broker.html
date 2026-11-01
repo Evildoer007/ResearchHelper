@@ -1,0 +1,476 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="rh-source-key" content="broker"><meta name="rh-chart-renderer" content="ECharts 6.0.0 offline SVG"><title>券商板块：卖压衰减、盈利改善与分红扩张</title><style>/*
+THESIS: Complete research content is the artifact; navigation stays out of print.
+OWN-WORLD: Demo paper, ink, red rules, blue comparison charts and system text.
+STORY: Read the conclusion, inspect arguments, check figures and source limits.
+FIRST VIEWPORT: Left chapter directory and a readable report title/conclusion.
+FORM: Extend the user's established Demo reader; no new visual-world selection.
+*/
+:root {
+  --paper:#FFFDFB;
+  --surface:#F5F2EF;
+  --ink:#292427;
+  --muted:#6E6569;
+  --red:#B8102D;
+  --blue:#3D607F;
+  --rule:#DED8D6;
+  --report-size:15px;
+  --directory-width:144px;
+  --content-width:940px;
+  --page-padding:28px;
+  color-scheme:light;
+  font-family:"PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  font-size:var(--report-size);
+  color:var(--ink);
+  background:var(--paper);
+  font-variant-numeric:tabular-nums;
+}
+* { box-sizing:border-box; }
+body { margin:0; padding-left:var(--directory-width); line-height:1.9; }
+a { color:var(--red); }
+:focus-visible { outline:2px solid var(--red); outline-offset:3px; }
+.skip-link { position:absolute; top:8px; left:8px; padding:10px 16px; background:var(--paper); transform:translateY(-150%); z-index:3; }
+.skip-link:focus { transform:none; }
+.report-directory { position:fixed; inset:0 auto 0 0; width:var(--directory-width); padding:24px 8px; background:var(--surface); border-right:1px solid var(--rule); }
+.report-directory nav { display:grid; gap:8px; }
+.report-directory a { display:flex; align-items:center; min-height:44px; padding:8px 12px; font-size:14px; color:var(--muted); text-decoration:none; border-radius:8px; }
+.report-directory a:hover { color:var(--red); background:var(--paper); }
+.report-sheet { max-width:var(--content-width); min-width:0; padding:30px var(--page-padding) 48px; margin:0 auto; overflow-wrap:anywhere; }
+h1,h2,h3,figcaption,caption { font-weight:600; text-wrap:balance; }
+h1 { max-width:26em; margin:0 0 27px; font-size:clamp(25px,3vw,30px); line-height:1.45; letter-spacing:-.025em; }
+h2,.evidence-section-title { margin:36px 0 18px; font-size:21px; line-height:1.55; }
+h3 { margin:26px 0 12px; font-size:18px; line-height:1.65; }
+p { margin:0 0 14px; max-width:75ch; }
+section { scroll-margin-top:28px; }
+.report-summary { border-top:2px solid var(--red); padding-top:18px; }
+.report-summary h2 { margin-top:0; color:var(--red); font-size:15px; }
+.conclusion { font-size:17px; line-height:1.95; font-weight:500; }
+.report-meta { display:flex; flex-wrap:wrap; gap:8px 22px; padding:10px 0 18px; margin:0; border-bottom:1px solid var(--rule); color:var(--muted); font-size:13px; }
+.report-meta dd { margin:0; }
+.logic-block { padding-bottom:14px; border-bottom:1px solid var(--rule); }
+.source-note,.archive-source,.historical-note { color:var(--muted); font-size:13px; line-height:1.85; }
+.source-note { margin-top:14px; }
+.chart-grid,.catch-up-grid,.comparison-grid,.instrument-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:24px; }
+.comparison-grid,.instrument-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.chart-box,.report-chart { min-width:0; margin:0; }
+.chart-box { border-bottom:1px solid var(--rule); padding:12px 0; }
+.report-chart { break-inside:avoid; container-type:inline-size; }
+.report-chart figcaption { font-size:16px; margin:8px 0; line-height:1.5; }
+.report-chart svg { display:block; width:100%; height:auto; max-width:100%; }
+.report-chart .chart-svg-medium,.report-chart .chart-svg-narrow { display:none; }
+@container (max-width:639px) {
+  .report-chart .chart-svg-wide { display:none; }
+  .report-chart .chart-svg-medium { display:block; }
+}
+@container (max-width:399px) {
+  .report-chart .chart-svg-medium { display:none; }
+  .report-chart .chart-svg-narrow { display:block; }
+}
+.chart-values { margin:8px 0 14px; }
+summary { color:var(--muted); font-size:13px; cursor:pointer; min-height:44px; padding:10px 0; }
+summary:hover { color:var(--red); }
+.chart-boundary { color:var(--muted); font-size:13px; line-height:1.8; }
+.report-metric-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:14px 20px; padding:18px 0; margin:18px 0 22px; border-block:1px solid var(--rule); }
+.report-metric span,.report-metric small { display:block; font-size:13px; color:var(--muted); }
+.report-metric strong { display:block; font-size:21px; line-height:1.6; margin:4px 0; font-weight:600; }
+.catch-up-grid { align-items:center; margin:24px 0; }
+.catch-up-steps { display:grid; gap:18px; }
+.catch-up-step strong { display:block; font-size:15px; }
+.catch-up-step span { display:block; color:var(--muted); font-size:14px; margin-top:4px; }
+.comparison-grid,.instrument-grid { margin:24px 0; }
+.report-table-wrap { overflow-x:auto; max-width:100%; margin:0 0 20px; }
+table { width:100%; border-collapse:collapse; font-size:13px; line-height:1.75; }
+caption { text-align:left; padding:2px 0 12px; color:var(--ink); font-size:16px; }
+th,td { padding:9px 10px; text-align:left; vertical-align:top; border-bottom:1px solid var(--rule); }
+th { background:var(--surface); border-top:1px solid var(--rule); font-weight:600; }
+.pe-table td:nth-child(even) { white-space:nowrap; text-align:right; }
+.instrument-card { padding:16px 0; border-top:1px solid var(--rule); }
+.instrument-card strong { font-size:15px; }
+.instrument-card p { font-size:14px; color:var(--muted); margin:10px 0; }
+.instrument-tags { display:flex; flex-wrap:wrap; gap:12px; color:var(--blue); font-size:13px; }
+.archive-table-grid { margin:26px 0; }
+.report-verification { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; margin:20px 0; }
+.report-verification h3 { font-size:15px; color:var(--red); margin:0 0 10px; }
+.report-verification p { font-size:14px; }
+.risk-note { font-size:14px; padding-top:20px; border-top:1px solid var(--rule); }
+.historical-note { padding-top:16px; margin-top:20px; border-top:1px solid var(--rule); }
+.visually-hidden { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media (max-width:1100px) {
+  .chart-grid,.catch-up-grid,.comparison-grid { grid-template-columns:minmax(0,1fr); }
+}
+@media (max-width:800px) {
+  :root { --page-padding:22px; }
+  body { padding:0; }
+  .report-directory { position:sticky; inset:auto; top:0; z-index:2; width:100%; padding:8px; border-right:0; border-bottom:1px solid var(--rule); }
+  .report-directory nav { grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; }
+  .report-directory a { padding:8px 2px; justify-content:center; font-size:13px; line-height:1.5; }
+  .report-sheet { padding-top:28px; }
+  section { scroll-margin-top:84px; }
+}
+@media (max-width:520px) {
+  :root { --page-padding:18px; }
+  .instrument-grid,.report-verification { grid-template-columns:minmax(0,1fr); gap:14px; }
+  .report-metric-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  th,td { padding:8px 6px; }
+}
+@media print {
+  @page { size:A4; margin:15mm; }
+  body { padding:0; font-size:11pt; }
+  .report-directory,.skip-link { display:none; }
+  .report-sheet { max-width:none; margin:0; padding:0; }
+  h1 { font-size:22pt; }
+  h2,.evidence-section-title { font-size:15pt; break-after:avoid; page-break-after:avoid; }
+  h3,caption,figcaption { break-after:avoid; page-break-after:avoid; }
+  p { orphans:3; widows:3; }
+  table { font-size:10pt; }
+  thead { display:table-header-group; }
+  tr,.report-chart,.report-metric,.instrument-card,.report-table-wrap,table { break-inside:avoid; page-break-inside:avoid; }
+  .report-table-wrap { overflow:visible; }
+  /* WebKit can split a grid item's caption from its chart despite break-inside.
+     Normal print flow keeps each complete figure and short source table together. */
+  .chart-grid,.catch-up-grid,.comparison-grid { display:block; }
+  .chart-grid > * + *,.catch-up-grid > * + *,.comparison-grid > * + * { margin-top:24px; }
+  /* An inline block is indivisible in WebKit pagination. Grid items are not:
+     the FY3PE label previously printed on a different page from its value. */
+  .report-metric-strip { display:block; }
+  .report-metric { display:inline-block; vertical-align:top; width:25%; padding:0 14px 14px 0; }
+  .report-chart { container-type:normal; }
+  .report-chart .chart-svg-wide { display:block; }
+  .report-chart .chart-svg-medium,.report-chart .chart-svg-narrow { display:none; }
+  .chart-values summary { display:none; }
+  .chart-values::details-content { content-visibility:visible; }
+  .chart-values > :not(summary) { display:block; }
+  .source-note,.archive-source,.historical-note { font-size:10pt; }
+  * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+}
+</style></head><body>
+<a class="skip-link" href="#reportTitle">跳至报告</a><aside class="report-directory" aria-label="报告目录"><nav><a href="#reportSummary">1.核心结论</a><a href="#reportArguments">2.研究论点</a><a href="#reportEvidenceSection">3.数据与图表</a><a href="#reportVerification">4.口径与风险</a></nav></aside><main class="report-sheet" aria-label="完整历史报告"><h1 id="reportTitle">券商板块：卖压衰减、盈利改善与分红扩张</h1><section id="reportSummary" class="report-summary"><h2>1.核心结论</h2><p class="conclusion">券商处在超卖修复、营收增长与分红改善三个节点。2026年初以来，特定机构累计减持约1.5万亿元，占减持前规模九成以上，主要卖压趋于衰减；头部券商盈利持续改善，中报预告高增；2025年上市券商现金分红同比增长32%，A股与H股平均股息率分别达到1.8%至1.9%和3.8%至4.0%。</p><dl class="report-meta"><div><dd>研究口径：A股券商板块</dd></div><div><dd>观察标的：券商ETF（512000.SH）</dd></div><div><dd>方向：谨慎看多</dd></div><div><dd>期限：中期</dd></div><div><dd>数据截至2026年6至7月</dd></div></dl></section><section id="reportArguments"><h2>2.研究论点</h2><section class="logic-block" id="reportLogic1"><h3>2.1 卖压减少，安全边际提高</h3><p>2026年初以来，原材料估计特定机构累计减持约1.5万亿元，占减持前总规模九成以上。2026年Q1前后，非银板块持有规模最大、减持最重，说明当前时点主要被动卖压已大部分释放，后续抛压边际下降。</p><p>原气泡图同时比较非银、医药、房地产、食品饮料和银行，横轴为持有规模，纵轴为减持力度，气泡大小表示相对规模。</p><p class="source-note">来源口径：原材料机构持仓与减持统计；具体数据源及样本方法未披露。</p></section><section class="logic-block" id="reportLogic2"><h3>2.2 股价与营收背离，盈利改善尚未充分定价</h3><p>证券板块在2026年1月14日至5月31日下跌17.13%，但Q1营收同比增长30.72%。同期通信设备、商贸零售、电力、电子和房地产的股价与营收数据均在证据表中完整列示。</p><p>头部券商Q1营收同比增长69%、52%和41%；中信证券2026H1归母净利润同比增长69.59%。行业PB为1.37倍，处于2016年以来约27%分位，头部券商ROE约为10%至13%。减持导致的被动卖盘是原材料解释股价下行的主要压力源。</p><p class="source-note">来源口径：原材料财务与行情对比；PB分位自2016年起，原PDF未列具体数据源。</p></section><section class="logic-block" id="reportLogic3"><h3>2.3 券商分红改善，提供现金流补偿</h3><p>2025年上市券商现金分红总额含中期为735亿元，同比增长32%；平均分红比例为33%，同比提升4个百分点。</p><p>A股券商平均股息率为1.8%至1.9%，H股为3.8%至4.0%。分红扩张与比例提升构成边际改善，H股券商的红利属性更强。</p><p class="source-note">来源口径：原材料分红统计；具体公司样本未披露。</p></section></section><section class="report-evidence-section" id="reportEvidenceSection"><h2>3.数据与图表</h2><div class="report-metric-strip"><div class="report-metric"><span>累计减持</span><strong>约1.5万亿元</strong><small>九成以上</small></div><div class="report-metric"><span>中信利润增速</span><strong>+69.59%</strong><small>2026H1预告</small></div><div class="report-metric"><span>行业PB</span><strong>1.37x</strong><small>27%分位</small></div><div class="report-metric"><span>头部券商ROE</span><strong>10%至13%</strong><small>原材料口径</small></div><div class="report-metric"><span>现金分红</span><strong>735亿元</strong><small>同比+32%</small></div></div><div class="chart-grid"><figure class="report-chart" data-chart="broker-0"><figcaption>特定机构各板块持仓与减持相对关系</figcaption><svg class="chart-svg chart-svg-wide" role="img" aria-label="特定机构各板块持仓与减持相对关系" viewBox="0 0 760 350" width="760" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 760 350">
+<rect width="760" height="350" x="0" y="0" fill="none"></rect>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="matrix(0,-1,1,0,12,181)" fill="#292427">减持力度</text>
+<path d="M32.5 300L32.5 62" fill="none" pointer-events="visible" stroke="#54555a" stroke-linecap="round" class="rh-broker-0-wide-cls-42"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="8" transform="translate(384 320)" fill="#292427">持有规模</text>
+<path d="M32 300.5L736 300.5" fill="none" pointer-events="visible" stroke="#54555a" stroke-linecap="round" class="rh-broker-0-wide-cls-42"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(24,0,0,24,651.52,100.08)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-broker-0-wide-cls-43"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(14,0,0,14,334.72,138.16)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-broker-0-wide-cls-43"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(15.5,0,0,15.5,440.32,178.62)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-broker-0-wide-cls-43"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(12.5,0,0,12.5,222.08,183.38)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-broker-0-wide-cls-43"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(20,0,0,20,560,228.6)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-broker-0-wide-cls-43"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" transform="translate(651.52 100.08)" fill="#292427" fill-opacity="0.7">非银</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" transform="translate(334.72 138.16)" fill="#292427" fill-opacity="0.7">医药</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" transform="translate(440.32 178.62)" fill="#292427" fill-opacity="0.7">房地产</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" transform="translate(222.08 183.38)" fill="#292427" fill-opacity="0.7">食品饮料</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" transform="translate(560 228.6)" fill="#292427" fill-opacity="0.7">银行</text>
+<style ><![CDATA[
+.rh-broker-0-wide-cls-42:hover {
+pointer-events:none;
+}
+.rh-broker-0-wide-cls-43:hover {
+cursor:pointer;
+fill:rgba(77,122,166,1);
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-medium" role="img" aria-label="特定机构各板块持仓与减持相对关系" viewBox="0 0 480 350" width="480" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 480 350">
+<rect width="480" height="350" x="0" y="0" fill="none"></rect>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="matrix(0,-1,1,0,12,181)" fill="#292427">减持力度</text>
+<path d="M32.5 300L32.5 62" fill="none" pointer-events="visible" stroke="#54555a" stroke-linecap="round" class="rh-broker-0-medium-cls-44"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="8" transform="translate(244 320)" fill="#292427">持有规模</text>
+<path d="M32 300.5L456 300.5" fill="none" pointer-events="visible" stroke="#54555a" stroke-linecap="round" class="rh-broker-0-medium-cls-44"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(24,0,0,24,405.12,100.08)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-broker-0-medium-cls-45"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(14,0,0,14,214.32,138.16)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-broker-0-medium-cls-45"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(15.5,0,0,15.5,277.92,178.62)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-broker-0-medium-cls-45"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(12.5,0,0,12.5,146.48,183.38)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-broker-0-medium-cls-45"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(20,0,0,20,350,228.6)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-broker-0-medium-cls-45"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" transform="translate(405.12 100.08)" fill="#292427" fill-opacity="0.7">非银</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" transform="translate(214.32 138.16)" fill="#292427" fill-opacity="0.7">医药</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" transform="translate(277.92 178.62)" fill="#292427" fill-opacity="0.7">房地产</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" transform="translate(146.48 183.38)" fill="#292427" fill-opacity="0.7">食品饮料</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" transform="translate(350 228.6)" fill="#292427" fill-opacity="0.7">银行</text>
+<style ><![CDATA[
+.rh-broker-0-medium-cls-44:hover {
+pointer-events:none;
+}
+.rh-broker-0-medium-cls-45:hover {
+cursor:pointer;
+fill:rgba(77,122,166,1);
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-narrow" role="img" aria-label="特定机构各板块持仓与减持相对关系" viewBox="0 0 320 380" width="320" height="380" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 320 380">
+<rect width="320" height="380" x="0" y="0" fill="none"></rect>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="-6.5" transform="matrix(0,-1,1,0,-12,204)" fill="#292427">减持力度</text>
+<path d="M8.5 330L8.5 78" fill="none" pointer-events="visible" stroke="#54555a" stroke-linecap="round" class="rh-broker-0-narrow-cls-46"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="6.5" transform="translate(160 350)" fill="#292427">持有规模</text>
+<path d="M8 330.5L312 330.5" fill="none" pointer-events="visible" stroke="#54555a" stroke-linecap="round" class="rh-broker-0-narrow-cls-46"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(16.8,0,0,16.8,275.52,118.32)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-broker-0-narrow-cls-47"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.1A1 1 0 0 1 1 0" transform="matrix(9.8,0,0,9.8,138.72,158.64)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-broker-0-narrow-cls-47"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(10.85,0,0,10.85,184.32,201.48)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-broker-0-narrow-cls-47"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.1A1 1 0 0 1 1 0" transform="matrix(8.75,0,0,8.75,90.08,206.52)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-broker-0-narrow-cls-47"></path>
+<path d="M1 0A1 1 0 1 1 1 -0.01" transform="matrix(14,0,0,14,236,254.4)" fill="#466F97" fill-opacity="0.7" ecmeta_series_index="0" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-broker-0-narrow-cls-47"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" transform="translate(275.52 118.32)" fill="#292427" fill-opacity="0.7">非银</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" transform="translate(138.72 158.64)" fill="#292427" fill-opacity="0.7">医药</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" transform="translate(184.32 201.48)" fill="#292427" fill-opacity="0.7">房地产</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" transform="translate(90.08 206.52)" fill="#292427" fill-opacity="0.7">食品饮料</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" transform="translate(236 254.4)" fill="#292427" fill-opacity="0.7">银行</text>
+<style ><![CDATA[
+.rh-broker-0-narrow-cls-46:hover {
+pointer-events:none;
+}
+.rh-broker-0-narrow-cls-47:hover {
+cursor:pointer;
+fill:rgba(77,122,166,1);
+}
+
+]]>
+
+</style>
+</svg><p class="chart-boundary">原报告相对位置示意，不代表精确坐标或规模。非银、医药、房地产、食品饮料、银行。</p></figure><figure class="report-chart" data-chart="broker-1"><figcaption>板块股价表现与Q1营收增速</figcaption><svg class="chart-svg chart-svg-wide" role="img" aria-label="板块股价表现与Q1营收增速" viewBox="0 0 760 350" width="760" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 760 350">
+<rect width="760" height="350" x="0" y="0" fill="none"></rect>
+<path d="M77.4 271.5L736 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-wide-cls-48"></path>
+<path d="M77.4 241.5L736 241.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-wide-cls-48"></path>
+<path d="M77.4 211.5L736 211.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-wide-cls-48"></path>
+<path d="M77.4 181.5L736 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-wide-cls-48"></path>
+<path d="M77.4 151.5L736 151.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-wide-cls-48"></path>
+<path d="M77.4 121.5L736 121.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-wide-cls-48"></path>
+<path d="M77.4 92.5L736 92.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-wide-cls-48"></path>
+<path d="M77.4 62.5L736 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-wide-cls-48"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(77.44 42)" fill="#292427">%</text>
+<path d="M77.4 181.5L736 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-broker-1-wide-cls-48"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 271)" fill="#54555a">-30%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 241.1429)" fill="#54555a">-20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 211.2857)" fill="#54555a">-10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 181.4286)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 151.5714)" fill="#54555a">10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 121.7143)" fill="#54555a">20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 91.8571)" fill="#54555a">30%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 62)" fill="#54555a">40%</text>
+<path d="M-24 0l48 0l0 21l-48 0Z" transform="translate(132.32 279)" fill="none" pointer-events="visible" class="rh-broker-1-wide-cls-48"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(132.32 279)" fill="#54555a">证券Ⅱ</text>
+<path d="M-32 0l64 0l0 21l-64 0Z" transform="translate(242.08 279)" fill="none" pointer-events="visible" class="rh-broker-1-wide-cls-48"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(242.08 279)" fill="#54555a">通信设备</text>
+<path d="M-32 0l64 0l0 21l-64 0Z" transform="translate(351.84 279)" fill="none" pointer-events="visible" class="rh-broker-1-wide-cls-48"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(351.84 279)" fill="#54555a">商贸零售</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(461.6 279)" fill="none" pointer-events="visible" class="rh-broker-1-wide-cls-48"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(461.6 279)" fill="#54555a">电力</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(571.36 279)" fill="none" pointer-events="visible" class="rh-broker-1-wide-cls-48"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(571.36 279)" fill="#54555a">电子</text>
+<path d="M-24 0l48 0l0 21l-48 0Z" transform="translate(681.12 279)" fill="none" pointer-events="visible" class="rh-broker-1-wide-cls-48"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(681.12 279)" fill="#54555a">房地产</text>
+<path d="M92.4 181.4l38 0l0 51.1l-38 0Z" fill="url(#rh-broker-1-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-49"></path>
+<path d="M202.2 181.4l38 0l0 52.1l-38 0Z" fill="url(#rh-broker-1-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-49"></path>
+<path d="M311.9 181.4l38 0l0 67.3l-38 0Z" fill="url(#rh-broker-1-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-49"></path>
+<path d="M421.7 181.4l38 0l0 18.9l-38 0Z" fill="url(#rh-broker-1-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-49"></path>
+<path d="M531.5 181.4l38 0l0 -113.4l-38 0Z" fill="url(#rh-broker-1-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-49"></path>
+<path d="M641.2 181.4l38 0l0 25.6l-38 0Z" fill="url(#rh-broker-1-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="5" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-49"></path>
+<path d="M134.2 181.4l38 0l0 -91.7l-38 0Z" fill="url(#rh-broker-1-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-50"></path>
+<path d="M244 181.4l38 0l0 -61.1l-38 0Z" fill="url(#rh-broker-1-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-50"></path>
+<path d="M353.7 181.4l38 0l0 -14.5l-38 0Z" fill="url(#rh-broker-1-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-50"></path>
+<path d="M463.5 181.4l38 0l0 -94.6l-38 0Z" fill="url(#rh-broker-1-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-50"></path>
+<path d="M573.3 181.4l38 0l0 -85.7l-38 0Z" fill="url(#rh-broker-1-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-50"></path>
+<path d="M683 181.4l38 0l0 69.6l-38 0Z" fill="url(#rh-broker-1-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="5" ecmeta_ssr_type="chart" class="rh-broker-1-wide-cls-50"></path>
+<path d="M-5 -5l205.4 0l0 26l-205.4 0Z" transform="translate(5 10)" fill="rgb(0,0,0)" fill-opacity="0" stroke="#b7b9be" stroke-width="0" class="rh-broker-1-wide-cls-48"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(5 14)" fill="url(#rh-broker-1-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-broker-1-wide-cls-48"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(5 14)" fill="#6E6569">股价表现</text>
+<path d="M0 -4l83 0l0 16l-83 0Z" transform="translate(5 14)" fill="none" pointer-events="visible" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" class="rh-broker-1-wide-cls-51"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(96 14)" fill="url(#rh-broker-1-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-broker-1-wide-cls-48"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(96 14)" fill="#6E6569">Q1营收同比</text>
+<path d="M0 -4l104.4 0l0 16l-104.4 0Z" transform="translate(96 14)" fill="none" pointer-events="visible" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" class="rh-broker-1-wide-cls-51"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-broker-1-wide-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-broker-1-wide-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-broker-1-wide-cls-48:hover {
+pointer-events:none;
+}
+.rh-broker-1-wide-cls-49:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-broker-1-wide-cls-50:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-broker-1-wide-cls-51:hover {
+cursor:pointer;
+fill:rgba(0,0,0,0);
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-medium" role="img" aria-label="板块股价表现与Q1营收增速" viewBox="0 0 480 350" width="480" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 480 350">
+<rect width="480" height="350" x="0" y="0" fill="none"></rect>
+<path d="M77.4 271.5L456 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-medium-cls-52"></path>
+<path d="M77.4 241.5L456 241.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-medium-cls-52"></path>
+<path d="M77.4 211.5L456 211.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-medium-cls-52"></path>
+<path d="M77.4 181.5L456 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-medium-cls-52"></path>
+<path d="M77.4 151.5L456 151.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-medium-cls-52"></path>
+<path d="M77.4 121.5L456 121.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-medium-cls-52"></path>
+<path d="M77.4 92.5L456 92.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-medium-cls-52"></path>
+<path d="M77.4 62.5L456 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-medium-cls-52"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(77.44 42)" fill="#292427">%</text>
+<path d="M77.4 181.5L456 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-broker-1-medium-cls-52"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 271)" fill="#54555a">-30%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 241.1429)" fill="#54555a">-20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 211.2857)" fill="#54555a">-10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 181.4286)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 151.5714)" fill="#54555a">10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 121.7143)" fill="#54555a">20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 91.8571)" fill="#54555a">30%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 62)" fill="#54555a">40%</text>
+<path d="M-24 0l48 0l0 21l-48 0Z" transform="translate(108.9867 279)" fill="none" pointer-events="visible" class="rh-broker-1-medium-cls-52"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(108.9867 279)" fill="#54555a">证券Ⅱ</text>
+<path d="M-32 0l64 0l0 21l-64 0Z" transform="translate(172.08 279)" fill="none" pointer-events="visible" class="rh-broker-1-medium-cls-52"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(172.08 279)" fill="#54555a">通信设备</text>
+<path d="M-32 0l64 0l0 21l-64 0Z" transform="translate(235.1733 279)" fill="none" pointer-events="visible" class="rh-broker-1-medium-cls-52"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(235.1733 279)" fill="#54555a">商贸零售</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(298.2667 279)" fill="none" pointer-events="visible" class="rh-broker-1-medium-cls-52"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(298.2667 279)" fill="#54555a">电力</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(361.36 279)" fill="none" pointer-events="visible" class="rh-broker-1-medium-cls-52"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(361.36 279)" fill="#54555a">电子</text>
+<path d="M-24 0l48 0l0 21l-48 0Z" transform="translate(424.4533 279)" fill="none" pointer-events="visible" class="rh-broker-1-medium-cls-52"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(424.4533 279)" fill="#54555a">房地产</text>
+<path d="M86 181.4l21.9 0l0 51.1l-21.9 0Z" fill="url(#rh-broker-1-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-53"></path>
+<path d="M149.1 181.4l21.9 0l0 52.1l-21.9 0Z" fill="url(#rh-broker-1-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-53"></path>
+<path d="M212.1 181.4l21.9 0l0 67.3l-21.9 0Z" fill="url(#rh-broker-1-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-53"></path>
+<path d="M275.2 181.4l21.9 0l0 18.9l-21.9 0Z" fill="url(#rh-broker-1-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-53"></path>
+<path d="M338.3 181.4l21.9 0l0 -113.4l-21.9 0Z" fill="url(#rh-broker-1-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-53"></path>
+<path d="M401.4 181.4l21.9 0l0 25.6l-21.9 0Z" fill="url(#rh-broker-1-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="5" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-53"></path>
+<path d="M110.1 181.4l21.9 0l0 -91.7l-21.9 0Z" fill="url(#rh-broker-1-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-54"></path>
+<path d="M173.2 181.4l21.9 0l0 -61.1l-21.9 0Z" fill="url(#rh-broker-1-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-54"></path>
+<path d="M236.3 181.4l21.9 0l0 -14.5l-21.9 0Z" fill="url(#rh-broker-1-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-54"></path>
+<path d="M299.4 181.4l21.9 0l0 -94.6l-21.9 0Z" fill="url(#rh-broker-1-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-54"></path>
+<path d="M362.5 181.4l21.9 0l0 -85.7l-21.9 0Z" fill="url(#rh-broker-1-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-54"></path>
+<path d="M425.5 181.4l21.9 0l0 69.6l-21.9 0Z" fill="url(#rh-broker-1-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="5" ecmeta_ssr_type="chart" class="rh-broker-1-medium-cls-54"></path>
+<path d="M-5 -5l205.4 0l0 26l-205.4 0Z" transform="translate(5 10)" fill="rgb(0,0,0)" fill-opacity="0" stroke="#b7b9be" stroke-width="0" class="rh-broker-1-medium-cls-52"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(5 14)" fill="url(#rh-broker-1-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-broker-1-medium-cls-52"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(5 14)" fill="#6E6569">股价表现</text>
+<path d="M0 -4l83 0l0 16l-83 0Z" transform="translate(5 14)" fill="none" pointer-events="visible" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" class="rh-broker-1-medium-cls-55"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(96 14)" fill="url(#rh-broker-1-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-broker-1-medium-cls-52"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(96 14)" fill="#6E6569">Q1营收同比</text>
+<path d="M0 -4l104.4 0l0 16l-104.4 0Z" transform="translate(96 14)" fill="none" pointer-events="visible" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" class="rh-broker-1-medium-cls-55"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-broker-1-medium-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-broker-1-medium-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-broker-1-medium-cls-52:hover {
+pointer-events:none;
+}
+.rh-broker-1-medium-cls-53:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-broker-1-medium-cls-54:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-broker-1-medium-cls-55:hover {
+cursor:pointer;
+fill:rgba(0,0,0,0);
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-narrow" role="img" aria-label="板块股价表现与Q1营收增速" viewBox="0 0 320 380" width="320" height="380" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 320 380">
+<rect width="320" height="380" x="0" y="0" fill="none"></rect>
+<path d="M46.4 256.5L312 256.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-narrow-cls-56"></path>
+<path d="M46.4 230.5L312 230.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-narrow-cls-56"></path>
+<path d="M46.4 205.5L312 205.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-narrow-cls-56"></path>
+<path d="M46.4 179.5L312 179.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-narrow-cls-56"></path>
+<path d="M46.4 154.5L312 154.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-narrow-cls-56"></path>
+<path d="M46.4 129.5L312 129.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-narrow-cls-56"></path>
+<path d="M46.4 103.5L312 103.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-narrow-cls-56"></path>
+<path d="M46.4 78.5L312 78.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-broker-1-narrow-cls-56"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="-6.5" transform="translate(46.42 58)" fill="#292427">%</text>
+<path d="M46.4 179.5L312 179.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-broker-1-narrow-cls-56"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 256)" fill="#54555a">-30%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 230.5714)" fill="#54555a">-20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 205.1429)" fill="#54555a">-10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 179.7143)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 154.2857)" fill="#54555a">10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 128.8571)" fill="#54555a">20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 103.4286)" fill="#54555a">30%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 78)" fill="#54555a">40%</text>
+<path d="M-19.5 0l39 0l0 18l-39 0Z" transform="translate(68.5517 264)" fill="none" pointer-events="visible" class="rh-broker-1-narrow-cls-56"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(68.5517 264)" fill="#54555a">证券Ⅱ</text>
+<path d="M-19.5 0l39 0l0 36l-39 0Z" transform="translate(112.815 264)" fill="none" pointer-events="visible" class="rh-broker-1-narrow-cls-56"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(112.815 264)" fill="#54555a">通信设</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(112.815 264)" fill="#54555a">备</text>
+<path d="M-19.5 0l39 0l0 36l-39 0Z" transform="translate(157.0783 264)" fill="none" pointer-events="visible" class="rh-broker-1-narrow-cls-56"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(157.0783 264)" fill="#54555a">商贸零</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(157.0783 264)" fill="#54555a">售</text>
+<path d="M-13 0l26 0l0 18l-26 0Z" transform="translate(201.3417 264)" fill="none" pointer-events="visible" class="rh-broker-1-narrow-cls-56"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(201.3417 264)" fill="#54555a">电力</text>
+<path d="M-13 0l26 0l0 18l-26 0Z" transform="translate(245.605 264)" fill="none" pointer-events="visible" class="rh-broker-1-narrow-cls-56"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(245.605 264)" fill="#54555a">电子</text>
+<path d="M-19.5 0l39 0l0 18l-39 0Z" transform="translate(289.8683 264)" fill="none" pointer-events="visible" class="rh-broker-1-narrow-cls-56"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(289.8683 264)" fill="#54555a">房地产</text>
+<path d="M52.4 179.7l15.4 0l0 43.6l-15.4 0Z" fill="url(#rh-broker-1-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-57"></path>
+<path d="M96.7 179.7l15.4 0l0 44.4l-15.4 0Z" fill="url(#rh-broker-1-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-57"></path>
+<path d="M140.9 179.7l15.4 0l0 57.3l-15.4 0Z" fill="url(#rh-broker-1-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-57"></path>
+<path d="M185.2 179.7l15.4 0l0 16.1l-15.4 0Z" fill="url(#rh-broker-1-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-57"></path>
+<path d="M229.4 179.7l15.4 0l0 -96.6l-15.4 0Z" fill="url(#rh-broker-1-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-57"></path>
+<path d="M273.7 179.7l15.4 0l0 21.8l-15.4 0Z" fill="url(#rh-broker-1-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="5" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-57"></path>
+<path d="M69.3 179.7l15.4 0l0 -78.1l-15.4 0Z" fill="url(#rh-broker-1-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-58"></path>
+<path d="M113.6 179.7l15.4 0l0 -52.1l-15.4 0Z" fill="url(#rh-broker-1-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-58"></path>
+<path d="M157.8 179.7l15.4 0l0 -12.4l-15.4 0Z" fill="url(#rh-broker-1-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-58"></path>
+<path d="M202.1 179.7l15.4 0l0 -80.6l-15.4 0Z" fill="url(#rh-broker-1-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-58"></path>
+<path d="M246.4 179.7l15.4 0l0 -73l-15.4 0Z" fill="url(#rh-broker-1-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-58"></path>
+<path d="M290.6 179.7l15.4 0l0 59.2l-15.4 0Z" fill="url(#rh-broker-1-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="5" ecmeta_ssr_type="chart" class="rh-broker-1-narrow-cls-58"></path>
+<path d="M-5 -5l177.4 0l0 23l-177.4 0Z" transform="translate(5 10)" fill="rgb(0,0,0)" fill-opacity="0" stroke="#b7b9be" stroke-width="0" class="rh-broker-1-narrow-cls-56"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(5 12.5)" fill="url(#rh-broker-1-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-broker-1-narrow-cls-56"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:13px;font-family:Arial;" x="19" y="4" transform="translate(5 12.5)" fill="#6E6569">股价表现</text>
+<path d="M0 -2.5l71 0l0 13l-71 0Z" transform="translate(5 12.5)" fill="none" pointer-events="visible" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" class="rh-broker-1-narrow-cls-59"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(84 12.5)" fill="url(#rh-broker-1-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-broker-1-narrow-cls-56"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:13px;font-family:Arial;" x="19" y="4" transform="translate(84 12.5)" fill="#6E6569">Q1营收同比</text>
+<path d="M0 -2.5l88.4 0l0 13l-88.4 0Z" transform="translate(84 12.5)" fill="none" pointer-events="visible" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" class="rh-broker-1-narrow-cls-59"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-broker-1-narrow-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-broker-1-narrow-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-broker-1-narrow-cls-56:hover {
+pointer-events:none;
+}
+.rh-broker-1-narrow-cls-57:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-broker-1-narrow-cls-58:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-broker-1-narrow-cls-59:hover {
+cursor:pointer;
+fill:rgba(0,0,0,0);
+}
+
+]]>
+
+</style>
+</svg><details class="chart-values"><summary>查看图表数值</summary><div class="report-table-wrap" tabindex="0" role="region" aria-label="板块股价表现与Q1营收增速"><table><thead><tr><th scope="col">观察对象</th><th scope="col">股价表现（%）</th><th scope="col">Q1营收同比（%）</th></tr></thead><tbody><tr><td>证券Ⅱ</td><td>-17.13</td><td>30.72</td></tr><tr><td>通信设备</td><td>-17.46</td><td>20.48</td></tr><tr><td>商贸零售</td><td>-22.55</td><td>4.87</td></tr><tr><td>电力</td><td>-6.32</td><td>31.7</td></tr><tr><td>电子</td><td>37.98</td><td>28.69</td></tr><tr><td>房地产</td><td>-8.57</td><td>-23.3</td></tr></tbody></table></div></details></figure></div><div class="archive-table-grid"><div class="report-table-wrap" tabindex="0" role="region" aria-label="特定机构持仓与减持特征"><table><caption>特定机构持仓与减持特征</caption><thead><tr><th scope="col">板块</th><th scope="col">减持特征</th><th scope="col">持仓特征</th></tr></thead><tbody><tr><td>非银</td><td>减持最重</td><td>规模最大</td></tr><tr><td>医药</td><td>减持明显</td><td>规模较大</td></tr><tr><td>房地产</td><td>减持明显</td><td>规模中等</td></tr><tr><td>食品饮料</td><td>减持较多</td><td>规模较小</td></tr><tr><td>银行</td><td>减持温和</td><td>规模较大</td></tr></tbody></table></div><div class="report-table-wrap" tabindex="0" role="region" aria-label="六板块股价与营收对比"><table><caption>六板块股价与营收对比</caption><thead><tr><th scope="col">板块</th><th scope="col">股价表现</th><th scope="col">Q1营收同比</th><th scope="col">特征</th></tr></thead><tbody><tr><td>证券Ⅱ</td><td>-17.13%</td><td>+30.72%</td><td>量价背离最显著</td></tr><tr><td>通信设备</td><td>-17.46%</td><td>+20.48%</td><td>同样背离</td></tr><tr><td>商贸零售</td><td>-22.55%</td><td>+4.87%</td><td>股价超跌</td></tr><tr><td>电力</td><td>-6.32%</td><td>+31.70%</td><td>营收强但未涨</td></tr><tr><td>电子</td><td>+37.98%</td><td>+28.69%</td><td>量价同步</td></tr><tr><td>房地产</td><td>-8.57%</td><td>-23.30%</td><td>量价双弱</td></tr></tbody></table></div><div class="report-table-wrap" tabindex="0" role="region" aria-label="2025年券商分红指标"><table><caption>2025年券商分红指标</caption><thead><tr><th scope="col">指标</th><th scope="col">数据</th><th scope="col">变化</th></tr></thead><tbody><tr><td>现金分红总额</td><td>735亿元</td><td>同比+32%</td></tr><tr><td>平均分红比例</td><td>33%</td><td>同比+4个百分点</td></tr><tr><td>A股平均股息率</td><td>1.8%至1.9%</td><td>边际改善</td></tr><tr><td>H股平均股息率</td><td>3.8%至4.0%</td><td>红利属性更强</td></tr></tbody></table></div></div><p class="source-note">来源口径：原材料公开财务、行情与分红统计，数据截至2026年6至7月；原PDF未列数据供应商、图表脚注和样本方法。气泡坐标仅复现相对关系，不代表可计算数值。</p></section><section id="reportVerification"><h2>4.口径与风险</h2><div class="report-metric-strip"><div class="report-metric"><span>累计减持</span><strong>约1.5万亿元</strong><small>占减持前规模九成以上</small></div><div class="report-metric"><span>行业PB</span><strong>1.37x</strong><small>2016年以来约27%分位</small></div><div class="report-metric"><span>现金分红</span><strong>735亿元</strong><small>2025年含中期</small></div></div><div class="report-verification"><div><h3>数据边界</h3><p>气泡图仅表达相对关系，不能作为数值坐标使用</p></div><div><h3>待核验项</h3><p>持仓样本、行情来源与中报正式数据仍需逐项复核</p></div></div><p>原PDF未列具体数据源与样本方法</p><p class="risk-note">风险提示：市场成交回落、机构减持节奏反复、权益自营波动、投行业务恢复不及预期或盈利改善无法持续。历史数据不代表未来表现。</p><p class="source-note">来源口径：原材料中的公开财务、行情与分红统计，数据截至2026年6至7月；原PDF未列具体数据源。出品机构、业务部门及内部标识已脱敏；产品结构与报价未纳入。本报告为Demo，不构成投资建议。</p><p class="historical-note">历史报告样例，非实时研究。完整保留现有Demo已整理的研究内容。</p></section></main></body></html>

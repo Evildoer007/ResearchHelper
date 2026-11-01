@@ -1,0 +1,6 @@
+# Developer packaging tools. Never installed by a build.
+PyInstaller==6.21.0
+altgraph==0.17.5
+macholib==1.16.4
+PyYAML==6.0.3
+setuptools==83.0.0

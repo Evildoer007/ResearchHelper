@@ -1,0 +1,6 @@
+interface:
+  display_name: ResearchHelper
+  short_description: A股与港股研究，核验证据、形成论点并交付完整报告
+  icon_small: "./products/app/frontend/brand.svg"
+  brand_color: "#B8102D"
+  default_prompt: 使用$researchhelper研究这个问题，保留证据、限制与可追溯报告。

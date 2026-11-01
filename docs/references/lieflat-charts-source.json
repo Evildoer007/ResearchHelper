@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/larashero3-dotcom/lieflat-charts",
+  "commit": "ed436ba56b3cbeee20b9b9966b38a9a9689e239c",
+  "license": "PolyForm Noncommercial 1.0.0",
+  "usage": "Reference data encodings and catalogue organization only; no upstream implementation bundled. ECharts builders and expanded palettes are independently implemented.",
+  "license_sha256": "ffcca38841adb694b6f380647e15f17c446a4d1656fed51a1e2041d064c94cc8"
+}

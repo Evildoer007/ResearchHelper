@@ -1,0 +1,107 @@
+/* OptionHelper native general appearance controls. */
+.setup-page .optionhelper-general-section {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.setup-page .optionhelper-general-title {
+  color: var(--color-ink);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+}
+
+.setup-page .optionhelper-appearance-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 0;
+  border-bottom: 0;
+}
+
+.setup-page .optionhelper-theme-cubes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.setup-page .optionhelper-theme-cube {
+  box-sizing: border-box;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 20px 32px;
+  border: 1px solid var(--color-rule);
+  border-radius: 16px;
+  background: transparent;
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+  cursor: default;
+}
+
+.setup-page .optionhelper-theme-cube svg {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.setup-page .optionhelper-theme-cube:hover:not([aria-pressed="true"]) {
+  background: var(--color-blue-gray-soft);
+}
+
+.setup-page .optionhelper-theme-cube[aria-pressed="true"] {
+  border-color: var(--color-rule-strong);
+  background: var(--color-surface);
+}
+
+.setup-page .optionhelper-theme-cube:focus-visible {
+  outline: 2px solid var(--color-brand-red);
+  outline-offset: 2px;
+}
+
+.setup-page .optionhelper-scale-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 28px;
+  padding: 22px 0;
+  border-top: 1px solid var(--color-rule);
+}
+
+.setup-page .optionhelper-scale-row > div { min-width: 0; }
+
+.setup-page .optionhelper-scale-row p {
+  margin: 3px 0 0;
+  color: var(--color-muted);
+  font-size: 12px;
+  line-height: 19px;
+}
+
+.setup-page .optionhelper-scale-row select {
+  width: 132px;
+  min-width: 132px;
+  min-height: 44px;
+  padding: 0 36px 0 12px;
+  border: 1px solid var(--color-rule-strong);
+  border-radius: 9px;
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+}
+
+@media (max-width: 620px) {
+  .setup-page .optionhelper-scale-row { align-items: stretch; flex-direction: column; gap: 10px; }
+  .setup-page .optionhelper-scale-row select { width: 100%; }
+}
+
+.setup-page .optionhelper-general-status { margin: var(--space-md) 0 0; }

@@ -1,0 +1,12 @@
+{
+  "platform": "windows",
+  "architecture": "x64",
+  "python": "3.12",
+  "dotnet_sdk_major": 8,
+  "webview2_sdk": "1.0.3485.44",
+  "webview2_runtime": "Evergreen, installed prerequisite",
+  "inno_setup_minimum": "6.3",
+  "offline_build": true,
+  "native_runtime": "self-contained win-x64",
+  "external_model_or_data_calls": false
+}

@@ -1,0 +1,214 @@
+/* THESIS: Strategy-research paper, not an OH quotation sheet or dashboard.
+   OWN-WORLD: White paper, navy headings, restrained red emphasis, offline red/blue figures.
+   STORY: Read the answer, inspect its adjacent chart, then follow the frozen evidence.
+   FIRST VIEWPORT: One paper, short title, findings and bound figure; no directory or toolbar.
+   FORM: User-pinned six strategy PDFs; no standard-format or invented time series. */
+:root {
+  --SERIES_MAIN:#B83C46;--SERIES_MAIN_DEEP:#922C35;--SERIES_BENCH:#2867A8;--SERIES_BENCH_DEEP:#174A7C;
+  --INK:#222D3A;--TEXT_SECONDARY:#586A7E;--GRID_LINE:#DFE5EC;--RULE_BLACK:#B0BAC8;--FOCUS:#A52E3B;
+  --PAPER:#FFFFFF;--PANEL:#FFFFFF;--NOTE_BG:#FAF4F3;--FORMULA_BG:#F4F7FA;
+  --paper:var(--PAPER);--surface:var(--PANEL);--ink:var(--INK);--muted:var(--TEXT_SECONDARY);
+  --red:var(--SERIES_MAIN);--blue:var(--SERIES_BENCH);--rule:var(--GRID_LINE);
+  --content:1000px;--chart-height:280px;
+  color-scheme:light;font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;font-size:15px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#F2F4F6;color:var(--ink);line-height:1.8;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+main{max-width:var(--content);padding:28px 32px 32px;margin:24px auto;background:var(--paper);border-top:3px solid var(--red);min-width:0;overflow-wrap:anywhere}
+a{color:var(--red)}
+h1,h2,h3,h4{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;text-wrap:balance;color:#1D2D43}
+h1{font-size:28px;line-height:1.35;margin:0 0 10px;max-width:36ch;font-weight:700;letter-spacing:0}
+.report-header{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--rule)}
+.report-meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 16px;margin:0;font-size:14px;color:var(--muted);max-width:none}
+.report-meta span{color:var(--red)}
+h2{font-size:18px;line-height:1.5;margin:0 0 14px;font-weight:700}
+h3{font-size:17px;line-height:1.5;margin:16px 0 8px}
+h4{font-size:16px;line-height:1.5}
+p{max-width:75ch;margin:10px 0;line-height:1.75}
+section{padding:22px 0;border-top:1px solid var(--rule);scroll-margin-top:20px}
+main>section:first-of-type{border-top:0;padding-top:0}
+#summary{padding:0 0 20px;margin-bottom:0;background:var(--paper)}
+#summary h2{font-size:18px;padding:0;margin-bottom:8px}
+#summary h2::before{display:none}
+.lead{font-size:18px;font-weight:600}
+.report-findings{list-style:none;margin:0;padding:0}
+.report-findings li{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:8px 20px;margin:10px 0}
+.report-findings strong{font-size:17px;font-weight:600}
+.report-findings span{font-size:14px;color:var(--muted)}
+article{padding:8px 0 22px;border-bottom:1px solid var(--rule)}
+article:last-child{border-bottom:0;padding-bottom:0}
+dt{font-weight:600}
+dd{margin:0 0 10px}
+:focus-visible{outline:2px solid var(--FOCUS);outline-offset:3px}
+.skip{position:fixed;top:8px;left:8px;transform:translateY(-150%);padding:10px;background:var(--surface);z-index:3}
+.skip:focus{transform:none}
+.document-content-quote{white-space:pre-wrap;overflow-wrap:anywhere}
+.document-content-quote[data-source-format="pdf"]{white-space:normal}
+.report-references{display:flex;flex-wrap:wrap;gap:4px 12px}
+.report-references a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}
+.argument-reading{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);grid-template-rows:min-content auto;column-gap:28px;row-gap:0;align-items:start}
+.argument-introduction,.argument-visual,.argument-continuation{min-width:0}
+.argument-introduction{grid-column:1;grid-row:1}
+.argument-visual{grid-column:2;grid-row:1 / span 2}
+.argument-introduction>p:first-child{margin-top:0}
+.argument-continuation{grid-column:1;grid-row:2;padding-top:10px}
+.argument-continuation p{max-width:none}
+.argument-heading{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 16px;margin-bottom:8px}
+.argument-heading h2,.argument-heading h3{margin:0}
+.argument-judgment{font-size:14px;color:var(--muted);font-weight:400}
+.argument-summary#summary{padding-bottom:0}
+.argument-references{margin:0 0 12px;font-size:14px}
+.thesis-answer{margin-bottom:12px}
+.thesis-answer>p:first-child{margin-top:0}
+.thesis-answer:last-child{margin-bottom:0}
+.basis-references{font-size:14px;color:var(--muted)}
+.quantity-link{color:inherit;text-decoration:underline dotted;text-decoration-color:currentColor;text-underline-offset:3px;font-weight:500}
+.quantity-link:hover{text-decoration-style:solid;text-decoration-color:var(--red)}
+.source-quotation{display:block;align-content:center;min-height:44px;margin:12px 0;color:var(--TEXT_SECONDARY);font-size:14px;line-height:1.7;text-decoration:none;max-width:75ch}
+.source-quotation q{font-style:normal}
+.source-quotation q::before,.source-quotation q::after{content:none}
+.source-quotation:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.source-quotation-reused{display:block}
+.source-quotation-repeat{display:inline-flex;align-items:center;min-width:44px;min-height:44px;font-size:14px}
+.argument-boundary{font-size:14px;color:var(--muted);margin-top:16px}
+.counter-references,.figure-source,.query-reference,.report-source-line{font-size:14px;color:var(--muted)}
+.report-source-line{border-top:1px solid var(--rule);padding-top:14px;margin-top:16px}
+.figure-source{margin-bottom:0}
+figcaption a,.argument-heading h2 a,.argument-heading h3 a,.example-logic h2 a{color:inherit;text-decoration:none}
+figcaption a:hover,.argument-heading h2 a:hover,.argument-heading h3 a:hover,.example-logic h2 a:hover{text-decoration:underline;text-underline-offset:4px}
+figcaption a,.figure-source a,.report-source-line a{display:inline-block;min-height:44px;align-content:center}
+[hidden]{display:none!important}
+.report-inspecting{overflow:hidden}
+#report-inspector{padding:0;border:0;border-radius:12px;background:var(--paper);color:var(--ink);width:min(820px,calc(100vw - 32px));max-width:none;max-height:calc(100dvh - 48px);overflow:hidden;box-shadow:0 16px 56px #172B4540}
+#report-inspector[open]{display:flex;flex-direction:column}
+#report-inspector::backdrop{background:#13243880}
+.inspection-header{display:flex;align-items:center;gap:12px;padding:14px 20px;border-bottom:1px solid var(--rule)}
+.inspection-header h2{margin:0;flex:1;min-width:0;font-size:18px;text-wrap:wrap}
+.inspection-header button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;min-width:44px;padding:8px;border:0;background:transparent;color:var(--ink);font:inherit;cursor:pointer;flex-shrink:0;border-radius:6px}
+.inspection-header button:hover{background:var(--FORMULA_BG)}
+.inspection-content{padding:12px 24px 24px;overflow:auto;max-height:calc(100dvh - 124px);min-height:0;flex:1;overscroll-behavior:contain;overflow-wrap:anywhere}
+.inspection-content>section,.inspection-content>article{border:0;padding-top:0;scroll-margin-top:12px}
+.inspection-content p{max-width:none}
+.inspection-content dl,.inspection-content .report-references{font-size:14px}
+.argument-visual .research-figure{margin:0;padding-top:0}
+.argument-visual .figure-context{font-size:13px;margin:5px 0 12px}
+.argument-visual .figure-note{font-size:13px;line-height:1.65;margin-bottom:0}
+.argument-visual .chart{height:240px}
+.document-answer-index{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px 16px;padding:8px 0;}
+.document-answer-index h3{margin:0;font-size:16px;line-height:1.5;text-wrap:wrap}
+.document-answer-index .report-references{justify-content:flex-end;max-width:24ch}
+#facts article{scroll-margin-top:20px}
+.scroll{overflow:auto;max-height:460px;width:100%;margin:18px 0}
+table{border-collapse:collapse;width:100%;border-block:1.5px solid var(--RULE_BLACK);font-size:14px;line-height:1.55}
+caption{text-align:left;font-weight:600;padding:10px 0}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;min-width:100px}
+thead{border-bottom:1px solid var(--RULE_BLACK)}
+.scroll th{position:sticky;top:0;background:var(--surface);z-index:1}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.adopted-data-table{table-layout:fixed}
+.adopted-data-scroll{max-height:none}
+.adopted-data-table th,.adopted-data-table td{min-width:0;overflow-wrap:anywhere}
+.adopted-data-table th:first-child{width:44%}
+.adopted-data-table thead th:nth-child(2){width:18%}
+.adopted-data-table thead th:nth-child(3){width:24%}
+.adopted-data-table thead th:nth-child(4){width:14%}
+.eq{font-family:"Cambria Math","STIX Two Math","Times New Roman",serif;padding:18px;background:var(--FORMULA_BG);font-size:22px;overflow-x:auto}
+.chart{height:var(--chart-height);min-width:0;width:100%}
+.chart-grouped{height:235px;max-width:860px}
+.research-figure{margin:28px 0 12px;padding:0;background:var(--paper);break-inside:avoid}
+figcaption{font-weight:700;font-size:16px;line-height:1.6;color:#28496F}
+.figure-context{font-size:14px;color:var(--muted);max-width:none;margin:6px 0 8px}
+.figure-result{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:6px 16px;color:var(--ink);max-width:none;margin:12px 0 4px;padding-top:10px;border-top:1px solid var(--rule)}
+.figure-result span{font-size:14px;font-weight:400}
+.figure-result strong{font-size:21px;line-height:1.4;font-weight:600}
+.figure-note{font-size:14px;color:var(--muted);max-width:none}
+.research-figure .report-references{font-size:14px;align-items:center}
+.research-figure .scroll{margin:12px 0}
+.research-figure td{border-bottom:1px solid var(--rule)}
+.research-figure td a{display:inline-flex;align-items:center;min-height:44px;min-width:44px}
+.research-figure th:first-child{width:46%}
+.measurement-figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:16px 24px}
+.measurement-figures .research-figure{margin:4px 0}
+.measurement-figures th,.measurement-figures td{min-width:0;padding:8px}
+.comparison-figures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}
+.comparison-figures .research-figure{min-width:0;margin:0}
+/* Three related measurements read as one row when the paper has room.
+   Their captions, contexts and charts share baselines without hiding copy. */
+@media(min-width:1100px){
+  .comparison-figures[data-figure-count="3"]{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:0}
+  .comparison-figures[data-figure-count="3"]>.research-figure{display:grid;grid-template-rows:subgrid;grid-row:span 6}
+}
+.argument-comparisons{grid-template-columns:minmax(0,1fr);grid-template-rows:none;gap:12px}
+.argument-comparisons>.argument-introduction,.argument-comparisons>.argument-visual,.argument-comparisons>.argument-continuation{grid-column:1;grid-row:auto}
+.argument-comparisons>.argument-continuation{padding-top:0}
+@media(max-width:900px){
+  main{padding:24px 24px 36px;margin:16px auto}
+  h1{font-size:25px}h2{font-size:19px}
+}
+@media(max-width:680px){.argument-reading{grid-template-columns:minmax(0,1fr);grid-template-rows:none;gap:16px}.argument-introduction,.argument-visual,.argument-continuation{grid-column:1;grid-row:auto}.argument-visual .chart{height:240px}.argument-introduction p{max-width:none}.report-findings li{grid-template-columns:1fr;gap:0}.comparison-figures{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:480px){main{padding:22px 18px 32px;margin:0}.document-answer-index .report-references{max-width:12ch}.chart{height:230px}.research-figure th,.research-figure td{padding:8px;min-width:0}.research-figure th:first-child{width:42%}}
+@media print{
+  :focus-visible{outline:none}
+  body{background:var(--PANEL);font-size:11pt;line-height:1.55}.skip{display:none}
+  main{padding:12px 0 0;margin:0;width:190mm;max-width:100%;box-shadow:none}
+  #report-inspector,#report-records{display:none!important}
+  .report-inspecting{overflow:visible}
+  h1{font-size:20pt}h2{font-size:13pt}h3{font-size:12pt}
+  .report-header{margin-bottom:12px;padding-bottom:10px}
+  h1{margin-bottom:8px}h2{margin-bottom:8px}h3{margin:10px 0 6px}
+  p{margin:6px 0;line-height:1.55}
+  section{padding:10px 0}#summary{padding:8px 12px;margin-bottom:10px}
+  article{padding:4px 0 12px}
+  .report-references a,.research-figure td a{min-height:0;min-width:0}
+  .research-figure{margin:12px 0 6px}
+  .argument-visual .chart{height:190px}.argument-continuation{padding-top:6px}
+  .argument-comparisons{grid-template-columns:minmax(0,1fr);grid-template-rows:none;gap:8px}
+  .argument-comparisons>.argument-introduction,.argument-comparisons>.argument-visual,.argument-comparisons>.argument-continuation{grid-column:1;grid-row:auto}
+  .argument-comparisons>.argument-continuation{padding-top:0}
+  .comparison-figures{grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:18px}
+  .figure-result{margin:6px 0}.figure-result strong{font-size:15pt}
+  figcaption a,.figure-source a,.report-source-line a{min-height:0}
+  .figure-context{margin:4px 0 6px}.figure-result{margin:8px 0 4px}
+  .research-figure .scroll{margin:8px 0}
+  .measurement-figures{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px}
+  .measurement-figures .research-figure{min-width:0}
+  h2,h3,caption{break-after:avoid}figure,.eq,tr{break-inside:avoid}
+  section{border-top:1px solid var(--rule)}.scroll{overflow:visible;max-height:none}
+  a{color:var(--ink);text-decoration:none}
+  .research-figure{padding:0;box-shadow:none}.chart{height:200px}
+}
+/* Printing keeps the responsive reading layout. A desktop two-column paper
+   is appropriate only when the available width can hold both columns. */
+@media print and (min-width:681px){
+  .comparison-figures[data-figure-count="3"]{grid-template-columns:repeat(3,minmax(0,1fr));column-gap:16px;row-gap:0}
+  .comparison-figures[data-figure-count="3"]>.research-figure{display:grid;grid-template-rows:subgrid;grid-row:span 6}
+  .argument-reading:not(.argument-comparisons){grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);grid-template-rows:min-content auto;column-gap:20px;row-gap:0}
+  .argument-reading:not(.argument-comparisons)>.argument-introduction{grid-column:1;grid-row:1}
+  .argument-reading:not(.argument-comparisons)>.argument-visual{grid-column:2;grid-row:1 / span 2}
+  .argument-reading:not(.argument-comparisons)>.argument-continuation{grid-column:1;grid-row:2}
+}
+@page{size:A4;margin:10mm}
+
+/* Two-period financial data reads across, while every raw value stays present. */
+.report-data-scroll{overflow:auto}
+.financial-comparison-table caption{font-size:14px;padding:8px 0}
+.table-unit{float:right;color:var(--muted);font-weight:400}
+.financial-comparison-table th,.financial-comparison-table td{min-width:0;padding:8px;font-size:14px}
+.financial-comparison-table td:not(:first-child),.financial-comparison-table th:not(:first-child){white-space:nowrap}
+@media(max-width:640px){.table-unit{float:none;display:block}.financial-comparison-table th,.financial-comparison-table td{padding:7px 6px}}
+
+/* Shared evidence composition: chart and frozen original-value ledger. */
+figure{container-type:inline-size}
+.evidence-layout{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;align-items:start;min-width:0}
+.evidence-layout>.chart{min-width:0;width:100%}
+.evidence-ledger{min-width:0;max-width:100%;overflow-x:auto}
+.evidence-ledger table{width:100%;border-collapse:collapse;table-layout:auto;font-size:12px;line-height:1.45;margin:0}
+.evidence-ledger th,.evidence-ledger td{padding:5px 6px!important;border-bottom:1px solid var(--GRID_LINE,#E5EAF0);text-align:right;white-space:normal;overflow-wrap:anywhere;font-weight:400;font-variant-numeric:tabular-nums}
+.evidence-ledger thead th{font-size:11px;color:var(--TEXT_SECONDARY,#586A7E);font-weight:600}
+.evidence-ledger th:first-child{min-width:58px;text-align:left}
+.evidence-ledger tbody tr:hover{background:var(--NOTE_BG,#F4F5F7)}
+.evidence-ledger a{color:inherit;text-decoration:none}
+.evidence-ledger a:hover{color:var(--SERIES_MAIN,#B83C46);text-decoration:underline}
+.evidence-ledger a:focus-visible{outline:2px solid var(--SERIES_MAIN,#B83C46);outline-offset:3px}
+@container(min-width:680px){.evidence-layout[data-ledger-columns="2"],.evidence-layout[data-ledger-columns="3"]{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}}
+@media print{.evidence-ledger{overflow:visible}.evidence-ledger th,.evidence-ledger td{padding:3px 5px!important}.evidence-layout{break-inside:avoid}}

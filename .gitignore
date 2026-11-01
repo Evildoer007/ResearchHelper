@@ -3,6 +3,8 @@ config.local.json
 .env
 *.key
 *credentials*
+# This is application source, never a credential value or local store.
+!/core/src/researchhelper/credentials.py
 
 # ==== 本地数据缓存（iFinD 配额有限，静态数据缓存到本地）====
 data_cache/
@@ -21,16 +23,16 @@ _preview_*
 
 # ==== 只留本地的工作文档 ====
 # 设计与论点库的问题记录属于内部工作底稿，不随代码分发。
-# THESIS_LIBRARY.md 例外：它被 core/thesis.py 直接解析，是代码的一部分。
+# 当前产品规范与开发指南按实际目录单独维护。
 DESIGN.md
+!/blueprint/DESIGN.md
 论点库说明与问题.md
 
 # ==== 第三方材料：绝不提交 ====
-# references/ 是券商研报与内部模板（含标注"内部使用"的材料），有版权与合规风险；
-# sources/ 是分析师放待引用研报的工作台，同理。
-# 二者都不是本项目的代码，且一旦推上去，即使事后删除，旧提交里仍然留有副本。
-references/
-sources/
+# references/ 只保留Skill公开运行指南，不放券商内部材料。
+# 原件与内部工作材料放入sources或data/source-materials，不随代码分发。
+/sources/
+/data/source-materials/
 
 # ==== Python ====
 __pycache__/
@@ -40,10 +42,9 @@ __pycache__/
 .release-venv310/
 venv/
 
-# ==== OptionHelper Skill 本地运行状态 ====
-# 旧隔离环境保留忽略规则，避免历史目录误提交；新版明确选择的 Python 可在任意
-# 外部环境中。.optionhelper/ 存 Agent selection、memory 与 runtime；data/result
-# 是受控资产与正式交付 Store。三者都可能含行情、合同和本地身份信息，绝不提交。
+# ==== ResearchHelper本地运行状态 ====
+# 保留旧隔离状态的忽略规则，避免迁移后误提交。
+# data/result和项目级Skill安装均属于本地资产，可能含行情与身份信息。
 .optionhelper_venv/
 .optionhelper/
 /data/
@@ -53,4 +54,21 @@ venv/
 build/
 dist/
 *.spec
-!ResearchHelper.spec
+
+# Published snapshots are generated, immutable local artifacts.
+/versions/
+/.cache/
+/.skills/
+# This project-level discovery link targets a generated local installation.
+# Keep source Skill metadata and other explicitly maintained skills trackable.
+/.agents/skills/researchhelper
+/.researchhelper/
+# Generated local demos and abandoned design studies stay on this machine.
+# The maintained frontend, report examples and controlled icons remain source.
+/demo/
+/assets/design/
+/.impeccable/
+# Native Windows build cache; not release source.
+**/obj/
+**/bin/
+.DS_Store

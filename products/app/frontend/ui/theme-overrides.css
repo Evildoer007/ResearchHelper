@@ -1,0 +1,1141 @@
+/* App-wide semantic theme layer. Values are defined only by Designer tokens. */
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] :is(body, .workspace-shell, .workspace-body, .setup-page, .setup-card, .connection-editor, .chat-surface, .desk-surface, .work-area, .task-context, .assistant-panel, .workbench-head, .work-stage, .desk-panel) {
+  background-color: var(--color-ground);
+  color: var(--color-ink);
+}
+
+html[data-theme="dark"] :is(.workspace-rail, .task-rail, .settings-nav, .configured-models, .task-context, .assistant-panel, .setup-card, .connection-editor, .model-provider-card, .model-provider-add, .model-empty, .connection-item, .report-item, .report-empty, .conversation-start, .conversation-starter, .task-item, .message, .composer, .choice-trigger, .choice-menu, .button-secondary, .button-quiet, .settings-row, .field, .model-catalog-row) {
+  border-color: var(--color-rule);
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+}
+
+html[data-theme="dark"] :is(input, select, textarea, .choice-trigger, .choice-menu, .choice-option, .model-provider-editor input, .model-provider-editor button) {
+  border-color: var(--color-rule-strong);
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+}
+
+html[data-theme="dark"] :is(input, textarea)::placeholder {
+  color: var(--color-muted-soft);
+}
+
+html[data-theme="dark"] :is(.settings-nav a:hover, .connection-item:hover, .conversation-starter:hover, .choice:hover .choice-trigger, .choice:focus-within .choice-trigger, .choice[data-open="true"] .choice-trigger, .choice-option:hover, .choice-option:focus-visible, .choice-option[aria-selected="true"], .model-provider-card__summary:hover) {
+  background-color: var(--color-brand-red-soft);
+  color: var(--color-ink);
+}
+
+html[data-theme="dark"] :is(.notice--error, .message.error) {
+  border-color: var(--color-red-border-soft);
+  background-color: var(--state-failed-surface);
+  color: var(--state-failed-color);
+}
+
+html[data-theme="dark"] :is(.notice--warning, .status-note, .warning, .pending) {
+  border-color: var(--color-gold-border);
+  background-color: var(--state-pending-surface);
+  color: var(--state-pending-color);
+}
+
+html[data-theme="dark"] :is(.workspace-rail:not(.workspace-rail--unbranded), .rail-account-menu, .task-menu) {
+  background-color: var(--color-paper);
+  border-color: var(--color-rule-strong);
+  color: var(--color-ink);
+}
+
+html[data-theme="dark"] .login-page {
+  --login-bg: var(--color-ground);
+  --login-card: var(--color-surface);
+  --login-ink: var(--color-ink);
+  --login-ink-2: var(--color-ink-soft);
+  --login-ink-3: var(--color-muted);
+  --login-line: var(--color-rule);
+  --login-field: var(--color-surface);
+  --login-brand: var(--color-brand-red);
+  --login-brand-hi: var(--color-brand-red-deep);
+  --login-brand-lo: var(--color-brand-red-deep);
+  --login-ring: color-mix(in srgb, var(--color-brand-red) 28%, transparent);
+}
+
+html[data-theme="dark"] :is(.login-theme, .login-input, .login-check__box) {
+  border-color: var(--color-rule);
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+html[data-theme="dark"] .login-card { color: var(--color-ink); }
+
+html[data-theme="dark"] .workspace-shell--desk .workspace-rail,
+html[data-theme="dark"] .workspace-shell--desk .rail-mode-area {
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+/* Legacy Desk refinements use long, light-mode selectors. Keep this final
+   layer equally specific so a theme switch changes the entire shell at once,
+   rather than leaving isolated pale islands behind. */
+html[data-theme="dark"] .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell],
+html[data-theme="dark"] .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-body,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .work-area,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .work-area,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .work-stage {
+  background: var(--color-ground) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail:not(.workspace-rail--unbranded),
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .workspace-rail:not(.workspace-rail--unbranded),
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .workspace-rail:not(.workspace-rail--unbranded),
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-mode-area {
+  background: var(--color-paper) !important;
+  border-color: var(--color-rule) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .workbench-head,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-command-dock,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .composer,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .assistant-panel,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-panel {
+  background: var(--color-surface) !important;
+  border-color: var(--color-rule) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .workbench-head {
+  border-bottom: 1px solid var(--color-rule) !important;
+}
+
+/* One conversation canvas continues behind the transparent composer wrappers. */
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] :is(.work-area, .chat-surface) {
+  background: var(--color-surface) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item__title,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-kicker,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .workbench-head h1,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .parameter-summary--strip dd:nth-child(2) {
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item small,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .task-item small,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-item__more,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .parameter-summary--strip dt:first-child,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .model-picker__label,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .message__meta {
+  color: var(--color-muted) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__mark,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-menu {
+  background: var(--color-surface) !important;
+  border-color: var(--color-rule) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch--rail {
+  border-color: color-mix(in srgb, var(--color-ink) 12%, transparent) !important;
+  background: color-mix(in srgb, var(--color-ink) 7%, transparent) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch button,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-new-task,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__copy strong,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-menu__action {
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch button[aria-pressed="true"] {
+  background: transparent !important;
+  color: var(--color-ink) !important;
+}
+
+/* The moving segment stays translucent in Dark mode instead of becoming a
+   saturated block that separates the web surface from the native shell. */
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .mode-switch--rail::before {
+  border-color: color-mix(in srgb, var(--color-ink) 12%, transparent) !important;
+  background: color-mix(in srgb, var(--color-paper) 78%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .1), 0 2px 8px rgba(0, 0, 0, .22) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button:hover,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button[aria-selected="true"] {
+  background: var(--color-brand-red-soft) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button:first-child {
+  border-color: var(--color-rule) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .desk-module-tabs button[aria-selected="true"] {
+  box-shadow: inset 0 -3px var(--color-brand-red) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .composer form,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .composer--desk form,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .model-picker select,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .model-picker .choice-trigger,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-rename-input {
+  background: var(--color-paper) !important;
+  border-color: var(--color-rule-strong) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .composer textarea,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .composer textarea::placeholder {
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .composer textarea {
+  background: transparent !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-region .composer {
+  background: transparent !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .composer textarea::placeholder {
+  color: var(--color-muted) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .composer form:focus-within,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .model-picker select:focus,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .model-picker .choice:focus-within .choice-trigger {
+  border-color: var(--color-rule-strong) !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .model-picker select:enabled:hover,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .model-picker .choice:hover .choice-trigger,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .model-picker .choice[data-open="true"] .choice-trigger {
+  background: var(--color-brand-red-soft) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .send-control,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .send-control:hover {
+  background: var(--color-brand-red) !important;
+  border-color: var(--color-brand-red) !important;
+  color: var(--color-on-brand) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .drawer-close {
+  border-color: var(--color-rule-strong);
+  background: var(--color-paper);
+  color: var(--color-muted);
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .drawer-close:hover,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .drawer-close:focus-visible {
+  border-color: var(--color-brand-red);
+  background: var(--color-brand-red-soft);
+  color: var(--color-brand-red);
+}
+
+html[data-native-shell="macos"] .workspace-shell.workspace-shell--desk[data-workspace-shell] :is(.report-drawer-toggle, [data-report-close]) {
+  display: none !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .message__mark {
+  background: var(--color-brand-red-soft) !important;
+  color: var(--color-ink) !important;
+}
+
+/* Shared shell elements that still inherit light-only literals from the
+   original workbench receive the same text and rule hierarchy as the rest of
+   the dark workspace. Embedded Desk modules keep their own theme boundary. */
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] :is(
+  .conversation-start__copy,
+  .conversation-start__note,
+  .assistant-panel__head span,
+  .assistant-panel__close,
+  .rail-account-trigger,
+  .task-item--empty
+) {
+  color: var(--color-muted) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] :is(
+  .conversation-start h2,
+  .assistant-panel__head strong
+) {
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .assistant-panel__head,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .assistant-panel__transcript,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .assistant-panel__transcript .message-stream {
+  border-color: var(--color-rule) !important;
+  background: var(--color-surface) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .assistant-panel__transcript :is(.conversation-start, .conversation-starter) {
+  border-color: var(--color-rule) !important;
+  background: var(--color-surface) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .assistant-panel__transcript .conversation-starter:hover {
+  border-color: var(--color-rule-strong) !important;
+  background: var(--color-paper) !important;
+}
+
+html[data-theme="dark"] .conversation-start__mark img {
+  content: url("/capability/assets/icons/optionhelper-app-icon-tile-dark.svg");
+}
+
+/* The command body is a real panel only when the Desk assistant is open.
+   Chat renders the same subtree with display: contents, so its background
+   must not become a full-width rectangle behind the floating composer. */
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .assistant-panel > .desk-command-dock__body {
+  border-color: var(--color-rule) !important;
+  background: var(--color-surface) !important;
+}
+
+html[data-theme="light"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-panel > .desk-command-dock__body,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-panel > .desk-command-dock__body {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .assistant-panel__close:hover {
+  background: var(--color-brand-red-soft) !important;
+  color: var(--color-brand-red) !important;
+}
+
+/* Keep the account control and its open state inside the dark shell. */
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger:focus-visible {
+  background: transparent !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger:hover,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger[aria-expanded="true"] {
+  background: var(--task-row-state-surface) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-trigger__mark {
+  border-color: transparent !important;
+  background: #50555C !important;
+  color: #FFFFFF !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__identity strong,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item {
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__identity span {
+  color: var(--color-muted) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__separator {
+  background: var(--color-rule) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item:hover,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item:focus-visible {
+  background: var(--color-paper) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item--logout,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item--logout:hover,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-account-menu__item--logout:focus-visible {
+  color: var(--color-brand-red) !important;
+}
+
+/* Quiet non-interactive separators in the dark shell. Keep the red tab and
+   splitter indicators unchanged; only legacy pale rules are tokenized here. */
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .rail-footer,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .task-rail,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .workbench-head,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .desk-module-tabs,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .desk-command-dock {
+  border-color: var(--color-rule) !important;
+}
+
+/* WKWebView can retain -webkit-text-fill-color over a normal color rule. */
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .composer textarea {
+  color: var(--color-ink) !important;
+  -webkit-text-fill-color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .composer textarea::placeholder {
+  color: var(--color-muted) !important;
+  -webkit-text-fill-color: var(--color-muted) !important;
+  opacity: 1 !important;
+}
+
+/* Chat paints only the form itself. Its layout wrappers stay transparent so
+   the material samples the conversation beneath instead of a rectangular
+   backing strip. Geometry is shared; themes only supply color tokens. */
+html[data-theme="light"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] :is(.assistant-region, .assistant-panel, .assistant-panel > .desk-command-dock__body, .assistant-region .composer),
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] :is(.assistant-region, .assistant-panel, .assistant-panel > .desk-command-dock__body, .assistant-region .composer) {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+html[data-theme="light"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .assistant-region .composer form,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .assistant-region .composer form {
+  overflow: visible;
+  border-radius: 24px;
+  border: 1px solid var(--composer-edge) !important;
+  background: var(--composer-fill) !important;
+  box-shadow: var(--composer-shadow) !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* The model control belongs to the same neutral material as the composer.
+   Avoid the legacy rose-tinted fill in Light mode while keeping identical
+   geometry and interaction across themes. */
+html[data-theme="light"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-region .model-picker :is(select, .choice-trigger),
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-region .model-picker :is(select, .choice-trigger) {
+  background-color: color-mix(in srgb, var(--color-ink) 5%, var(--color-surface)) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="light"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-region .model-picker :is(select:enabled:hover, select:focus, .choice:hover .choice-trigger, .choice[data-open="true"] .choice-trigger),
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="chat"] .assistant-region .model-picker :is(select:enabled:hover, select:focus, .choice:hover .choice-trigger, .choice[data-open="true"] .choice-trigger) {
+  background-color: color-mix(in srgb, var(--color-ink) 8%, var(--color-surface)) !important;
+  color: var(--color-ink) !important;
+}
+
+/* Conversation content keeps the same hierarchy in Dark mode; these final rules
+   replace the remaining light-only literals in the legacy chat skin. */
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] :is(
+  .conversation-start h2,
+  .conversation-starter strong,
+  .message__body
+) {
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] :is(.conversation-start__copy,
+.conversation-starter span,
+.conversation-start__note,
+.message__meta,
+.model-picker__label ) {
+  color: var(--color-muted) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .conversation-start__mark {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .message__mark {
+  background: color-mix(in srgb, var(--color-brand-red) 12%, var(--color-surface)) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-brand-red) 18%, transparent) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .conversation-starter {
+  border-color: var(--color-rule) !important;
+  background: var(--color-surface) !important;
+  color: var(--color-ink) !important;
+}
+
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .conversation-starter:hover,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .conversation-starter:focus-visible {
+  border-color: var(--color-rule-strong) !important;
+  background: var(--color-brand-red-soft) !important;
+  color: var(--color-ink) !important;
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--color-ink) 12%, transparent) !important;
+}
+
+html[data-theme="light"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .message--user .message__body,
+html[data-theme="dark"] .workspace-shell.workspace-shell--desk[data-workspace-shell] .message--user .message__body {
+  background: color-mix(in srgb, var(--color-ink) 7%, var(--color-surface)) !important;
+  color: var(--color-ink) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-ink) 10%, transparent) !important;
+}
+
+/* The native shell owns the actual sidebar blur. Web content supplies only a
+   restrained theme tint so labels and controls remain readable. Browsers keep
+   the existing backdrop-filter fallback for local visual development. */
+html[data-theme="light"] {
+  --rail-material-fill: color-mix(in srgb, var(--color-ground) 48%, transparent);
+  /* Light uses its own native material; retain a thin neutral web tint. */
+  --rail-native-material-fill: color-mix(in srgb, var(--color-ground) 8%, transparent);
+  --rail-material-border: color-mix(in srgb, var(--color-ink) 10%, transparent);
+  --rail-material-control: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  --rail-material-control-hover: color-mix(in srgb, var(--color-ink) 8%, transparent);
+  --rail-material-menu: color-mix(in srgb, var(--color-paper) 96%, transparent);
+  --rail-mode-selection: rgb(255 255 255 / .66);
+  --rail-mode-selection-edge: rgb(0 0 0 / .13);
+  --rail-mode-selection-shadow: 0 1px 3px rgb(0 0 0 / .12), 0 2px 6px rgb(0 0 0 / .04);
+}
+
+html[data-theme="dark"] {
+  --rail-material-fill: color-mix(in srgb, var(--color-paper) 48%, transparent);
+  /* Match Light tint strength; the native material supplies theme contrast. */
+  --rail-native-material-fill: rgb(42 42 42 / .08);
+  --rail-material-border: color-mix(in srgb, var(--color-ink) 14%, transparent);
+  --rail-material-control: color-mix(in srgb, var(--color-ink) 4%, transparent);
+  --rail-material-control-hover: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  --rail-material-menu: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  --rail-mode-selection: rgb(255 255 255 / .10);
+  --rail-mode-selection-edge: rgb(255 255 255 / .13);
+  --rail-mode-selection-shadow: 0 1px 3px rgb(0 0 0 / .18);
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded {
+  border-right-color: var(--rail-material-border) !important;
+  background: var(--rail-material-fill) !important;
+  color: var(--color-ink) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(125%);
+  backdrop-filter: blur(30px) saturate(125%);
+}
+
+html[data-native-material="system"] .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded {
+  background: var(--rail-native-material-fill) !important;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+/* Light labels must remain readable when a dark backdrop is visible. */
+html[data-theme="light"][data-native-material="system"] .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded :is(.rail-section-label, .rail-help-trigger) {
+  color: #666 !important;
+}
+
+/* A dark glass rail needs its own foreground contrast over bright windows.
+   Scope these tokens to the rail so the conversation and Light stay unchanged. */
+html[data-theme="dark"] .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded {
+  --color-muted: #cdcdcd;
+  --color-muted-soft: #bcbcbc;
+  --color-rule: rgb(255 255 255 / .10);
+}
+
+html[data-theme="dark"] .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded .task-item[aria-current="true"] {
+  background: rgb(255 255 255 / .09) !important;
+}
+
+html[data-theme="dark"] .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded .task-item[aria-current="true"] small {
+  color: #e0e0e0 !important;
+}
+
+html[data-theme="dark"] .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded :is(.rail-section-label, .rail-help-trigger) {
+  color: var(--color-muted) !important;
+}
+
+html[data-theme="dark"] .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded .rail-footer {
+  border-top-color: var(--color-rule);
+}
+
+html[data-native-shell],
+html[data-native-shell] body.workspace-body,
+html[data-native-shell] body.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] {
+  background: transparent !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded :is(
+  .rail-kicker,
+  .task-item,
+  .task-item__title,
+  .rail-account-trigger,
+  .rail-account-trigger__copy strong
+) {
+  color: var(--color-ink) !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded :is(
+  .task-item:hover,
+  .task-item[aria-current="true"],
+  .rail-account-trigger:hover,
+  .rail-account-trigger[aria-expanded="true"]
+) {
+  background: var(--rail-material-control-hover) !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded :is(
+  .workspace-brand,
+  .rail-mode-area,
+  .task-rail,
+  .rail-footer,
+  .task-item,
+  .rail-account-trigger
+) {
+  background: transparent !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded :is(
+  .task-item small,
+  .task-item--empty,
+  .task-item__more,
+  .rail-account-trigger__copy span
+) {
+  color: var(--color-muted) !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded :is(
+  .workspace-brand,
+  .mode-switch--rail
+) {
+  border-color: var(--rail-material-border) !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded .mode-switch--rail {
+  background: color-mix(in srgb, var(--color-ink) 3%, transparent) !important;
+  border-color: color-mix(in srgb, var(--color-ink) 7%, transparent) !important;
+  box-shadow: none !important;
+}
+
+/* The selected segment is a light translucent lift in either theme. Avoid
+   paper-colored fills: in Dark those turn into a recessed black slab. */
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded .mode-switch--rail::before {
+  background: var(--rail-mode-selection) !important;
+  border-color: var(--rail-mode-selection-edge) !important;
+  box-shadow: var(--rail-mode-selection-shadow) !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded .mode-switch button {
+  color: var(--color-muted) !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded .mode-switch button[aria-pressed="true"] {
+  color: var(--color-ink) !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded .rail-new-task {
+  border-color: transparent !important;
+  background: color-mix(in srgb, var(--color-ink) 3%, transparent) !important;
+  color: var(--color-ink) !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded .rail-new-task:hover {
+  border-color: color-mix(in srgb, var(--color-ink) 18%, transparent) !important;
+  background: var(--rail-material-control-hover) !important;
+}
+
+.workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] :is(.rail-account-menu, .task-menu) {
+  background: var(--rail-material-menu) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(108%);
+  backdrop-filter: blur(14px) saturate(108%);
+}
+
+@media (max-width: 700px) {
+  .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded {
+    background: var(--color-paper) !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Respect transparency preferences without changing task geometry or contrast. */
+@media (prefers-reduced-transparency: reduce) {
+  html .workspace-body .workspace-shell.workspace-shell--desk[data-workspace-shell] .workspace-rail--unbranded {
+    background: var(--color-paper) !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* A single material vocabulary for the composer and its floating controls.
+   The border alone defines the edge: a top inset highlight doubles its weight. */
+html[data-theme="light"] {
+  --composer-fill: #fff;
+  --composer-edge: rgb(37 37 37 / .15);
+  --composer-shadow: 0 2px 4px rgb(30 35 40 / .025), 0 6px 18px rgb(30 35 40 / .055);
+  --glass-fill: rgb(255 255 255 / .78);
+  --glass-edge: rgb(37 37 37 / .16);
+  --glass-shadow: inset 0 1px 0 rgb(255 255 255 / .95), 0 2px 5px rgb(34 40 50 / .06), 0 14px 36px rgb(34 40 50 / .10);
+}
+html[data-theme="dark"] {
+  --composer-fill: #222;
+  --composer-edge: rgb(255 255 255 / .16);
+  --composer-shadow: 0 2px 4px rgb(0 0 0 / .09), 0 8px 24px rgb(0 0 0 / .16);
+  --glass-fill: rgb(40 40 40 / .84);
+  --glass-edge: rgb(255 255 255 / .12);
+  --glass-shadow: inset 0 1px 0 rgb(255 255 255 / .08), 0 2px 5px rgb(0 0 0 / .2), 0 14px 36px rgb(0 0 0 / .28);
+}
+html[data-theme] .conversation-outline__preview {
+  background: var(--glass-fill) !important;
+  border-color: var(--glass-edge) !important;
+  box-shadow: var(--glass-shadow) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(125%);
+  backdrop-filter: blur(24px) saturate(125%);
+}
+html[data-theme] .workspace-shell[data-workspace-shell] .composer form {
+  border-radius: 24px;
+  padding: 12px;
+}
+html[data-theme] .workspace-shell[data-workspace-shell] .composer textarea {
+  background: transparent !important;
+}
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-actions {
+  border: 0;
+  background: transparent;
+  padding-top: 8px;
+}
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .choice-trigger {
+  border-radius: 16px;
+  font-weight: 500;
+}
+@media (prefers-reduced-transparency: reduce) {
+  html[data-theme] { --glass-fill: var(--color-surface); --composer-fill: var(--color-surface); }
+}
+
+/* Shared material across workspace, settings, and contextual surfaces. */
+html[data-theme="light"] { --workspace-wash: #f3f4f6; --glass-soft: rgb(255 255 255 / .58); }
+html[data-theme="dark"] { --workspace-wash: #1d1d1d; --glass-soft: rgb(42 42 42 / .64); }
+html[data-theme] .setup-page { background: var(--workspace-wash); }
+html[data-theme] .setup-page .setup-card {
+  border: 1px solid var(--glass-edge);
+  border-radius: 24px;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow);
+}
+html[data-theme] .setup-page .settings-nav { background: var(--glass-soft); }
+html[data-theme] .workspace-shell[data-workspace-shell] .task-context {
+  background: var(--glass-fill);
+  border-color: var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  -webkit-backdrop-filter: blur(24px) saturate(125%);
+  backdrop-filter: blur(24px) saturate(125%);
+}
+/* One frosted surface; opaque child layers would conceal its backdrop. */
+html[data-theme="light"] { --desk-assistant-fill: rgb(255 255 255 / .26); --desk-assistant-highlight: rgb(255 255 255 / .8); }
+html[data-theme="dark"] { --desk-assistant-fill: rgb(28 28 28 / .30); --desk-assistant-highlight: rgb(255 255 255 / .18); }
+html[data-theme] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .assistant-panel {
+  background: var(--desk-assistant-fill) !important;
+  border: 0;
+  border-radius: 20px;
+  box-shadow: inset 0 0 0 1px var(--desk-assistant-highlight), 0 24px 64px -16px rgb(0 0 0 / .24), 0 4px 14px rgb(0 0 0 / .06);
+  -webkit-backdrop-filter: blur(24px) saturate(120%);
+  backdrop-filter: blur(24px) saturate(120%);
+}
+html[data-theme] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .assistant-panel :is(.assistant-panel__head, .assistant-panel__transcript, .message-stream, .desk-command-dock__body, .composer, .conversation-start) {
+  background: transparent !important;
+}
+html[data-theme] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .assistant-panel > .desk-command-dock__body {
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.assistant-panel__head > div:first-child { min-width: 0; }
+.assistant-panel__head [data-assistant-title] {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  html[data-theme] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .assistant-panel { background: var(--color-paper) !important; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  html[data-theme] .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode="desk"] .assistant-panel {
+    background: var(--color-paper) !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+html[data-theme] .process-collaboration {
+  border-color: var(--glass-edge);
+  background: var(--glass-soft);
+  box-shadow: 0 3px 10px rgb(0 0 0 / .05);
+}
+html[data-theme] .message-question {
+  border: 0; padding: 0; background: transparent; box-shadow: none;
+}
+html[data-theme] .message-question[data-state="answered"] {
+  border: 0; padding: 0; background: transparent; box-shadow: none;
+}
+.message-question[data-state="answered"] .message-question__prompt { margin-bottom: 6px; font-size: 13px; font-weight: 400; color: var(--muted); }
+.message-question__answer { margin: 0; font-size: 13px; font-weight: 400; line-height: 1.6; }
+
+html[data-theme] .workspace-shell[data-workspace-shell] .composer form.is-generating {
+  border-color: var(--composer-edge) !important;
+}
+html[data-theme] .workspace-shell[data-workspace-shell] .composer form {
+  transition: border-color 220ms ease, box-shadow 220ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme] .workspace-shell[data-workspace-shell] .composer form { transition: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  html[data-theme] { --glass-soft: var(--color-surface); }
+}
+
+html[data-theme] .workspace-shell[data-workspace-shell] .composer textarea::placeholder {
+  color: var(--color-muted) !important;
+  -webkit-text-fill-color: var(--color-muted) !important;
+  opacity: 1;
+  font-weight: 400;
+}
+
+.composer-preset { flex-shrink: 0; }
+.workspace-shell[data-workspace-shell] .composer-preset .choice-trigger { width: 34px; min-width: 34px; height: 34px; min-height: 34px; padding: 7px; border: 0; background: transparent; }
+.composer-preset .choice-trigger__value, .composer-preset .choice-trigger__chevron { display: none !important; }
+.composer-preset .choice-trigger::before { content: ""; width: 20px; height: 20px; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5'%3E%3Ccircle cx='12' cy='5' r='3'/%3E%3Ccircle cx='5' cy='18' r='3'/%3E%3Ccircle cx='19' cy='18' r='3'/%3E%3Cpath d='M12 8v4M5 15v-3h14v3'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.5'%3E%3Ccircle cx='12' cy='5' r='3'/%3E%3Ccircle cx='5' cy='18' r='3'/%3E%3Ccircle cx='19' cy='18' r='3'/%3E%3Cpath d='M12 8v4M5 15v-3h14v3'/%3E%3C/svg%3E") center / contain no-repeat; }
+.composer-preset .choice-menu { width: min(270px, calc(100vw - 60px)); left: 0; right: auto; }
+.composer-preset .choice-group__label { padding: 9px 11px; font-size: 12px; font-weight: 500; color: var(--color-ink); }
+.composer-preset .choice-group > .choice-option { padding-inline-start: 23px; }
+
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-attach-control,
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-preset .choice-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  min-width: 34px;
+  height: 34px;
+  min-height: 34px;
+  padding: 7px;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent) !important;
+  color: var(--color-muted) !important;
+}
+html[data-theme] .workspace-shell[data-workspace-shell] .composer :is(.composer-attach-control, .composer-preset .choice-trigger):hover {
+  background: color-mix(in srgb, var(--color-ink) 10%, transparent) !important;
+}
+/* Keep adjacent composer icons identical; disabled behavior is conveyed by availability and help text. */
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-followup-control {
+  color: var(--color-muted) !important;
+}
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-attach-control:disabled,
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-preset .choice-trigger:disabled,
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-followup-control:disabled {
+  color: var(--color-muted) !important;
+  opacity: 1;
+}
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-attach-control::after { display: none; }
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-attach-control svg { width: 20px; height: 20px; stroke-width: 1.5; }
+
+/* Workspace navigation shares the composer's quiet material. */
+.mode-switch button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.mode-switch button svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.task-item .task-item__date { opacity: 0; transition: opacity 140ms ease; }
+.task-list__row:hover .task-item__date, .task-list__row:focus-within .task-item__date { opacity: 1; }
+@media (hover: none) { .task-item .task-item__date { opacity: .65; } }
+.rail-section-label { display: flex; align-items: center; justify-content: space-between; }
+.rail-task-search { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: inherit; cursor: default; padding: 5px; }
+.rail-task-search svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.rail-task-search:hover { background: var(--glass-soft); }
+html[data-native-shell="macos"] .rail-task-search { display: none; }
+.task-search-dialog { width: min(540px, calc(100vw - 40px)); max-height: 70vh; padding: 20px; border: 1px solid var(--glass-edge); border-radius: 22px; background: var(--glass-fill); color: var(--ink); box-shadow: var(--glass-shadow); backdrop-filter: blur(24px); }
+.task-search-dialog::backdrop { background: rgb(0 0 0 / .28); backdrop-filter: blur(3px); }
+.task-search-dialog header { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
+.task-search-dialog input { min-width: 0; flex: 1; border: 0; border-radius: 12px; padding: 12px; background: var(--glass-soft); color: inherit; font: inherit; }
+.task-search-dialog button { border: 0; background: transparent; color: inherit; font: inherit; cursor: default; border-radius: 10px; padding: 12px; }
+.task-search-dialog header button { font-size: 24px; padding: 4px 10px; }
+.task-search-dialog > div button { display: block; width: 100%; text-align: start; overflow-wrap: anywhere; }
+.task-search-dialog button:hover, .task-search-dialog button:focus-visible { background: var(--glass-soft); }
+@media (prefers-reduced-motion: reduce) { .task-item .task-item__date { transition: none; } }
+
+/* Elevation belongs to the rounded form, never its full-width wrappers. */
+html[data-theme] .workspace-shell[data-workspace-shell] .composer form {
+  border-color: var(--composer-edge) !important;
+  background: var(--composer-fill) !important;
+  box-shadow: var(--composer-shadow) !important;
+}
+html[data-theme] .workspace-shell[data-workspace-shell] .composer-attach-control::before { display: none; }
+.task-search-dialog[open] { animation: workspace-modal-enter 250ms cubic-bezier(.22, 1, .36, 1); }
+@keyframes workspace-modal-enter { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes workspace-menu-enter { from { opacity: 0; transform: translateY(4px) scale(.97); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .task-search-dialog[open] { animation: none; } }
+
+/* Shared motion vocabulary, adapted from the supplied Transitions.dev examples. */
+:root { --motion-open: 250ms; --motion-close: 150ms; --motion-content: 300ms; --motion-surface-ease: cubic-bezier(.22, 1, .36, 1); }
+html[data-theme] .optionhelper-choice[data-open="true"] .choice-menu { animation: none; }
+.task-search-dialog[open] { animation: none; }
+.workspace-body .workspace-shell[data-workspace-shell] .mode-switch--rail::before { transition: transform var(--motion-open) var(--motion-surface-ease), background-color var(--motion-open) ease; }
+.runtime-state-label, .assistant-reasoning__title { position: relative; display: inline-block; }
+.message--process:not([data-terminal="true"]) .runtime-state-label::after,
+.assistant-reasoning[data-running="true"] .assistant-reasoning__title::after {
+  content: attr(data-text); position: absolute; inset: 0; pointer-events: none; color: transparent;
+  background: linear-gradient(90deg, transparent 40%, var(--ink) 50%, transparent 60%) 100% 0 / 400% 100%;
+  -webkit-background-clip: text; background-clip: text; animation: workspace-status-shimmer 2200ms linear infinite;
+}
+@keyframes workspace-status-shimmer { to { background-position: 0 0; } }
+.assistant-reasoning__chevron { transition: transform var(--motion-open) var(--motion-surface-ease); }
+.assistant-reasoning[data-running="true"] .assistant-reasoning__body {
+  -webkit-mask-image: linear-gradient(transparent, #000 8px, #000 calc(100% - 8px), transparent);
+  mask-image: linear-gradient(transparent, #000 8px, #000 calc(100% - 8px), transparent);
+}
+.process-token-values { align-items: center; gap: 6px 14px; }
+.report-item { position: relative; isolation: isolate; }
+.report-item::after { content: ""; position: absolute; inset: 0; border-radius: inherit; z-index: -1; pointer-events: none; opacity: 0; background: radial-gradient(160px circle at var(--reflection-x, 50%) var(--reflection-y, 50%), rgb(255 255 255 / .10), transparent); transition: opacity var(--motion-content) ease; }
+.report-item:hover::after { opacity: 1; }
+.report-item__actions button svg, .message__actions button svg { transition: transform var(--motion-open) var(--motion-surface-ease); }
+.report-item__actions button:hover svg { transform: translateY(-1px); }
+.composer-attachment-area, .composer-followup-queue { transition: height var(--motion-content) var(--motion-surface-ease); }
+.composer-followup-row { border-radius: 12px; background: var(--glass-soft); margin-block: 4px; }
+.composer-question__option { transition: background-color var(--motion-close) ease, border-color var(--motion-close) ease; }
+@media (prefers-reduced-motion: reduce) {
+  .message--process .runtime-state-label::after, .assistant-reasoning__title::after { display: none; }
+  .workspace-body .workspace-shell[data-workspace-shell] .mode-switch--rail::before,
+  .assistant-reasoning__chevron, .report-item::after, .report-item__actions button svg,
+  .composer-attachment-area, .composer-followup-queue { transition: none; }
+}
+.send-control.is-sent .send-success { stroke-dasharray: var(--success-path-length, 20); animation: workspace-check-draw 350ms var(--motion-surface-ease) both; }
+@keyframes workspace-check-draw { from { stroke-dashoffset: var(--success-path-length, 20); } to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .send-control.is-sent .send-success { animation: none; stroke-dashoffset: 0; } }
+
+/* Unified selection controls: shared by App and embedded module pages. */
+html body label:has(> input:is([type="checkbox"], [type="radio"])) {
+  display: flex;
+  align-items: center;
+  column-gap: 8px !important;
+}
+
+html body input:is([type="checkbox"], [type="radio"]) {
+  -webkit-appearance: none !important;
+  appearance: none !important;
+  position: relative !important;
+  display: inline-grid !important;
+  place-items: center !important;
+  flex: 0 0 16px !important;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  box-sizing: border-box !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  vertical-align: -2px;
+  border: 1px solid var(--color-rule-strong, #888) !important;
+  border-radius: 4px !important;
+  background: transparent !important;
+  color: #fff !important;
+  box-shadow: none !important;
+  transform: none !important;
+  cursor: default;
+  transition: background-color 150ms ease, border-color 150ms ease, opacity 150ms ease !important;
+}
+html body input:is([type="checkbox"], [type="radio"])::before { content: none !important; }
+html body input[type="radio"] { border-radius: 50% !important; }
+html body input:is([type="checkbox"], [type="radio"]):is(:checked, :indeterminate) {
+  border-color: var(--color-brand-red, #c8102e) !important;
+  background: var(--color-brand-red, #c8102e) !important;
+}
+html body input:is([type="checkbox"], [type="radio"])::after {
+  content: "" !important;
+  position: static !important;
+  display: block !important;
+  width: 10px !important;
+  height: 10px !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  transform: none !important;
+  background: #fff !important;
+  opacity: 0;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m2 6 2.5 2.5L10 3' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m2 6 2.5 2.5L10 3' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  transition: opacity 120ms ease;
+}
+html body input:is([type="checkbox"], [type="radio"]):checked::after { opacity: 1; }
+html body input[type="checkbox"]:indeterminate::after { opacity: 1; width: 8px !important; height: 2px !important; mask: none; -webkit-mask: none; }
+html body input[type="radio"]::after { width: 6px !important; height: 6px !important; border-radius: 50% !important; mask: none; -webkit-mask: none; }
+html body input:is([type="checkbox"], [type="radio"]):hover:not(:disabled) { border-color: var(--color-brand-red, #c8102e) !important; }
+html body input:is([type="checkbox"], [type="radio"]):focus-visible { outline: 2px solid color-mix(in srgb, var(--color-brand-red, #c8102e) 55%, transparent) !important; outline-offset: 3px !important; }
+html body input:is([type="checkbox"], [type="radio"]):disabled { opacity: .45 !important; cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) {
+  html body input:is([type="checkbox"], [type="radio"]), html body input:is([type="checkbox"], [type="radio"])::after { transition: none !important; }
+}
+html body :is(.choice-option, .oh-choice__option) { position: relative; padding-inline-end: 34px !important; }
+html body :is(.choice-option, .oh-choice__option)[aria-selected="true"]::after {
+  content: ""; position: absolute !important; right: 12px !important; top: 50% !important;
+  width: 12px !important; height: 12px !important; margin: 0 !important; border: 0 !important;
+  transform: translateY(-50%) !important; background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m2 6 2.5 2.5L10 3' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='m2 6 2.5 2.5L10 3' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+/* End unified selection controls. */
+
+/* Compact controls keep their real layout space while revealing their label. */
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-attach-control {
+  appearance: none; -webkit-appearance: none; position: relative;
+  display: flex; flex: 0 0 auto; justify-content: flex-start; gap: 0;
+  box-sizing: border-box; height: 34px; min-height: 34px; max-height: 34px;
+  padding: 7px; overflow: hidden; border-radius: 17px;
+  transition: width 220ms cubic-bezier(.22, 1, .36, 1), background-color 150ms ease;
+}
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-attach-control svg { position: absolute; left: 7px; top: 7px; display: block; width: 20px; min-width: 20px; height: 20px; fill: none; stroke: currentColor; flex: none; }
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-attach-control .composer-attach-label {
+  display: block; position: static; margin-left: 27px; transform: none; flex: none; white-space: nowrap;
+  font-size: 12px; opacity: 0; transition: opacity 120ms ease;
+}
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-attach-control:is(:hover, :focus-visible):not(:disabled) { width: 104px; }
+html[data-theme] .workspace-shell[data-workspace-shell] .composer .composer-attach-control:is(:hover, :focus-visible):not(:disabled) .composer-attach-label { opacity: 1; }
+.composer-followup-control[hidden] { display: none !important; }
+/* Sent turns reserve reading space above the composer, then consume it as text grows. */
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .message-stream[data-turn-anchored="true"] {
+  padding-bottom: calc(40px + var(--conversation-turn-space, 0px));
+}
+.message--process .process-geometry { flex: 0 0 20px; }
+.task-item__title { gap: 4px; }
+/* The leading status stays in place; only live work emits a quiet ripple. */
+.task-item__title .task-item__running-dot {
+  position: relative; flex: 0 0 14px; width: 14px; height: 18px;
+  color: var(--muted); background: transparent; box-shadow: none;
+}
+.task-item__running-dot::before, .task-item__running-dot::after {
+  content: ""; position: absolute; inset: 6px 4px; box-sizing: border-box; border-radius: 50%;
+}
+.task-item__running-dot::before { background: currentColor; }
+.task-item__running-dot::after { border: 1px solid currentColor; opacity: 0; }
+.task-item__running-dot:is([data-state="running"], [data-state="cancelling"], [data-state="queued"]) { color: var(--color-brand-red, #c8102e); }
+.task-item__running-dot:is([data-state="running"], [data-state="cancelling"], [data-state="queued"])::after {
+  animation: task-activity-ripple 1600ms cubic-bezier(.16, 1, .3, 1) infinite;
+}
+.task-item__pin { display: inline-flex; flex: 0 0 12px; color: var(--muted); }
+.task-item__pin svg { display: block; width: 12px; height: 12px; }
+@keyframes task-activity-ripple {
+  0% { transform: scale(1); opacity: .65; }
+  85%, 100% { transform: scale(2.1); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .task-item__running-dot::after { animation: none !important; opacity: 0 !important; }
+  .workspace-shell .composer-attach-control, .workspace-shell .composer-attach-label { transition: none !important; }
+}
+
+/* Settings uses the workspace top layer; its iframe does not replace the chat. */
+.workspace-settings-dialog {
+  box-sizing: border-box; width: min(900px, calc(100vw - 48px));
+  height: min(800px, calc(100vh - 64px)); max-width: none; max-height: none;
+  padding: 0; border: 1px solid var(--glass-edge); border-radius: 24px;
+  overflow: hidden; background: var(--color-surface); color: var(--color-ink);
+  box-shadow: 0 24px 64px rgb(0 0 0 / .18);
+}
+/* Blur the mounted workspace as one surface. WebKit's backdrop filter can
+   sample its native-transparent rail and opaque content inconsistently. */
+.workspace-body:has(> .workspace-settings-dialog[open]) > .workspace-shell[data-workspace-shell] {
+  filter: blur(10px);
+}
+.workspace-settings-dialog::backdrop { background: rgb(0 0 0 / .08); }
+.workspace-settings-dialog iframe { display: block; width: 100%; height: 100%; border: 0; }
+@media (max-width: 700px) {
+  .workspace-settings-dialog { width: calc(100vw - 20px); height: calc(100dvh - 24px); border-radius: 18px; }
+}
+
+/* Composer popovers share a frosted surface; Desk form dropdowns keep their geometry. */
+html[data-theme] body .composer .optionhelper-choice .choice-menu,
+.research-depth-slider {
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-edge);
+  border-radius: 22px;
+  box-shadow: var(--composer-shadow);
+  -webkit-backdrop-filter: blur(24px) saturate(115%);
+  backdrop-filter: blur(24px) saturate(115%);
+  color: var(--color-ink);
+}
+html[data-theme] body .composer .optionhelper-choice .choice-menu { padding: 8px; }
+html[data-theme] body .composer .model-picker .choice-menu__heading {
+  display: block; padding: 5px 10px 9px; color: var(--color-muted); font-size: 12px; font-weight: 500;
+}
+html[data-theme] body .composer .optionhelper-choice .choice-option {
+  min-height: 38px; border-radius: 12px; padding: 8px 10px; font-size: 14px;
+  background: transparent;
+}
+html[data-theme] body .composer .optionhelper-choice .choice-option[aria-selected="true"] {
+  background: color-mix(in srgb, var(--color-ink) 10%, transparent); font-weight: 500;
+}
+html[data-theme] body .composer .optionhelper-choice .choice-option:enabled:is(:hover,:focus-visible) {
+  background: color-mix(in srgb, var(--color-ink) 6%, transparent);
+}
+html[data-theme] body .composer .optionhelper-choice .choice-group__label {
+  padding: 8px 10px 4px; font-size: 11px; color: var(--color-muted);
+}
+.composer-depth[hidden], .composer-depth select[hidden], .research-depth-slider[hidden] { display: none !important; }
+.composer-depth { flex-shrink: 0; }
+html body .composer-depth-trigger {
+  width: auto; min-width: 44px; height: 34px; min-height: 34px; padding: 4px 10px;
+  border: 0; border-radius: 17px;
+  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+  color: var(--color-muted); font-size: 12px; font-weight: 400;
+}
+html body .composer-depth-trigger:hover,
+html body .composer-depth-trigger[aria-expanded="true"] { background: color-mix(in srgb, var(--color-ink) 10%, transparent); }
+.research-depth-slider {
+  position: fixed; z-index: 10000; box-sizing: border-box; padding: 12px 14px 10px;
+  transform-origin: 50% 100%; --depth-thumb-size: 28px;
+}
+.research-depth-slider__heading { display: grid; grid-template-columns: 28px 1fr 28px; align-items: center; gap: 12px; }
+.research-depth-slider__reset svg { width: 18px; height: 18px; }
+html body .research-depth-slider__reset {
+  display: grid; place-items: center; width: 28px; min-height: 28px; padding: 4px;
+  border: 0; border-radius: 50%; background: transparent; color: var(--color-muted); cursor: default;
+}
+html body .research-depth-slider__reset:hover { background: color-mix(in srgb, var(--color-ink) 8%, transparent); color: var(--color-ink); }
+.research-depth-slider__value { grid-column: 2; display: grid; overflow: hidden; text-align: center; line-height: 1.5; font-size: 15px; font-weight: 500; color: var(--color-brand-red); }
+.research-depth-slider__value span { grid-area: 1/1; opacity: 0; transform: translateY(35%); transition: opacity 250ms var(--motion-surface-ease,cubic-bezier(.22,1,.36,1)),transform 250ms var(--motion-surface-ease,cubic-bezier(.22,1,.36,1)); }
+.research-depth-slider__value span[data-selected="true"] { opacity: 1; transform: translateY(0); }
+.research-depth-slider__context { margin: 2px 0 14px; text-align: center; font-size: 12px; line-height: 1.4; color: var(--color-muted); }
+.research-depth-slider__track { position: relative; height: 30px; }
+.research-depth-slider__rail { position: absolute; inset: 2px 0; border-radius: 99px; background: color-mix(in srgb, var(--color-ink) 12%, transparent); pointer-events: none; }
+.research-depth-slider__fill { position: absolute; inset: 0 auto 0 0; width: calc(100% * var(--depth-fraction,.5)); border-radius: 99px; background: var(--color-brand-red); transition: width 250ms var(--motion-surface-ease,cubic-bezier(.22,1,.36,1)); }
+.research-depth-slider__stops { position: absolute; inset: 0 12px; display: flex; align-items: center; justify-content: space-between; }
+.research-depth-slider__stops i { width: 4px; height: 4px; border-radius: 50%; background: color-mix(in srgb,var(--color-ink) 35%,transparent); }
+.research-depth-slider__thumb { position: absolute; left: 0; top: -1px; width: calc(100% - 28px); height: 28px; transform: translateX(var(--depth-progress,50%)); transition: transform 250ms var(--motion-surface-ease,cubic-bezier(.22,1,.36,1)); }
+.research-depth-slider__thumb::after { content: ''; display: block; width: 28px; height: 28px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #0003,inset 0 0 0 1px #0000000a; }
+html body .research-depth-slider .research-depth-slider__track input[type="range"] { position: absolute; inset: 0; width: 100%; height: 30px; margin: 0; padding: 0; border: 0; opacity: 0; cursor: grab; touch-action: none; }
+.research-depth-slider__track:has(input:focus-visible) { outline: 2px solid var(--color-muted); outline-offset: 4px; border-radius: 99px; }
+.research-depth-slider[data-dragging] :is(.research-depth-slider__thumb,.research-depth-slider__fill) { transition: none; }
+html body .research-depth-slider[data-dragging] input[type="range"] { cursor: grabbing; }
+.research-depth-slider__labels { display: flex; justify-content: space-between; margin-top: 5px; }
+html body .research-depth-slider__labels button { min-width: 0; min-height: 26px; padding: 0 1px; border: 0; background: transparent; font-size: 11px; font-weight: 400; color: var(--color-muted); cursor: default; transition: color 250ms var(--motion-surface-ease); }
+html body .research-depth-slider__labels button[aria-pressed="true"] { color: var(--color-ink); font-weight: 500; }
+.research-depth-slider :focus-visible { outline: 2px solid var(--color-muted); outline-offset: 3px; }
+.research-depth-slider :disabled { cursor: default; }
+@media(prefers-reduced-motion:reduce) { .research-depth-slider__thumb,.research-depth-slider__fill,.research-depth-slider__value span,html body .research-depth-slider__labels button { transition: none; } }
+@media(prefers-reduced-transparency:reduce) { html[data-theme] body .composer .optionhelper-choice .choice-menu,.research-depth-slider { background: var(--color-surface); backdrop-filter: none; -webkit-backdrop-filter: none; } }
+
+.workflow-header{display:flex;justify-content:space-between;gap:16px;align-items:center}.workflow-header small,.workflow-node small,.workflow-note{color:var(--muted)}.workflow-handoff small{color:var(--ink)}.workflow-scroll{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;contain:paint}.workflow-network{position:relative;min-width:570px;aspect-ratio:800/280}.workflow-network svg{width:100%;height:100%;position:absolute;inset:0;overflow:visible}.workflow-link,.workflow-arrowhead{fill:none;stroke-width:1.15;stroke-linecap:round;stroke-linejoin:round;vector-effect:non-scaling-stroke}.host-link{stroke:var(--color-rule,#666);opacity:.8}.handoff-link{stroke:var(--ink)}.return-link{stroke:light-dark(#946514,#e0b568)}.workflow-pulse{fill:none;filter:drop-shadow(0 0 4px currentColor) drop-shadow(0 0 9px currentColor)}
+.workflow-pulse.handoff-link{color:var(--accent);stroke:currentColor}
+.workflow-pulse.return-link{color:light-dark(#946514,#e0b568);stroke:currentColor}
+.energy-segment{stroke-width:4;stroke-linecap:round;vector-effect:non-scaling-stroke;stroke-dasharray:16 984;stroke-dashoffset:calc(1000 + var(--energy-lag));animation:workflow-energy 2.4s cubic-bezier(.3,0,.2,1) 3 both}
+.energy-head{stroke-width:5.5;stroke:color-mix(in srgb,var(--accent) 25%,var(--surface));stroke-dasharray:11 989}
+.workflow-pulse.return-link .energy-head{stroke:light-dark(#b48630,#ffe1a1)}
+.workflow-oh{position:absolute;left:50%;top:8%;transform:translateX(-50%);width:46px;height:46px;border-radius:50%;display:grid;place-items:center;font-weight:650;background:var(--color-ink,#eee);color:var(--color-surface,#222)}.workflow-node{position:absolute;top:58%;transform:translateX(-50%);background:none;border:0;color:inherit;font:inherit;display:flex;align-items:center;flex-direction:column;gap:8px;width:155px;cursor:default;padding:0}.workflow-node:disabled{cursor:default;opacity:.45}.workflow-mark{height:36px;width:36px;display:grid;place-items:center;border:1px solid var(--color-rule,#555);border-radius:50%;background:var(--color-surface,#222);color:var(--color-muted,#aaa)}.workflow-node strong{font-size:13px;font-weight:600}.workflow-node small{font-size:11px}.workflow-node[data-state=complete] :is(.workflow-mark,small){color:var(--ink)}.workflow-node[data-state=running] small{color:var(--ink)}.workflow-node[data-state=running] .workflow-mark{color:var(--color-brand-red,#d54b5a);border-color:currentColor;box-shadow:0 0 0 5px color-mix(in srgb,var(--color-brand-red,#d54b5a) 10%,transparent)}.workflow-node:focus-visible{outline:2px solid var(--color-brand-red,#d54b5a);outline-offset:5px;border-radius:8px}.workflow-handoffs{padding-top:8px;border-top:1px solid var(--color-rule,#444)}.workflow-handoff{display:flex;gap:14px;align-items:baseline;font-size:12px;margin:8px 0}.workflow-handoff small{font-size:12px}.workflow-note{font-size:12px}@keyframes workflow-energy{0%{stroke-dashoffset:calc(1000 + var(--energy-lag));opacity:0}14%,80%{opacity:var(--energy-alpha)}100%{stroke-dashoffset:var(--energy-lag);opacity:0}}@media(prefers-reduced-motion:reduce){.workflow-pulse{display:none}.energy-segment{animation:none}}@media(max-width:550px){.workflow-header{align-items:flex-start;flex-direction:column;gap:6px}.workflow-handoff{flex-direction:column;gap:4px}}
+
+.receives-energy .workflow-mark{animation:workflow-arrival 2.4s ease-in-out 3}@keyframes workflow-arrival{0%,55%,100%{filter:none}78%{filter:brightness(1.6);box-shadow:0 0 0 7px color-mix(in srgb,var(--accent) 10%,transparent),0 0 22px color-mix(in srgb,var(--accent) 50%,transparent)}}@media(prefers-reduced-motion:reduce){.receives-energy .workflow-mark{animation:none}}
+
+/* Research revisions are expected workflow branches, not execution errors. */
+.process-tool-card [data-state="review"], .process-tool-card [data-state="waiting"] { color: light-dark(#946514,#e0b568); }
+.process-tool-card [data-state="excluded"] { color: var(--color-muted); }
+
+.process-tool-group .process-tool-group__counts { color: var(--color-muted); }
+.process-tool-group__counts [data-failure="true"] { color: var(--color-brand-red); }
+
+/* Composer feedback stays readable without turning the whole composer red. */
+.workspace-shell .composer #workspace-status.notice {
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+html[data-theme="dark"] .workspace-shell .composer #workspace-status.notice--error {
+  background: rgb(255 255 255 / .035);
+  color: #efa7b0;
+  border: 0;
+}
+html[data-theme="dark"] .composer:has(#workspace-status.notice--error:not([hidden])) form:not(.is-generating) {
+  border-color: var(--color-rule);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html[data-theme] .workspace-shell[data-workspace-shell] .assistant-region .composer form { backdrop-filter: none; -webkit-backdrop-filter: none; }
+}

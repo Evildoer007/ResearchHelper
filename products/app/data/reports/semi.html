@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="rh-source-key" content="semi"><meta name="rh-chart-renderer" content="ECharts 6.0.0 offline SVG"><title>AI产业趋势与估值：资本开支与盈利仍在上修</title><style>/*
+THESIS: Complete research content is the artifact; navigation stays out of print.
+OWN-WORLD: Demo paper, ink, red rules, blue comparison charts and system text.
+STORY: Read the conclusion, inspect arguments, check figures and source limits.
+FIRST VIEWPORT: Left chapter directory and a readable report title/conclusion.
+FORM: Extend the user's established Demo reader; no new visual-world selection.
+*/
+:root {
+  --paper:#FFFDFB;
+  --surface:#F5F2EF;
+  --ink:#292427;
+  --muted:#6E6569;
+  --red:#B8102D;
+  --blue:#3D607F;
+  --rule:#DED8D6;
+  --report-size:15px;
+  --directory-width:144px;
+  --content-width:940px;
+  --page-padding:28px;
+  color-scheme:light;
+  font-family:"PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  font-size:var(--report-size);
+  color:var(--ink);
+  background:var(--paper);
+  font-variant-numeric:tabular-nums;
+}
+* { box-sizing:border-box; }
+body { margin:0; padding-left:var(--directory-width); line-height:1.9; }
+a { color:var(--red); }
+:focus-visible { outline:2px solid var(--red); outline-offset:3px; }
+.skip-link { position:absolute; top:8px; left:8px; padding:10px 16px; background:var(--paper); transform:translateY(-150%); z-index:3; }
+.skip-link:focus { transform:none; }
+.report-directory { position:fixed; inset:0 auto 0 0; width:var(--directory-width); padding:24px 8px; background:var(--surface); border-right:1px solid var(--rule); }
+.report-directory nav { display:grid; gap:8px; }
+.report-directory a { display:flex; align-items:center; min-height:44px; padding:8px 12px; font-size:14px; color:var(--muted); text-decoration:none; border-radius:8px; }
+.report-directory a:hover { color:var(--red); background:var(--paper); }
+.report-sheet { max-width:var(--content-width); min-width:0; padding:30px var(--page-padding) 48px; margin:0 auto; overflow-wrap:anywhere; }
+h1,h2,h3,figcaption,caption { font-weight:600; text-wrap:balance; }
+h1 { max-width:26em; margin:0 0 27px; font-size:clamp(25px,3vw,30px); line-height:1.45; letter-spacing:-.025em; }
+h2,.evidence-section-title { margin:36px 0 18px; font-size:21px; line-height:1.55; }
+h3 { margin:26px 0 12px; font-size:18px; line-height:1.65; }
+p { margin:0 0 14px; max-width:75ch; }
+section { scroll-margin-top:28px; }
+.report-summary { border-top:2px solid var(--red); padding-top:18px; }
+.report-summary h2 { margin-top:0; color:var(--red); font-size:15px; }
+.conclusion { font-size:17px; line-height:1.95; font-weight:500; }
+.report-meta { display:flex; flex-wrap:wrap; gap:8px 22px; padding:10px 0 18px; margin:0; border-bottom:1px solid var(--rule); color:var(--muted); font-size:13px; }
+.report-meta dd { margin:0; }
+.logic-block { padding-bottom:14px; border-bottom:1px solid var(--rule); }
+.source-note,.archive-source,.historical-note { color:var(--muted); font-size:13px; line-height:1.85; }
+.source-note { margin-top:14px; }
+.chart-grid,.catch-up-grid,.comparison-grid,.instrument-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:24px; }
+.comparison-grid,.instrument-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.chart-box,.report-chart { min-width:0; margin:0; }
+.chart-box { border-bottom:1px solid var(--rule); padding:12px 0; }
+.report-chart { break-inside:avoid; container-type:inline-size; }
+.report-chart figcaption { font-size:16px; margin:8px 0; line-height:1.5; }
+.report-chart svg { display:block; width:100%; height:auto; max-width:100%; }
+.report-chart .chart-svg-medium,.report-chart .chart-svg-narrow { display:none; }
+@container (max-width:639px) {
+  .report-chart .chart-svg-wide { display:none; }
+  .report-chart .chart-svg-medium { display:block; }
+}
+@container (max-width:399px) {
+  .report-chart .chart-svg-medium { display:none; }
+  .report-chart .chart-svg-narrow { display:block; }
+}
+.chart-values { margin:8px 0 14px; }
+summary { color:var(--muted); font-size:13px; cursor:pointer; min-height:44px; padding:10px 0; }
+summary:hover { color:var(--red); }
+.chart-boundary { color:var(--muted); font-size:13px; line-height:1.8; }
+.report-metric-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:14px 20px; padding:18px 0; margin:18px 0 22px; border-block:1px solid var(--rule); }
+.report-metric span,.report-metric small { display:block; font-size:13px; color:var(--muted); }
+.report-metric strong { display:block; font-size:21px; line-height:1.6; margin:4px 0; font-weight:600; }
+.catch-up-grid { align-items:center; margin:24px 0; }
+.catch-up-steps { display:grid; gap:18px; }
+.catch-up-step strong { display:block; font-size:15px; }
+.catch-up-step span { display:block; color:var(--muted); font-size:14px; margin-top:4px; }
+.comparison-grid,.instrument-grid { margin:24px 0; }
+.report-table-wrap { overflow-x:auto; max-width:100%; margin:0 0 20px; }
+table { width:100%; border-collapse:collapse; font-size:13px; line-height:1.75; }
+caption { text-align:left; padding:2px 0 12px; color:var(--ink); font-size:16px; }
+th,td { padding:9px 10px; text-align:left; vertical-align:top; border-bottom:1px solid var(--rule); }
+th { background:var(--surface); border-top:1px solid var(--rule); font-weight:600; }
+.pe-table td:nth-child(even) { white-space:nowrap; text-align:right; }
+.instrument-card { padding:16px 0; border-top:1px solid var(--rule); }
+.instrument-card strong { font-size:15px; }
+.instrument-card p { font-size:14px; color:var(--muted); margin:10px 0; }
+.instrument-tags { display:flex; flex-wrap:wrap; gap:12px; color:var(--blue); font-size:13px; }
+.archive-table-grid { margin:26px 0; }
+.report-verification { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; margin:20px 0; }
+.report-verification h3 { font-size:15px; color:var(--red); margin:0 0 10px; }
+.report-verification p { font-size:14px; }
+.risk-note { font-size:14px; padding-top:20px; border-top:1px solid var(--rule); }
+.historical-note { padding-top:16px; margin-top:20px; border-top:1px solid var(--rule); }
+.visually-hidden { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media (max-width:1100px) {
+  .chart-grid,.catch-up-grid,.comparison-grid { grid-template-columns:minmax(0,1fr); }
+}
+@media (max-width:800px) {
+  :root { --page-padding:22px; }
+  body { padding:0; }
+  .report-directory { position:sticky; inset:auto; top:0; z-index:2; width:100%; padding:8px; border-right:0; border-bottom:1px solid var(--rule); }
+  .report-directory nav { grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; }
+  .report-directory a { padding:8px 2px; justify-content:center; font-size:13px; line-height:1.5; }
+  .report-sheet { padding-top:28px; }
+  section { scroll-margin-top:84px; }
+}
+@media (max-width:520px) {
+  :root { --page-padding:18px; }
+  .instrument-grid,.report-verification { grid-template-columns:minmax(0,1fr); gap:14px; }
+  .report-metric-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  th,td { padding:8px 6px; }
+}
+@media print {
+  @page { size:A4; margin:15mm; }
+  body { padding:0; font-size:11pt; }
+  .report-directory,.skip-link { display:none; }
+  .report-sheet { max-width:none; margin:0; padding:0; }
+  h1 { font-size:22pt; }
+  h2,.evidence-section-title { font-size:15pt; break-after:avoid; page-break-after:avoid; }
+  h3,caption,figcaption { break-after:avoid; page-break-after:avoid; }
+  p { orphans:3; widows:3; }
+  table { font-size:10pt; }
+  thead { display:table-header-group; }
+  tr,.report-chart,.report-metric,.instrument-card,.report-table-wrap,table { break-inside:avoid; page-break-inside:avoid; }
+  .report-table-wrap { overflow:visible; }
+  /* WebKit can split a grid item's caption from its chart despite break-inside.
+     Normal print flow keeps each complete figure and short source table together. */
+  .chart-grid,.catch-up-grid,.comparison-grid { display:block; }
+  .chart-grid > * + *,.catch-up-grid > * + *,.comparison-grid > * + * { margin-top:24px; }
+  /* An inline block is indivisible in WebKit pagination. Grid items are not:
+     the FY3PE label previously printed on a different page from its value. */
+  .report-metric-strip { display:block; }
+  .report-metric { display:inline-block; vertical-align:top; width:25%; padding:0 14px 14px 0; }
+  .report-chart { container-type:normal; }
+  .report-chart .chart-svg-wide { display:block; }
+  .report-chart .chart-svg-medium,.report-chart .chart-svg-narrow { display:none; }
+  .chart-values summary { display:none; }
+  .chart-values::details-content { content-visibility:visible; }
+  .chart-values > :not(summary) { display:block; }
+  .source-note,.archive-source,.historical-note { font-size:10pt; }
+  * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+}
+</style></head><body>
+<a class="skip-link" href="#reportTitle">跳至报告</a><aside class="report-directory" aria-label="报告目录"><nav><a href="#reportSummary">1.核心结论</a><a href="#reportArguments">2.研究论点</a><a href="#reportEvidenceSection">3.数据与图表</a><a href="#reportVerification">4.口径与风险</a></nav></aside><main class="report-sheet" aria-label="完整历史报告"><h1 id="reportTitle">AI产业趋势与估值：资本开支与盈利仍在上修</h1><section id="reportSummary" class="report-summary"><h2>1.核心结论</h2><p class="conclusion">当前AI产业趋势与估值均未出现见顶信号，处于高估值、高景气、盈利高速上修阶段。从资本开支与FY3市盈率观察，尚未构成系统性泡沫。科创50ETF（588000.SH）与双创50ETF（588330.SH）分别提供集中硬科技暴露与跨板均衡观察口径。</p><dl class="report-meta"><div><dd>研究口径：A股AI设备产业链</dd></div><div><dd>观察标的：科创50ETF（588000.SH）/双创50ETF（588330.SH）</dd></div><div><dd>方向：谨慎看多</dd></div><div><dd>期限：中期</dd></div><div><dd>数据截至2026年7月</dd></div></dl></section><section id="reportArguments"><h2>2.研究论点</h2><section class="logic-block" id="reportLogic1"><h3>2.1 海外资本开支持续超预期，AI盈利闭环已经形成</h3><p>2026年北美云厂商预计资本支出增速达到87%以上，Q1实际扩张100%，进一步验证产业景气加速。2024年至2026年，全年实际或最新预期连续高于年初预期，市场连续三年低估Capex上修斜率，是A股硬件链持续超预期的核心驱动力。</p><p>OpenAI、Anthropic等海外AI模型公司收入呈非线性增长，AI盈利性得到验证，算力投入到模型收入的商业模式形成闭环。原材料只明确标注2026E收入终值，未披露中间年份的精确点位。</p><p class="source-note">数据来源：Wind、国泰海通证券研究；数据截至2026年6至7月。</p></section><section class="logic-block" id="reportLogic2"><h3>2.2 中国AI算力追赶加速，境内资本开支空间较大</h3><p>科技与生产力竞争成为大国博弈的重要方向。按原材料口径，美国人均算力为439EOPS/千人，中国为28EOPS/千人；美国单位GDP算力为280EOPS/十亿美元GDP，中国为54EOPS/十亿美元GDP，差距约为15倍和5倍。</p><p>中国科技企业AI算力投入整体更晚，资本开支占营业收入的比重较低。战略地位提升、低基数带来的弹性以及海外投入到收入闭环的验证，共同构成境内AI资本开支追赶逻辑。</p><p class="source-note">数据来源：Wind、国泰海通证券研究；同时列示美国、中国、德国、日本两组EOPS口径。</p></section><section class="logic-block" id="reportLogic3"><h3>2.3 从历次科技周期看，当前尚未出现估值泡沫</h3><p>2015年互联网行情全面题材化，缺少盈利和海外验证，主要由估值驱动；2020年至2021年新能源周期由估值与盈利共同驱动，并由产业链共振和海外需求拉动；本轮AI产业链具备盈利、订单和海外对标验证。</p><p>原材料列示的当前AI样本FY3市盈率为14.3至19.9倍，低于历史泡沫顶部样本的20.5至55.8倍。该比较支持尚未形成系统性泡沫的判断，但公司名称、预测口径和一致预期来源仍需逐项复核。</p><p class="source-note">数据来源：Wind、国泰海通证券研究；估值口径为FY3市盈率。</p></section></section><section class="report-evidence-section" id="reportEvidenceSection" aria-label="核心证据图表">
+                    <h3 class="evidence-section-title">3.数据与图表</h3>
+                    <p class="visually-hidden" id="valuationChartSummary">北美云厂商资本开支增速连续上修：2024年年初预期18%、全年实际33%，2025年年初预期35%、全年实际68%，2026年年初预期47%、最新预期87%以上，2026年一季度实际扩张100%。</p>
+                    <p class="visually-hidden" id="revenueChartSummary">原材料明确标注2026年预计收入终值：OpenAI为300亿美元，Anthropic为90亿美元；中间年份精确值未披露。</p>
+                    <div class="chart-grid" id="primaryChartGrid"><div class="chart-box"><figure class="report-chart" data-chart="semi-valuationChart"><figcaption>北美云厂商Capex增速</figcaption><svg class="chart-svg chart-svg-wide" role="img" aria-label="北美云厂商Capex增速" viewBox="0 0 760 350" width="760" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 760 350">
+<rect width="760" height="350" x="0" y="0" fill="none"></rect>
+<path d="M81.1 271.5L736 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-wide-cls-0"></path>
+<path d="M81.1 229.5L736 229.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-wide-cls-0"></path>
+<path d="M81.1 187.5L736 187.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-wide-cls-0"></path>
+<path d="M81.1 145.5L736 145.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-wide-cls-0"></path>
+<path d="M81.1 104.5L736 104.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-wide-cls-0"></path>
+<path d="M81.1 62.5L736 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-wide-cls-0"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(81.12 42)" fill="#292427">%</text>
+<path d="M81.1 271.5L736 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-semi-valuationChart-wide-cls-0"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 271)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 229.2)" fill="#54555a">20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 187.4)" fill="#54555a">40%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 145.6)" fill="#54555a">60%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 103.8)" fill="#54555a">80%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 62)" fill="#54555a">100%</text>
+<path d="M-17.9 0l35.8 0l0 21l-35.8 0Z" transform="translate(190.2667 279)" fill="none" pointer-events="visible" class="rh-semi-valuationChart-wide-cls-0"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(190.2667 279)" fill="#54555a">2024</text>
+<path d="M-17.9 0l35.8 0l0 21l-35.8 0Z" transform="translate(408.56 279)" fill="none" pointer-events="visible" class="rh-semi-valuationChart-wide-cls-0"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(408.56 279)" fill="#54555a">2025</text>
+<path d="M-23.3 0l46.6 0l0 21l-46.6 0Z" transform="translate(626.8533 279)" fill="none" pointer-events="visible" class="rh-semi-valuationChart-wide-cls-0"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(626.8533 279)" fill="#54555a">2026E</text>
+<path d="M129.5 271l38 0l0 -37.6l-38 0Z" fill="url(#rh-semi-valuationChart-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-wide-cls-1"></path>
+<path d="M347.8 271l38 0l0 -73.1l-38 0Z" fill="url(#rh-semi-valuationChart-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-wide-cls-1"></path>
+<path d="M566.1 271l38 0l0 -98.2l-38 0Z" fill="url(#rh-semi-valuationChart-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-wide-cls-1"></path>
+<path d="M171.3 271l38 0l0 -69l-38 0Z" fill="url(#rh-semi-valuationChart-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-wide-cls-2"></path>
+<path d="M389.6 271l38 0l0 -142.1l-38 0Z" fill="url(#rh-semi-valuationChart-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-wide-cls-2"></path>
+<path d="M607.9 271l38 0l0 -181.8l-38 0Z" fill="url(#rh-semi-valuationChart-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-wide-cls-2"></path>
+<path d="M649.7 271l38 0l0 -209l-38 0Z" fill="url(#rh-semi-valuationChart-wide-g2)" ecmeta_series_index="2" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-wide-cls-3"></path>
+<path d="M-5 -5l332.9 0l0 26l-332.9 0Z" transform="translate(5 10)" fill="rgb(0,0,0)" fill-opacity="0" stroke="#b7b9be" stroke-width="0" class="rh-semi-valuationChart-wide-cls-0"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(5 14)" fill="url(#rh-semi-valuationChart-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-valuationChart-wide-cls-0"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(5 14)" fill="#6E6569">年初预期</text>
+<path d="M0 -4l83 0l0 16l-83 0Z" transform="translate(5 14)" fill="none" pointer-events="visible" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" class="rh-semi-valuationChart-wide-cls-4"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(96 14)" fill="url(#rh-semi-valuationChart-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-valuationChart-wide-cls-0"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(96 14)" fill="#6E6569">全年实际/最新预期</text>
+<path d="M0 -4l151.5 0l0 16l-151.5 0Z" transform="translate(96 14)" fill="none" pointer-events="visible" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" class="rh-semi-valuationChart-wide-cls-4"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(255.48 14)" fill="url(#rh-semi-valuationChart-wide-g2)" ecmeta_series_index="2" ecmeta_data_index="2" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-valuationChart-wide-cls-0"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(255.48 14)" fill="#6E6569">Q1实际</text>
+<path d="M0 -4l72.4 0l0 16l-72.4 0Z" transform="translate(255.48 14)" fill="none" pointer-events="visible" ecmeta_series_index="2" ecmeta_data_index="2" ecmeta_ssr_type="legend" class="rh-semi-valuationChart-wide-cls-4"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-valuationChart-wide-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-valuationChart-wide-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-valuationChart-wide-g2">
+<stop offset="0%" stop-color="#839DB5"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-semi-valuationChart-wide-cls-0:hover {
+pointer-events:none;
+}
+.rh-semi-valuationChart-wide-cls-1:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-valuationChart-wide-cls-2:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-valuationChart-wide-cls-3:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-valuationChart-wide-cls-4:hover {
+cursor:pointer;
+fill:rgba(0,0,0,0);
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-medium" role="img" aria-label="北美云厂商Capex增速" viewBox="0 0 480 350" width="480" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 480 350">
+<rect width="480" height="350" x="0" y="0" fill="none"></rect>
+<path d="M81.1 271.5L456 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-medium-cls-5"></path>
+<path d="M81.1 229.5L456 229.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-medium-cls-5"></path>
+<path d="M81.1 187.5L456 187.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-medium-cls-5"></path>
+<path d="M81.1 145.5L456 145.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-medium-cls-5"></path>
+<path d="M81.1 104.5L456 104.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-medium-cls-5"></path>
+<path d="M81.1 62.5L456 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-medium-cls-5"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(81.12 42)" fill="#292427">%</text>
+<path d="M81.1 271.5L456 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-semi-valuationChart-medium-cls-5"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 271)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 229.2)" fill="#54555a">20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 187.4)" fill="#54555a">40%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 145.6)" fill="#54555a">60%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 103.8)" fill="#54555a">80%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.12 62)" fill="#54555a">100%</text>
+<path d="M-17.9 0l35.8 0l0 21l-35.8 0Z" transform="translate(143.6 279)" fill="none" pointer-events="visible" class="rh-semi-valuationChart-medium-cls-5"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(143.6 279)" fill="#54555a">2024</text>
+<path d="M-17.9 0l35.8 0l0 21l-35.8 0Z" transform="translate(268.56 279)" fill="none" pointer-events="visible" class="rh-semi-valuationChart-medium-cls-5"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(268.56 279)" fill="#54555a">2025</text>
+<path d="M-23.3 0l46.6 0l0 21l-46.6 0Z" transform="translate(393.52 279)" fill="none" pointer-events="visible" class="rh-semi-valuationChart-medium-cls-5"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(393.52 279)" fill="#54555a">2026E</text>
+<path d="M95.5 271l30.1 0l0 -37.6l-30.1 0Z" fill="url(#rh-semi-valuationChart-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-medium-cls-6"></path>
+<path d="M220.5 271l30.1 0l0 -73.1l-30.1 0Z" fill="url(#rh-semi-valuationChart-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-medium-cls-6"></path>
+<path d="M345.4 271l30.1 0l0 -98.2l-30.1 0Z" fill="url(#rh-semi-valuationChart-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-medium-cls-6"></path>
+<path d="M128.6 271l30.1 0l0 -69l-30.1 0Z" fill="url(#rh-semi-valuationChart-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-medium-cls-7"></path>
+<path d="M253.5 271l30.1 0l0 -142.1l-30.1 0Z" fill="url(#rh-semi-valuationChart-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-medium-cls-7"></path>
+<path d="M378.5 271l30.1 0l0 -181.8l-30.1 0Z" fill="url(#rh-semi-valuationChart-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-medium-cls-7"></path>
+<path d="M411.6 271l30.1 0l0 -209l-30.1 0Z" fill="url(#rh-semi-valuationChart-medium-g2)" ecmeta_series_index="2" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-medium-cls-8"></path>
+<path d="M-5 -5l332.9 0l0 26l-332.9 0Z" transform="translate(5 10)" fill="rgb(0,0,0)" fill-opacity="0" stroke="#b7b9be" stroke-width="0" class="rh-semi-valuationChart-medium-cls-5"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(5 14)" fill="url(#rh-semi-valuationChart-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-valuationChart-medium-cls-5"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(5 14)" fill="#6E6569">年初预期</text>
+<path d="M0 -4l83 0l0 16l-83 0Z" transform="translate(5 14)" fill="none" pointer-events="visible" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" class="rh-semi-valuationChart-medium-cls-9"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(96 14)" fill="url(#rh-semi-valuationChart-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-valuationChart-medium-cls-5"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(96 14)" fill="#6E6569">全年实际/最新预期</text>
+<path d="M0 -4l151.5 0l0 16l-151.5 0Z" transform="translate(96 14)" fill="none" pointer-events="visible" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" class="rh-semi-valuationChart-medium-cls-9"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(255.48 14)" fill="url(#rh-semi-valuationChart-medium-g2)" ecmeta_series_index="2" ecmeta_data_index="2" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-valuationChart-medium-cls-5"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(255.48 14)" fill="#6E6569">Q1实际</text>
+<path d="M0 -4l72.4 0l0 16l-72.4 0Z" transform="translate(255.48 14)" fill="none" pointer-events="visible" ecmeta_series_index="2" ecmeta_data_index="2" ecmeta_ssr_type="legend" class="rh-semi-valuationChart-medium-cls-9"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-valuationChart-medium-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-valuationChart-medium-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-valuationChart-medium-g2">
+<stop offset="0%" stop-color="#839DB5"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-semi-valuationChart-medium-cls-5:hover {
+pointer-events:none;
+}
+.rh-semi-valuationChart-medium-cls-6:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-valuationChart-medium-cls-7:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-valuationChart-medium-cls-8:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-valuationChart-medium-cls-9:hover {
+cursor:pointer;
+fill:rgba(0,0,0,0);
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-narrow" role="img" aria-label="北美云厂商Capex增速" viewBox="0 0 320 380" width="320" height="380" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 320 380">
+<rect width="320" height="380" x="0" y="0" fill="none"></rect>
+<path d="M49.4 256.5L312 256.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<path d="M49.4 220.5L312 220.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<path d="M49.4 185.5L312 185.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<path d="M49.4 149.5L312 149.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<path d="M49.4 113.5L312 113.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<path d="M49.4 78.5L312 78.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="-6.5" transform="translate(49.41 58)" fill="#292427">%</text>
+<path d="M49.4 256.5L312 256.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(41.41 256)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(41.41 220.4)" fill="#54555a">20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(41.41 184.8)" fill="#54555a">40%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(41.41 149.2)" fill="#54555a">60%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(41.41 113.6)" fill="#54555a">80%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(41.41 78)" fill="#54555a">100%</text>
+<path d="M-10.9 0l21.8 0l0 36l-21.8 0Z" transform="translate(93.175 264)" fill="none" pointer-events="visible" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(93.175 264)" fill="#54555a">202</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(93.175 264)" fill="#54555a">4</text>
+<path d="M-10.9 0l21.8 0l0 36l-21.8 0Z" transform="translate(180.705 264)" fill="none" pointer-events="visible" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(180.705 264)" fill="#54555a">202</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(180.705 264)" fill="#54555a">5</text>
+<path d="M-10.9 0l21.8 0l0 36l-21.8 0Z" transform="translate(268.235 264)" fill="none" pointer-events="visible" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(268.235 264)" fill="#54555a">202</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(268.235 264)" fill="#54555a">6E</text>
+<path d="M59.5 256l21.1 0l0 -32l-21.1 0Z" fill="url(#rh-semi-valuationChart-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-narrow-cls-11"></path>
+<path d="M147 256l21.1 0l0 -62.3l-21.1 0Z" fill="url(#rh-semi-valuationChart-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-narrow-cls-11"></path>
+<path d="M234.5 256l21.1 0l0 -83.7l-21.1 0Z" fill="url(#rh-semi-valuationChart-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-narrow-cls-11"></path>
+<path d="M82.6 256l21.1 0l0 -58.7l-21.1 0Z" fill="url(#rh-semi-valuationChart-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-narrow-cls-12"></path>
+<path d="M170.2 256l21.1 0l0 -121l-21.1 0Z" fill="url(#rh-semi-valuationChart-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-narrow-cls-12"></path>
+<path d="M257.7 256l21.1 0l0 -154.9l-21.1 0Z" fill="url(#rh-semi-valuationChart-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-narrow-cls-12"></path>
+<path d="M280.9 256l21.1 0l0 -178l-21.1 0Z" fill="url(#rh-semi-valuationChart-narrow-g2)" ecmeta_series_index="2" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-valuationChart-narrow-cls-13"></path>
+<path d="M-5 -5l286.1 0l0 23l-286.1 0Z" transform="translate(5 10)" fill="rgb(0,0,0)" fill-opacity="0" stroke="#b7b9be" stroke-width="0" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(5 12.5)" fill="url(#rh-semi-valuationChart-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:13px;font-family:Arial;" x="19" y="4" transform="translate(5 12.5)" fill="#6E6569">年初预期</text>
+<path d="M0 -2.5l71 0l0 13l-71 0Z" transform="translate(5 12.5)" fill="none" pointer-events="visible" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" class="rh-semi-valuationChart-narrow-cls-14"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(84 12.5)" fill="url(#rh-semi-valuationChart-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:13px;font-family:Arial;" x="19" y="4" transform="translate(84 12.5)" fill="#6E6569">全年实际/最新预期</text>
+<path d="M0 -2.5l126.6 0l0 13l-126.6 0Z" transform="translate(84 12.5)" fill="none" pointer-events="visible" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" class="rh-semi-valuationChart-narrow-cls-14"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(218.64 12.5)" fill="url(#rh-semi-valuationChart-narrow-g2)" ecmeta_series_index="2" ecmeta_data_index="2" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-valuationChart-narrow-cls-10"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:13px;font-family:Arial;" x="19" y="4" transform="translate(218.64 12.5)" fill="#6E6569">Q1实际</text>
+<path d="M0 -2.5l62.4 0l0 13l-62.4 0Z" transform="translate(218.64 12.5)" fill="none" pointer-events="visible" ecmeta_series_index="2" ecmeta_data_index="2" ecmeta_ssr_type="legend" class="rh-semi-valuationChart-narrow-cls-14"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-valuationChart-narrow-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-valuationChart-narrow-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-valuationChart-narrow-g2">
+<stop offset="0%" stop-color="#839DB5"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-semi-valuationChart-narrow-cls-10:hover {
+pointer-events:none;
+}
+.rh-semi-valuationChart-narrow-cls-11:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-valuationChart-narrow-cls-12:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-valuationChart-narrow-cls-13:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-valuationChart-narrow-cls-14:hover {
+cursor:pointer;
+fill:rgba(0,0,0,0);
+}
+
+]]>
+
+</style>
+</svg><details class="chart-values"><summary>查看图表数值</summary><div class="report-table-wrap" tabindex="0" role="region" aria-label="北美云厂商Capex增速"><table><thead><tr><th scope="col">观察对象</th><th scope="col">年初预期（%）</th><th scope="col">全年实际/最新预期（%）</th><th scope="col">Q1实际（%）</th></tr></thead><tbody><tr><td>2024</td><td>18</td><td>33</td><td>NA</td></tr><tr><td>2025</td><td>35</td><td>68</td><td>NA</td></tr><tr><td>2026E</td><td>47</td><td>87</td><td>100</td></tr></tbody></table></div></details></figure></div><div class="chart-box"><figure class="report-chart" data-chart="semi-revenueChart"><figcaption>2026E模型公司收入</figcaption><svg class="chart-svg chart-svg-wide" role="img" aria-label="2026E模型公司收入" viewBox="0 0 760 350" width="760" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 760 350">
+<rect width="760" height="350" x="0" y="0" fill="none"></rect>
+<path d="M57.9 271.5L736 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-wide-cls-15"></path>
+<path d="M57.9 236.5L736 236.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-wide-cls-15"></path>
+<path d="M57.9 201.5L736 201.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-wide-cls-15"></path>
+<path d="M57.9 166.5L736 166.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-wide-cls-15"></path>
+<path d="M57.9 131.5L736 131.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-wide-cls-15"></path>
+<path d="M57.9 97.5L736 97.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-wide-cls-15"></path>
+<path d="M57.9 62.5L736 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-wide-cls-15"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(57.92 42)" fill="#292427">十亿美元</text>
+<path d="M57.9 271.5L736 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-semi-revenueChart-wide-cls-15"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 271)" fill="#54555a">0</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 236.1667)" fill="#54555a">5</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 201.3333)" fill="#54555a">10</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 166.5)" fill="#54555a">15</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 131.6667)" fill="#54555a">20</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 96.8333)" fill="#54555a">25</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 62)" fill="#54555a">30</text>
+<path d="M-27.3 0l54.6 0l0 21l-54.6 0Z" transform="translate(227.44 279)" fill="none" pointer-events="visible" class="rh-semi-revenueChart-wide-cls-15"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(227.44 279)" fill="#54555a">OpenAI</text>
+<path d="M-33.9 0l67.8 0l0 21l-67.8 0Z" transform="translate(566.48 279)" fill="none" pointer-events="visible" class="rh-semi-revenueChart-wide-cls-15"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(566.48 279)" fill="#54555a">Anthropic</text>
+<path d="M208.4 271l38 0l0 -209l-38 0Z" fill="url(#rh-semi-revenueChart-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-revenueChart-wide-cls-16"></path>
+<path d="M547.5 271l38 0l0 -62.7l-38 0Z" fill="url(#rh-semi-revenueChart-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-revenueChart-wide-cls-16"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-revenueChart-wide-g0">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-semi-revenueChart-wide-cls-15:hover {
+pointer-events:none;
+}
+.rh-semi-revenueChart-wide-cls-16:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-medium" role="img" aria-label="2026E模型公司收入" viewBox="0 0 480 350" width="480" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 480 350">
+<rect width="480" height="350" x="0" y="0" fill="none"></rect>
+<path d="M57.9 220.5L456 220.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-medium-cls-17"></path>
+<path d="M57.9 193.5L456 193.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-medium-cls-17"></path>
+<path d="M57.9 167.5L456 167.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-medium-cls-17"></path>
+<path d="M57.9 141.5L456 141.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-medium-cls-17"></path>
+<path d="M57.9 114.5L456 114.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-medium-cls-17"></path>
+<path d="M57.9 88.5L456 88.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-medium-cls-17"></path>
+<path d="M57.9 62.5L456 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-medium-cls-17"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(57.92 42)" fill="#292427">十亿美元</text>
+<path d="M57.9 220.5L456 220.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-semi-revenueChart-medium-cls-17"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 220)" fill="#54555a">0</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 193.6667)" fill="#54555a">5</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 167.3333)" fill="#54555a">10</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 141)" fill="#54555a">15</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 114.6667)" fill="#54555a">20</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 88.3333)" fill="#54555a">25</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(49.92 62)" fill="#54555a">30</text>
+<path d="M-27.3 0l54.6 0l0 21l-54.6 0Z" transform="translate(157.44 228)" fill="none" pointer-events="visible" class="rh-semi-revenueChart-medium-cls-17"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(157.44 228)" fill="#54555a">OpenAI</text>
+<path d="M-23.7 0l47.4 0l0 42l-47.4 0Z" transform="translate(356.48 228)" fill="none" pointer-events="visible" class="rh-semi-revenueChart-medium-cls-17"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(356.48 228)" fill="#54555a">Anthro</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="31.5" transform="translate(356.48 228)" fill="#54555a">pic</text>
+<path d="M138.4 220l38 0l0 -158l-38 0Z" fill="url(#rh-semi-revenueChart-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-revenueChart-medium-cls-18"></path>
+<path d="M337.5 220l38 0l0 -47.4l-38 0Z" fill="url(#rh-semi-revenueChart-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-revenueChart-medium-cls-18"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-revenueChart-medium-g0">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-semi-revenueChart-medium-cls-17:hover {
+pointer-events:none;
+}
+.rh-semi-revenueChart-medium-cls-18:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-narrow" role="img" aria-label="2026E模型公司收入" viewBox="0 0 320 380" width="320" height="380" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 320 380">
+<rect width="320" height="380" x="0" y="0" fill="none"></rect>
+<path d="M30.6 238.5L312 238.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-narrow-cls-19"></path>
+<path d="M30.6 211.5L312 211.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-narrow-cls-19"></path>
+<path d="M30.6 184.5L312 184.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-narrow-cls-19"></path>
+<path d="M30.6 158.5L312 158.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-narrow-cls-19"></path>
+<path d="M30.6 131.5L312 131.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-narrow-cls-19"></path>
+<path d="M30.6 104.5L312 104.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-narrow-cls-19"></path>
+<path d="M30.6 78.5L312 78.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-revenueChart-narrow-cls-19"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="-6.5" transform="translate(30.56 58)" fill="#292427">十亿美元</text>
+<path d="M30.6 238.5L312 238.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-semi-revenueChart-narrow-cls-19"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(22.56 238)" fill="#54555a">0</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(22.56 211.3333)" fill="#54555a">5</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(22.56 184.6667)" fill="#54555a">10</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(22.56 158)" fill="#54555a">15</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(22.56 131.3333)" fill="#54555a">20</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(22.56 104.6667)" fill="#54555a">25</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(22.56 78)" fill="#54555a">30</text>
+<path d="M-12.4 0l24.7 0l0 36l-24.7 0Z" transform="translate(100.92 246)" fill="none" pointer-events="visible" class="rh-semi-revenueChart-narrow-cls-19"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(100.92 246)" fill="#54555a">Ope</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(100.92 246)" fill="#54555a">nAI</text>
+<path d="M-9.8 0l19.6 0l0 54l-19.6 0Z" transform="translate(241.64 246)" fill="none" pointer-events="visible" class="rh-semi-revenueChart-narrow-cls-19"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(241.64 246)" fill="#54555a">Ant</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(241.64 246)" fill="#54555a">hro</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="45" transform="translate(241.64 246)" fill="#54555a">pic</text>
+<path d="M81.9 238l38 0l0 -160l-38 0Z" fill="url(#rh-semi-revenueChart-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-revenueChart-narrow-cls-20"></path>
+<path d="M222.6 238l38 0l0 -48l-38 0Z" fill="url(#rh-semi-revenueChart-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-revenueChart-narrow-cls-20"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-revenueChart-narrow-g0">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-semi-revenueChart-narrow-cls-19:hover {
+pointer-events:none;
+}
+.rh-semi-revenueChart-narrow-cls-20:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><details class="chart-values"><summary>查看图表数值</summary><div class="report-table-wrap" tabindex="0" role="region" aria-label="2026E模型公司收入"><table><thead><tr><th scope="col">观察对象</th><th scope="col">预计收入（十亿美元）</th></tr></thead><tbody><tr><td>OpenAI</td><td>30</td></tr><tr><td>Anthropic</td><td>9</td></tr></tbody></table></div></details></figure></div></div>
+                    <div class="report-metric-strip" id="primaryMetricStrip"><div class="report-metric"><span id="reportMetricLabel1">云厂商Capex增速</span><strong id="reportMetricValue1">87%+</strong><small id="reportMetricNote1">2026年最新预期</small></div><div class="report-metric"><span id="reportMetricLabel2">一季度实际增速</span><strong id="reportMetricValue2">100%</strong><small id="reportMetricNote2">高于年初预期</small></div><div class="report-metric"><span id="reportMetricLabel3">人均AI算力差</span><strong id="reportMetricValue3">约15倍</strong><small id="reportMetricNote3">美国相对中国</small></div></div>
+                    <div class="catch-up-grid">
+                      <div class="chart-box"><p class="visually-hidden" id="computeChartSummary">人均AI算力口径下，美国439EOPS、中国28EOPS、德国33EOPS、日本19EOPS；单位GDP算力口径下分别为280、54、22、17EOPS。</p><figure class="report-chart" data-chart="semi-computeChart"><figcaption>中美德日AI算力基础设施</figcaption><svg class="chart-svg chart-svg-wide" role="img" aria-label="中美德日AI算力基础设施" viewBox="0 0 760 350" width="760" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 760 350">
+<rect width="760" height="350" x="0" y="0" fill="none"></rect>
+<path d="M66.9 271.5L736 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-wide-cls-21"></path>
+<path d="M66.9 229.5L736 229.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-wide-cls-21"></path>
+<path d="M66.9 187.5L736 187.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-wide-cls-21"></path>
+<path d="M66.9 145.5L736 145.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-wide-cls-21"></path>
+<path d="M66.9 104.5L736 104.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-wide-cls-21"></path>
+<path d="M66.9 62.5L736 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-wide-cls-21"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(66.88 42)" fill="#292427">EOPS</text>
+<path d="M66.9 271.5L736 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-semi-computeChart-wide-cls-21"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 271)" fill="#54555a">0</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 229.2)" fill="#54555a">100</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 187.4)" fill="#54555a">200</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 145.6)" fill="#54555a">300</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 103.8)" fill="#54555a">400</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 62)" fill="#54555a">500</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(150.52 279)" fill="none" pointer-events="visible" class="rh-semi-computeChart-wide-cls-21"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(150.52 279)" fill="#54555a">美国</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(317.8 279)" fill="none" pointer-events="visible" class="rh-semi-computeChart-wide-cls-21"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(317.8 279)" fill="#54555a">中国</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(485.08 279)" fill="none" pointer-events="visible" class="rh-semi-computeChart-wide-cls-21"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(485.08 279)" fill="#54555a">德国</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(652.36 279)" fill="none" pointer-events="visible" class="rh-semi-computeChart-wide-cls-21"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(652.36 279)" fill="#54555a">日本</text>
+<path d="M110.6 271l38 0l0 -183.5l-38 0Z" fill="url(#rh-semi-computeChart-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-computeChart-wide-cls-22"></path>
+<path d="M277.9 271l38 0l0 -11.7l-38 0Z" fill="url(#rh-semi-computeChart-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-computeChart-wide-cls-22"></path>
+<path d="M445.2 271l38 0l0 -13.8l-38 0Z" fill="url(#rh-semi-computeChart-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-computeChart-wide-cls-22"></path>
+<path d="M612.5 271l38 0l0 -7.9l-38 0Z" fill="url(#rh-semi-computeChart-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-semi-computeChart-wide-cls-22"></path>
+<path d="M152.4 271l38 0l0 -117l-38 0Z" fill="url(#rh-semi-computeChart-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-computeChart-wide-cls-23"></path>
+<path d="M319.7 271l38 0l0 -22.6l-38 0Z" fill="url(#rh-semi-computeChart-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-computeChart-wide-cls-23"></path>
+<path d="M487 271l38 0l0 -9.2l-38 0Z" fill="url(#rh-semi-computeChart-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-computeChart-wide-cls-23"></path>
+<path d="M654.3 271l38 0l0 -7.1l-38 0Z" fill="url(#rh-semi-computeChart-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-semi-computeChart-wide-cls-23"></path>
+<path d="M-5 -5l259.7 0l0 26l-259.7 0Z" transform="translate(5 10)" fill="rgb(0,0,0)" fill-opacity="0" stroke="#b7b9be" stroke-width="0" class="rh-semi-computeChart-wide-cls-21"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(5 14)" fill="url(#rh-semi-computeChart-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-computeChart-wide-cls-21"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(5 14)" fill="#6E6569">人均/千人</text>
+<path d="M0 -4l87.5 0l0 16l-87.5 0Z" transform="translate(5 14)" fill="none" pointer-events="visible" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" class="rh-semi-computeChart-wide-cls-24"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(100.48 14)" fill="url(#rh-semi-computeChart-wide-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-computeChart-wide-cls-21"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(100.48 14)" fill="#6E6569">产均/十亿美元GDP</text>
+<path d="M0 -4l154.2 0l0 16l-154.2 0Z" transform="translate(100.48 14)" fill="none" pointer-events="visible" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" class="rh-semi-computeChart-wide-cls-24"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-computeChart-wide-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-computeChart-wide-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-semi-computeChart-wide-cls-21:hover {
+pointer-events:none;
+}
+.rh-semi-computeChart-wide-cls-22:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-computeChart-wide-cls-23:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-computeChart-wide-cls-24:hover {
+cursor:pointer;
+fill:rgba(0,0,0,0);
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-medium" role="img" aria-label="中美德日AI算力基础设施" viewBox="0 0 480 350" width="480" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 480 350">
+<rect width="480" height="350" x="0" y="0" fill="none"></rect>
+<path d="M66.9 271.5L456 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-medium-cls-25"></path>
+<path d="M66.9 229.5L456 229.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-medium-cls-25"></path>
+<path d="M66.9 187.5L456 187.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-medium-cls-25"></path>
+<path d="M66.9 145.5L456 145.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-medium-cls-25"></path>
+<path d="M66.9 104.5L456 104.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-medium-cls-25"></path>
+<path d="M66.9 62.5L456 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-medium-cls-25"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(66.88 42)" fill="#292427">EOPS</text>
+<path d="M66.9 271.5L456 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-semi-computeChart-medium-cls-25"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 271)" fill="#54555a">0</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 229.2)" fill="#54555a">100</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 187.4)" fill="#54555a">200</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 145.6)" fill="#54555a">300</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 103.8)" fill="#54555a">400</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(58.88 62)" fill="#54555a">500</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(115.52 279)" fill="none" pointer-events="visible" class="rh-semi-computeChart-medium-cls-25"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(115.52 279)" fill="#54555a">美国</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(212.8 279)" fill="none" pointer-events="visible" class="rh-semi-computeChart-medium-cls-25"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(212.8 279)" fill="#54555a">中国</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(310.08 279)" fill="none" pointer-events="visible" class="rh-semi-computeChart-medium-cls-25"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(310.08 279)" fill="#54555a">德国</text>
+<path d="M-16 0l32 0l0 21l-32 0Z" transform="translate(407.36 279)" fill="none" pointer-events="visible" class="rh-semi-computeChart-medium-cls-25"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(407.36 279)" fill="#54555a">日本</text>
+<path d="M80 271l33.8 0l0 -183.5l-33.8 0Z" fill="url(#rh-semi-computeChart-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-computeChart-medium-cls-26"></path>
+<path d="M177.3 271l33.8 0l0 -11.7l-33.8 0Z" fill="url(#rh-semi-computeChart-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-computeChart-medium-cls-26"></path>
+<path d="M274.6 271l33.8 0l0 -13.8l-33.8 0Z" fill="url(#rh-semi-computeChart-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-computeChart-medium-cls-26"></path>
+<path d="M371.9 271l33.8 0l0 -7.9l-33.8 0Z" fill="url(#rh-semi-computeChart-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-semi-computeChart-medium-cls-26"></path>
+<path d="M117.2 271l33.8 0l0 -117l-33.8 0Z" fill="url(#rh-semi-computeChart-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-computeChart-medium-cls-27"></path>
+<path d="M214.5 271l33.8 0l0 -22.6l-33.8 0Z" fill="url(#rh-semi-computeChart-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-computeChart-medium-cls-27"></path>
+<path d="M311.8 271l33.8 0l0 -9.2l-33.8 0Z" fill="url(#rh-semi-computeChart-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-computeChart-medium-cls-27"></path>
+<path d="M409.1 271l33.8 0l0 -7.1l-33.8 0Z" fill="url(#rh-semi-computeChart-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-semi-computeChart-medium-cls-27"></path>
+<path d="M-5 -5l259.7 0l0 26l-259.7 0Z" transform="translate(5 10)" fill="rgb(0,0,0)" fill-opacity="0" stroke="#b7b9be" stroke-width="0" class="rh-semi-computeChart-medium-cls-25"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(5 14)" fill="url(#rh-semi-computeChart-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-computeChart-medium-cls-25"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(5 14)" fill="#6E6569">人均/千人</text>
+<path d="M0 -4l87.5 0l0 16l-87.5 0Z" transform="translate(5 14)" fill="none" pointer-events="visible" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" class="rh-semi-computeChart-medium-cls-28"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(100.48 14)" fill="url(#rh-semi-computeChart-medium-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-computeChart-medium-cls-25"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:16px;font-family:Arial;" x="19" y="4" transform="translate(100.48 14)" fill="#6E6569">产均/十亿美元GDP</text>
+<path d="M0 -4l154.2 0l0 16l-154.2 0Z" transform="translate(100.48 14)" fill="none" pointer-events="visible" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" class="rh-semi-computeChart-medium-cls-28"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-computeChart-medium-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-computeChart-medium-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-semi-computeChart-medium-cls-25:hover {
+pointer-events:none;
+}
+.rh-semi-computeChart-medium-cls-26:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-computeChart-medium-cls-27:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-computeChart-medium-cls-28:hover {
+cursor:pointer;
+fill:rgba(0,0,0,0);
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-narrow" role="img" aria-label="中美德日AI算力基础设施" viewBox="0 0 320 380" width="320" height="380" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 320 380">
+<rect width="320" height="380" x="0" y="0" fill="none"></rect>
+<path d="M37.8 304.5L312 304.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-narrow-cls-29"></path>
+<path d="M37.8 259.5L312 259.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-narrow-cls-29"></path>
+<path d="M37.8 213.5L312 213.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-narrow-cls-29"></path>
+<path d="M37.8 168.5L312 168.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-narrow-cls-29"></path>
+<path d="M37.8 123.5L312 123.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-narrow-cls-29"></path>
+<path d="M37.8 78.5L312 78.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-semi-computeChart-narrow-cls-29"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="-6.5" transform="translate(37.84 58)" fill="#292427">EOPS</text>
+<path d="M37.8 304.5L312 304.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-semi-computeChart-narrow-cls-29"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(29.84 304)" fill="#54555a">0</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(29.84 258.8)" fill="#54555a">100</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(29.84 213.6)" fill="#54555a">200</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(29.84 168.4)" fill="#54555a">300</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(29.84 123.2)" fill="#54555a">400</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(29.84 78)" fill="#54555a">500</text>
+<path d="M-13 0l26 0l0 18l-26 0Z" transform="translate(72.11 312)" fill="none" pointer-events="visible" class="rh-semi-computeChart-narrow-cls-29"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(72.11 312)" fill="#54555a">美国</text>
+<path d="M-13 0l26 0l0 18l-26 0Z" transform="translate(140.65 312)" fill="none" pointer-events="visible" class="rh-semi-computeChart-narrow-cls-29"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(140.65 312)" fill="#54555a">中国</text>
+<path d="M-13 0l26 0l0 18l-26 0Z" transform="translate(209.19 312)" fill="none" pointer-events="visible" class="rh-semi-computeChart-narrow-cls-29"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(209.19 312)" fill="#54555a">德国</text>
+<path d="M-13 0l26 0l0 18l-26 0Z" transform="translate(277.73 312)" fill="none" pointer-events="visible" class="rh-semi-computeChart-narrow-cls-29"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(277.73 312)" fill="#54555a">日本</text>
+<path d="M47.1 304l23.8 0l0 -198.4l-23.8 0Z" fill="url(#rh-semi-computeChart-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-computeChart-narrow-cls-30"></path>
+<path d="M115.6 304l23.8 0l0 -12.7l-23.8 0Z" fill="url(#rh-semi-computeChart-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-computeChart-narrow-cls-30"></path>
+<path d="M184.2 304l23.8 0l0 -14.9l-23.8 0Z" fill="url(#rh-semi-computeChart-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-computeChart-narrow-cls-30"></path>
+<path d="M252.7 304l23.8 0l0 -8.6l-23.8 0Z" fill="url(#rh-semi-computeChart-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-semi-computeChart-narrow-cls-30"></path>
+<path d="M73.3 304l23.8 0l0 -126.6l-23.8 0Z" fill="url(#rh-semi-computeChart-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-semi-computeChart-narrow-cls-31"></path>
+<path d="M141.8 304l23.8 0l0 -24.4l-23.8 0Z" fill="url(#rh-semi-computeChart-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-semi-computeChart-narrow-cls-31"></path>
+<path d="M210.4 304l23.8 0l0 -9.9l-23.8 0Z" fill="url(#rh-semi-computeChart-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-semi-computeChart-narrow-cls-31"></path>
+<path d="M278.9 304l23.8 0l0 -7.7l-23.8 0Z" fill="url(#rh-semi-computeChart-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-semi-computeChart-narrow-cls-31"></path>
+<path d="M-5 -5l221.5 0l0 23l-221.5 0Z" transform="translate(5 10)" fill="rgb(0,0,0)" fill-opacity="0" stroke="#b7b9be" stroke-width="0" class="rh-semi-computeChart-narrow-cls-29"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(5 12.5)" fill="url(#rh-semi-computeChart-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-computeChart-narrow-cls-29"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:13px;font-family:Arial;" x="19" y="4" transform="translate(5 12.5)" fill="#6E6569">人均/千人</text>
+<path d="M0 -2.5l74.6 0l0 13l-74.6 0Z" transform="translate(5 12.5)" fill="none" pointer-events="visible" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="legend" class="rh-semi-computeChart-narrow-cls-32"></path>
+<path d="M2 0L12 0A2 2 0 0 1 14 2L14 6A2 2 0 0 1 12 8L2 8A2 2 0 0 1 0 6L0 2A2 2 0 0 1 2 0" transform="translate(87.64 12.5)" fill="url(#rh-semi-computeChart-narrow-g1)" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" ecmeta_silent="true" class="rh-semi-computeChart-narrow-cls-29"></path>
+<text dominant-baseline="central" text-anchor="start" style="font-size:13px;font-family:Arial;" x="19" y="4" transform="translate(87.64 12.5)" fill="#6E6569">产均/十亿美元GDP</text>
+<path d="M0 -2.5l128.9 0l0 13l-128.8 0Z" transform="translate(87.64 12.5)" fill="none" pointer-events="visible" ecmeta_series_index="1" ecmeta_data_index="1" ecmeta_ssr_type="legend" class="rh-semi-computeChart-narrow-cls-32"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-computeChart-narrow-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-semi-computeChart-narrow-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-semi-computeChart-narrow-cls-29:hover {
+pointer-events:none;
+}
+.rh-semi-computeChart-narrow-cls-30:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-computeChart-narrow-cls-31:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-semi-computeChart-narrow-cls-32:hover {
+cursor:pointer;
+fill:rgba(0,0,0,0);
+}
+
+]]>
+
+</style>
+</svg><details class="chart-values"><summary>查看图表数值</summary><div class="report-table-wrap" tabindex="0" role="region" aria-label="中美德日AI算力基础设施"><table><thead><tr><th scope="col">观察对象</th><th scope="col">人均/千人（EOPS）</th><th scope="col">产均/十亿美元GDP（EOPS）</th></tr></thead><tbody><tr><td>美国</td><td>439</td><td>280</td></tr><tr><td>中国</td><td>28</td><td>54</td></tr><tr><td>德国</td><td>33</td><td>22</td></tr><tr><td>日本</td><td>19</td><td>17</td></tr></tbody></table></div></details></figure></div>
+                      <div class="catch-up-steps" aria-label="境内AI资本开支追赶逻辑">
+                        <div class="catch-up-step"><strong>1.战略地位确立</strong><span>科技竞争推动AI基础设施成为长期投入方向。</span></div>
+                        <div class="catch-up-step"><strong>2.低基数带来弹性</strong><span>国内算力基数与资本开支强度偏低，追赶空间仍大。</span></div>
+                        <div class="catch-up-step"><strong>3.商业闭环已验证</strong><span>海外模型收入高增长，为境内资本开支跟进提供参照。</span></div>
+                      </div>
+                    </div>
+                    <div class="comparison-grid">
+                      <div class="report-table-wrap"><table class="cycle-table" aria-label="AI产业链与历次科技周期对比"><thead><tr><th>2015互联网+</th><th>2020至2021新能源</th><th>2025至2026AI</th></tr></thead><tbody><tr><td>纯估值驱动</td><td>估值与盈利双驱动</td><td>有盈利、有订单</td></tr><tr><td>缺乏盈利支撑</td><td>产业链共振</td><td>有海外验证</td></tr><tr><td>无海外验证</td><td>海外需求拉动</td><td>Capex到收入闭环</td></tr><tr><td>泡沫破裂</td><td>景气见顶后回调</td><td>尚未形成系统性泡沫</td></tr></tbody></table></div>
+                      <div class="report-table-wrap"><table class="pe-table" aria-label="历次泡沫顶部与当前AI标的FY3市盈率对比"><thead><tr><th>历史样本</th><th>FY3PE</th><th>当前AI标的</th><th>FY3PE</th></tr></thead><tbody><tr><td>阳光电源</td><td>34.9x</td><td>新易盛</td><td>19.9x</td></tr><tr><td>宁德时代</td><td>37.8x</td><td>中际旭创</td><td>17.4x</td></tr><tr><td>蓝色光标</td><td>28.8x</td><td>胜宏科技</td><td>16.0x</td></tr><tr><td>时代电气</td><td>55.8x</td><td>源杰科技</td><td>15.8x</td></tr><tr><td>隆基绿能</td><td>29.3x</td><td>天孚通信</td><td>14.3x</td></tr><tr><td>华大科技</td><td>20.5x</td><td>沪电股份</td><td>14.4x</td></tr></tbody></table></div>
+                    </div>
+                    <div class="instrument-grid" aria-label="公开市场观察标的">
+                      <div class="instrument-card"><strong>科创50ETF（588000.SH）</strong><p>聚焦半导体、AI算力等硬科技龙头，行业集中度较高，科技弹性更强。</p><div class="instrument-tags"><span>科创板</span><span>半导体</span><span>AI算力</span></div></div>
+                      <div class="instrument-card"><strong>双创50ETF（588330.SH）</strong><p>横跨科创板与创业板，覆盖AI硬件、新能源等方向，行业结构更均衡。</p><div class="instrument-tags"><span>科创与创业</span><span>AI硬件</span><span>新能源</span></div></div>
+                    </div>
+                  </section><section id="reportVerification"><h2>4.口径与风险</h2><div class="report-metric-strip"><div class="report-metric"><span>云厂商Capex</span><strong>87%+</strong><small>2026年最新预期</small></div><div class="report-metric"><span>Q1实际增速</span><strong>100%</strong><small>2026年</small></div><div class="report-metric"><span>人均算力差</span><strong>约15倍</strong><small>美国相对中国</small></div><div class="report-metric"><span>单位GDP算力差</span><strong>约5倍</strong><small>美国相对中国</small></div><div class="report-metric"><span>当前FY3PE</span><strong>14.3至19.9x</strong><small>原材料样本</small></div></div><div class="report-verification"><div><h3>数据边界</h3><p>模型公司收入图只保留2026E明确终值，中间年份不反推</p></div><div><h3>待核验项</h3><p>估值样本名称、预测口径及境内盈利完整序列仍需复核</p></div></div><p class="risk-note">风险提示：资本开支指引下修、订单兑现不及预期、国产替代节奏放缓、估值波动放大。</p><p class="source-note">数据来源：Wind、国泰海通证券研究。出品机构、业务部门及内部标识已脱敏；产品结构与报价未纳入。本报告为Demo，不构成投资建议。</p><p class="historical-note">历史报告样例，非实时研究。完整保留现有Demo已整理的研究内容。</p></section></main></body></html>

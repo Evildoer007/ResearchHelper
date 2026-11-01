@@ -1,0 +1,27 @@
+{
+  "schema": "researchhelper.native-icon",
+  "tile": "same approved Helper-family white rounded tile",
+  "sizes": [
+    16,
+    20,
+    24,
+    32,
+    40,
+    48,
+    64,
+    96,
+    128,
+    256
+  ],
+  "source_candidate": "result/build-staging/20261010-204451-762361",
+  "source_hashes": {
+    "products/app/frontend/app-icon.svg": "75d19465cfc24092ff8d65798083ea5783dfcbe9c996ab0ee25324a001944333",
+    "products/app/frontend/brand.svg": "98e6b32705673c48305342703226f7fc75ee5bc4a8c2414e72bef0826060ddb6",
+    "assets/icons/researchhelper-app-icon-tile-light.png": "c20ce0c3bdebe9c545f18a8b601046e25607497906ed27bd04eee34f27066566",
+    "assets/icons/researchhelper-app-icon-tile-light.ico": "cb84ad975d4d64d789c8385a720a9e3ef548482554b8d7a577125901e315ec56",
+    "assets/icons/researchhelper-app-icon-tile-light.icns": "de91f38fd7c0e65d3ebd70ec1869bb431c4eb0588b50d892190d45082a40065b",
+    "assets/icons/researchhelper-mark.svg": "98e6b32705673c48305342703226f7fc75ee5bc4a8c2414e72bef0826060ddb6",
+    "assets/icons/researchhelper-logo.svg": "837cfaa96fb95e0c26569e19e66e56213f5fa04c8de82f80bff1fc39e9dad9dd",
+    "assets/icons/researchhelper-app-icon-tile-light.svg": "75d19465cfc24092ff8d65798083ea5783dfcbe9c996ab0ee25324a001944333"
+  }
+}

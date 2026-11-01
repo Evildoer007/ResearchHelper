@@ -1,0 +1,257 @@
+/* ResearchHelper workbench. Shared controls, one reading scale, real data. */
+.rh-artifacts{--desk-control-radius:8px;--desk-section-gap:28px;--desk-hover:var(--color-ground)}
+.workspace-shell[data-workspace-shell] .rh-artifacts:not([data-reader=true])>#content{width:100%;padding:28px 32px 56px}
+.desk-view{width:100%;min-width:0;color:var(--ink);font-size:14px;line-height:1.7}
+.desk-view :is(p,h2,h3,h4,dd,button){overflow-wrap:anywhere}
+.desk-view-heading{display:flex;align-items:center;flex-wrap:wrap;gap:8px 16px;margin-bottom:24px;min-height:44px}
+.desk-view-heading h2{margin:0;font-size:19px;line-height:1.4;font-weight:600}
+.desk-view-meta{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.desk-heading-actions{display:flex;gap:8px;margin-left:auto;align-items:center}
+.desk-block{padding:0;margin:0 0 var(--desk-section-gap);min-width:0}
+.desk-block>h3{font-size:15px;font-weight:600;line-height:1.5;margin:0 0 12px}
+.desk-block+.desk-block{padding-top:24px;border-top:1px solid var(--rule)}
+.desk-note{font-size:13px;color:var(--muted)}
+.workspace-shell[data-workspace-shell] .rh-artifacts .desk-action,
+.workspace-shell[data-workspace-shell] .rh-artifacts .form-actions>button{display:inline-flex;justify-content:center;align-items:center;gap:8px;min-height:40px;padding:8px 14px;border:1px solid var(--rule);border-radius:var(--desk-control-radius);background:var(--surface);color:var(--ink);font-size:14px;font-weight:500;line-height:1.4;white-space:nowrap;box-shadow:none;cursor:pointer}
+.workspace-shell[data-workspace-shell] .rh-artifacts .desk-action:hover,
+.workspace-shell[data-workspace-shell] .rh-artifacts .form-actions>button:hover{background:var(--desk-hover);border-color:var(--color-rule-strong)}
+.workspace-shell[data-workspace-shell] .rh-artifacts .desk-action:active{background:var(--line)}
+.workspace-shell[data-workspace-shell] .rh-artifacts .desk-action--primary{background:var(--red);border-color:var(--red);color:var(--color-on-brand)}
+.workspace-shell[data-workspace-shell] .rh-artifacts .desk-action--primary:hover{background:var(--red-rail);border-color:var(--red-rail);color:var(--color-on-brand)}
+.workspace-shell[data-workspace-shell] .rh-artifacts button:disabled{opacity:.5;cursor:not-allowed}
+.desk-action>svg,.paper-calculation>svg,.source-citation>svg,.desk-flow-step>svg{width:18px;height:18px;flex:none;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.desk-view :is(button,summary,a,[tabindex]):focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+/* A single disclosure vocabulary for optional records and explanations. */
+.desk-disclosure{margin:0;border:0;border-top:1px solid var(--rule);font-size:14px}
+.desk-disclosure>summary{display:flex;align-items:center;gap:10px;min-height:48px;padding:12px 0;list-style:none;font-size:14px;font-weight:500;color:var(--ink);cursor:pointer}
+.desk-disclosure>summary::-webkit-details-marker{display:none}
+.desk-disclosure>summary::before{content:'';width:7px;height:7px;flex:none;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform .16s ease}
+.desk-disclosure[open]>summary::before{transform:rotate(45deg)}
+.desk-disclosure>summary>span{font-size:13px;font-weight:400;color:var(--muted);margin-left:auto}
+.desk-disclosure[open]{padding-bottom:16px}
+/* Scope: one concise question, one output path, one metadata row. */
+.desk-overview{max-width:1100px}
+.desk-overview .desk-overview-facts{grid-template-columns:repeat(3,minmax(0,1fr));gap:20px 28px;margin:0}
+.desk-overview .desk-overview-facts dt{font-size:13px;margin-bottom:6px}
+.desk-overview .desk-overview-facts dd{font-size:14px;line-height:1.65;font-variant-numeric:tabular-nums}
+.desk-overview-request{max-width:76ch;font-size:14px;line-height:1.85;white-space:pre-line;margin:0}
+.desk-overview-questions{padding-left:22px;margin:0}
+.desk-overview-questions li{padding:10px 0 10px 4px;border-bottom:1px solid var(--rule)}
+.desk-overview-questions li:last-child{border:0}
+.desk-overview-input p{white-space:pre-wrap}
+.desk-pipeline{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:0 0 28px;border-block:1px solid var(--rule)}
+.workspace-shell[data-workspace-shell] button.desk-flow-step{display:flex;align-items:center;gap:10px;min-width:0;min-height:84px;padding:16px;border:0;border-radius:0;background:transparent;color:var(--ink);font-size:14px;text-align:left;box-shadow:none}
+.workspace-shell[data-workspace-shell] button.desk-flow-step:hover{background:color-mix(in srgb,var(--ink) 5%,transparent)}
+.desk-flow-step>span{min-width:0;flex:1}
+.desk-flow-step strong{display:block;font-size:14px;font-weight:600}
+.desk-flow-step strong+span{display:block;margin-top:4px;font-size:13px;color:var(--muted);font-weight:400}
+.desk-flow-step>svg{width:15px;height:15px;color:var(--muted)}
+/* Numbers open their retained observation. They read as cells, not buttons. */
+.observation-scroll{max-width:100%;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;border-top:1px solid var(--rule)}
+.workspace-shell .observation-matrix{width:100%;border-collapse:collapse;margin:0;font-size:13px;line-height:1.5;table-layout:auto}
+.workspace-shell .observation-matrix th,.workspace-shell .observation-matrix td{padding:6px 12px;border-bottom:1px solid var(--rule);vertical-align:middle;white-space:nowrap;background:transparent}
+.workspace-shell .observation-matrix thead th{height:44px;background:var(--color-ground);color:var(--muted);font-size:13px;font-weight:400;text-align:right}
+.workspace-shell .observation-matrix th:first-child{text-align:left;min-width:112px;max-width:220px;white-space:normal}
+.workspace-shell .observation-matrix tbody th{font-size:14px;font-weight:500;line-height:1.5}
+.workspace-shell .observation-matrix td{text-align:right;font-variant-numeric:tabular-nums;font-size:14px}
+.workspace-shell .observation-matrix .observation-latest{background:color-mix(in srgb,var(--ink) 2%,var(--surface))}
+.workspace-shell .observation-matrix thead .observation-latest{background:var(--color-ground);color:var(--ink)}
+.matrix-unit{display:block;margin-top:3px;color:var(--muted);font-size:13px;font-weight:400;line-height:1.5}
+.workspace-shell[data-workspace-shell] button.observation-value{display:block;width:100%;min-height:32px;padding:3px 0;border:0;border-radius:0;background:transparent;color:var(--ink);font:inherit;font-weight:400;text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums;text-decoration:underline;text-decoration-color:var(--color-rule-strong);text-decoration-style:dotted;text-underline-offset:4px;cursor:pointer}
+.workspace-shell[data-workspace-shell] button.observation-value:hover{background:transparent;color:var(--red);text-decoration-style:solid;text-decoration-color:currentColor}
+.observation-missing{color:var(--muted)}
+.source-citations{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;margin-top:10px;color:var(--muted);font-size:13px;line-height:1.6}
+.source-citations>span:first-child{color:var(--muted)}
+.source-comparison{margin:0 0 28px;min-width:0}
+.source-comparison>header{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px 14px;margin-bottom:10px}
+.source-comparison h3{margin:0;font-size:15px;font-weight:600;color:var(--ink)}
+.source-comparison>header>span{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.source-kind{margin-left:auto}
+.source-library-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:center;padding:12px 0;border-top:1px solid var(--rule)}
+.source-library-row:first-child{border-top:0}
+.source-library-row>div{min-width:0}
+.workspace-shell[data-workspace-shell] .source-library button.source-citation{display:inline-flex;align-items:center;gap:10px;max-width:100%;min-height:32px;padding:2px 0;border:0;border-radius:0;background:transparent;color:var(--ink);font-size:14px;font-weight:500;text-align:left}
+.workspace-shell[data-workspace-shell] .source-library button.source-citation:hover{color:var(--red);background:transparent}
+.source-citation>svg{width:15px;height:15px;color:var(--muted)}
+.source-library-row p{margin:2px 0 0;font-size:13px;color:var(--muted)}
+.source-library-period{display:flex;flex-direction:column;gap:3px;font-size:13px;text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+.source-process[open]>summary{margin-bottom:12px}
+.source-excerpt{padding:16px 0;border-bottom:1px solid var(--rule)}
+.source-excerpt p{margin:0;font-size:14px;line-height:1.8;white-space:pre-wrap}
+.source-excerpt footer{display:flex;align-items:baseline;flex-wrap:wrap;gap:10px;margin-top:8px;font-size:13px;color:var(--muted)}
+/* A retained series can change presentation without changing its evidence. */
+.observation-view{min-width:0}
+.observation-tools{display:flex;justify-content:flex-end;gap:2px;margin:-3px 0 8px}
+.workspace-shell[data-workspace-shell] .observation-tools button{min-height:36px;padding:6px 12px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:13px;line-height:1.5;box-shadow:none}
+.workspace-shell[data-workspace-shell] .observation-tools button[aria-pressed=true]{background:var(--color-ground);color:var(--ink);font-weight:500}
+.workspace-shell[data-workspace-shell] .observation-tools button:hover{background:var(--color-ground);color:var(--ink)}
+.observation-chart{width:100%;min-width:0}
+.observation-chart[hidden],.observation-table[hidden],.observation-chart-error[hidden]{display:none}
+.observation-chart-error{font-size:13px;line-height:1.6;color:var(--muted);margin:12px 0 0}
+/* Every argument keeps its judgment, reasoning, evidence and limitation together. */
+.desk-workingpaper--notebook{container-type:inline-size}
+.paper-navigation{position:sticky;top:var(--desk-tabs-height,48px);z-index:3;display:flex;align-items:stretch;gap:20px;overflow-x:auto;max-width:100%;padding:0;margin:0 0 24px;background:var(--surface);border-bottom:1px solid var(--rule);scrollbar-width:thin}
+.workspace-shell[data-workspace-shell] .paper-navigation button{position:relative;display:flex;align-items:baseline;gap:8px;flex:1 0 180px;min-width:0;max-width:34%;min-height:52px;padding:12px 0;border:0;border-radius:0;background:transparent;color:var(--muted);font-size:13px;line-height:1.6;font-weight:400;text-align:left;box-shadow:none}
+.paper-navigation button>span:first-child{color:var(--muted);font-variant-numeric:tabular-nums;font-weight:500}
+.paper-navigation-title{min-width:0;display:-webkit-box;overflow:hidden;-webkit-line-clamp:2;-webkit-box-orient:vertical;white-space:normal}
+.workspace-shell[data-workspace-shell] .paper-navigation button:hover,.workspace-shell[data-workspace-shell] .paper-navigation button[aria-current=true]{color:var(--ink);background:transparent}
+.desk-view .paper-navigation button:focus-visible{outline-offset:-2px}
+.paper-navigation button[aria-current=true]::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--red)}
+.paper-navigation button[aria-current=true]>span:first-child{color:var(--red)}
+.paper-argument{scroll-margin-top:var(--desk-paper-anchor-offset,120px);padding:0 0 24px;margin:0 0 28px;border-bottom:1px solid var(--rule);outline:none}
+.desk-view .paper-argument:focus-visible{outline:0}
+.desk-view .paper-argument:focus-visible .paper-argument-heading{outline:2px solid var(--ink);outline-offset:6px}
+.paper-argument:last-of-type{margin-bottom:12px}
+.paper-argument-heading{display:flex;align-items:baseline;gap:8px 12px;flex-wrap:wrap;margin:0 0 18px}
+.paper-argument-heading h2{flex:1;min-width:0;margin:0;font-size:18px;line-height:1.5;font-weight:600}
+.paper-argument-index{font-size:13px;color:var(--red);font-weight:500;white-space:nowrap}
+.paper-entry-kind{font-size:13px;color:var(--muted)}
+.paper-argument-heading .status{margin:0;font-size:13px}
+.paper-layout{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(320px,1fr);gap:28px;align-items:start}
+.paper-narrative{min-width:0}
+.desk-workingpaper--notebook .paper-judgment{margin:0 0 18px;max-width:68ch;font-size:14px;line-height:1.8;font-weight:500}
+.paper-reasoning h3,.paper-basis h3,.paper-validation h3,.paper-evidence-role h3{margin:0 0 8px;font-size:13px;font-weight:500;color:var(--muted);line-height:1.5}
+.paper-reasoning p,.paper-validation p,.paper-theory p,.paper-evidence-role p{margin:0 0 12px;font-size:14px;line-height:1.8;white-space:pre-line}
+.paper-reasoning h4{font-size:14px;font-weight:500;margin:16px 0 6px}
+.paper-basis{min-width:0;padding-left:24px;border-left:1px solid var(--rule)}
+.paper-basis>section+section{margin-top:20px}
+.workspace-shell .observation-matrix--compact th,.workspace-shell .observation-matrix--compact td{padding:6px 8px}
+.workspace-shell .observation-matrix--compact th:first-child{min-width:92px;max-width:150px}
+.workspace-shell[data-workspace-shell] button.paper-calculation{display:grid;grid-template-columns:minmax(0,1fr) auto 16px;align-items:center;gap:10px;width:100%;min-height:44px;padding:8px 0;border:0;border-bottom:1px solid var(--rule);border-radius:0;background:transparent;color:var(--ink);text-align:left;font-size:13px;cursor:pointer;box-shadow:none}
+.paper-calculation>span{min-width:0;line-height:1.5}
+.paper-calculation>strong{font-size:14px;font-weight:500;font-variant-numeric:tabular-nums;white-space:nowrap}
+.paper-calculation>svg{width:15px;height:15px;color:var(--muted)}
+.workspace-shell[data-workspace-shell] button.paper-calculation:hover{background:var(--desk-hover);color:var(--red)}
+.workspace-shell[data-workspace-shell] .matrix-calculation .paper-calculation{display:inline-flex;justify-content:flex-end;min-width:80px;min-height:32px;gap:6px;padding:0;border:0;font-size:14px}
+.matrix-calculation .paper-calculation>span{display:none}
+.matrix-calculation .paper-calculation>strong{font-weight:500}
+.paper-validation{display:grid;grid-template-columns:88px minmax(0,1fr);gap:16px;margin-top:20px;padding-top:14px;border-top:1px solid var(--rule)}
+.paper-validation h3{margin:3px 0 0;color:var(--muted)}
+.paper-validation p{margin:0}
+.paper-theory{margin-top:12px}
+.paper-theory>summary{font-size:13px;min-height:40px}
+.paper-supplement{margin:0}
+.paper-unlinked{font-size:13px;color:var(--muted)}
+.paper-excerpt{font-size:14px;margin:8px 0}
+.paper-excerpt p{white-space:pre-wrap}
+.paper-evidence-role{margin-top:18px}
+.paper-evidence-role .source-citations{margin-top:6px}
+/* Same control vocabulary in the delivery toolbar. */
+.workspace-shell[data-workspace-shell] .desk-report-actions .report-profile-switch{gap:3px;padding:3px;border:1px solid var(--rule);border-radius:9px;background:var(--color-ground)}
+.workspace-shell[data-workspace-shell] .report-profile-switch button.desk-segment{min-height:36px;padding:7px 13px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--muted);font-size:14px;font-weight:400;box-shadow:none}
+.workspace-shell[data-workspace-shell] .report-profile-switch button.desk-segment[aria-pressed=true]{background:var(--surface);border-color:var(--rule);color:var(--ink);font-weight:500}
+.workspace-shell[data-workspace-shell] .report-profile-switch button.desk-segment:hover{color:var(--ink)}
+.workspace-shell[data-workspace-shell] .desk-report-actions .report-export-actions .desk-action{min-height:44px}
+.workspace-shell[data-workspace-shell] .desk-report-actions .choice-trigger{border-radius:8px;font-size:14px}
+.desk-report-empty-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:8px}
+/* Preview state is separate from the frozen client document. */
+.report-actions .report-case-state{display:inline-flex;font-size:13px;color:var(--muted);white-space:nowrap}
+.report-reader-state{display:flex;flex:1;min-height:180px;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:24px;text-align:center}
+.report-reader-state h2{font-size:18px;font-weight:500;line-height:1.5;margin:0}
+.report-reader-state p{font-size:14px;line-height:1.7;margin:0;color:var(--muted)}
+.report-reader-state p:empty{display:none}
+.report-reader-state[hidden],.rh-artifacts .report-frame[hidden]{display:none}
+/* The optional drawer shows task facts rather than a duplicate navigation. */
+.workspace-shell[data-workspace-shell] .task-context__head{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:48px}
+.workspace-shell[data-workspace-shell] .task-context__head h2{font-size:17px;font-weight:600;margin:0}
+.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-context .drawer-close{display:grid;place-items:center;flex:none;width:40px;height:40px;min-height:40px;min-width:40px;padding:9px;border:0;border-radius:8px;background:transparent;color:var(--ink);cursor:pointer}
+.task-context .drawer-close>svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round}
+.task-context .drawer-close:hover{background:var(--color-ground)}
+.task-context .drawer-close:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.context-facts{display:grid;gap:20px;margin:0}
+.context-facts>div{min-width:0}
+.context-facts dt{margin:0 0 5px;font-size:13px;line-height:1.5;color:var(--muted)}
+.context-facts dd{margin:0;font-size:14px;line-height:1.7;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.context-empty{font-size:14px;line-height:1.7;color:var(--muted)}
+#context-operations>h3{margin:0 0 12px;font-size:14px;font-weight:500}
+@media(max-width:700px){.workspace-shell.workspace-shell--desk[data-workspace-shell] .task-context .drawer-close{width:44px;height:44px}}
+/* Follow-up contains registered conditions, not duplicate draft limitations. */
+.desk-tracking>.section{margin:0;padding:24px 0;border:0;border-bottom:1px solid var(--rule)}
+.desk-tracking>.section>h2,.desk-tracking .section-heading h2{font-size:16px;font-weight:600;margin:0 0 14px}
+.desk-tracking .tracking-empty{display:flex;align-items:center;justify-content:space-between;gap:24px;border:0;padding:8px 0 28px;min-height:120px}
+.desk-tracking .tracking-empty h2{margin:0 0 8px;font-size:16px;font-weight:500}
+.desk-tracking .tracking-empty p{max-width:60ch;margin:0;color:var(--muted);font-size:14px;line-height:1.7}
+.desk-tracking .tracking-history{margin-top:12px}
+.desk-tracking .thesis{min-width:0;padding:18px 0;border-bottom:1px solid var(--rule)}
+.desk-tracking .thesis h3{font-size:15px;font-weight:500;margin:0 0 8px}
+.desk-tracking .thesis p{margin:5px 0;font-size:14px;line-height:1.8}
+.desk-tracking .tracking-changes{padding-left:18px;margin:12px 0}
+.desk-tracking .tracking-changes li+li{margin-top:12px}
+.desk-tracking .section-heading{gap:16px;flex-wrap:wrap}
+.desk-tracking .tracking-history ol{margin:0;padding-left:18px}
+.desk-tracking .tracking-history li{padding:6px 0}
+.desk-tracking dd{min-width:0;overflow-wrap:anywhere}
+/* Evidence readers share the workbench typography and control geometry. */
+#dialog>header{padding:16px 20px;gap:16px}
+#dialog>header h2{font-size:18px;font-weight:600;line-height:1.5}
+#dialog>header>button,.workspace-shell[data-workspace-shell] .assistant-panel__close{display:grid;place-items:center;flex:none;width:40px;min-width:40px;height:40px;min-height:40px;padding:9px;border:0;border-radius:8px;background:transparent;color:var(--ink);cursor:pointer}
+#dialog>header>button:hover,.workspace-shell[data-workspace-shell] .assistant-panel__close:hover{background:var(--color-ground)}
+.workspace-shell[data-workspace-shell] .assistant-panel__close:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+#dialog>header>button>svg,.assistant-panel__close>svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round}
+#dialog-content{padding:20px;font-size:14px}
+#dialog-content h3{font-size:15px;font-weight:600}
+#dialog-content .source-api-summary{display:grid;grid-template-columns:100px minmax(0,1fr);gap:8px 16px;margin:16px 0}
+#dialog-content .source-api-summary dt{color:var(--muted);font-weight:400}
+#dialog-content .source-api-summary dd{margin:0;overflow-wrap:anywhere}
+#dialog-content .source-navigation{padding:12px;background:var(--color-ground);border-radius:8px;gap:8px}
+#dialog-content .source-navigation>button{min-height:40px;font-size:14px}
+#dialog-content .source-navigation label{font-size:14px;font-weight:400;gap:8px;margin:0}
+#dialog-content .source-api-fields table{font-size:14px}
+#dialog-content .source-api-fields :is(th,td){padding:10px 12px;line-height:1.6}
+#dialog-content .source-api-fields th{font-weight:500}
+#dialog-content .source-field-target :is(th,td){background:var(--color-risk-gold-soft)}
+@container(max-width:840px){.paper-layout{grid-template-columns:1fr;gap:20px}.paper-basis{border-left:0;padding-left:0}.paper-argument-heading h2{font-size:17px}.workspace-shell[data-workspace-shell] .paper-navigation button{flex:0 0 auto;max-width:260px}}
+@media(max-width:1000px){.desk-pipeline{grid-template-columns:repeat(2,minmax(0,1fr))}.desk-overview .desk-overview-facts{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:700px){
+ .workspace-shell[data-workspace-shell] .rh-artifacts:not([data-reader=true])>#content{padding:20px 18px 84px}
+ .desk-view-heading{gap:8px 12px;margin-bottom:20px}
+ .desk-view-heading h2{font-size:18px}
+ .desk-heading-actions{gap:6px}
+ .workspace-shell[data-workspace-shell] .rh-artifacts .desk-action{min-height:44px;padding:9px 12px}
+ .workspace-shell[data-workspace-shell] .observation-tools button{min-height:44px}
+ .workspace-shell[data-workspace-shell] button.desk-flow-step{padding:14px 12px;min-height:86px}
+ .desk-overview .desk-overview-facts{grid-template-columns:1fr;gap:16px}
+ .source-library-row{grid-template-columns:1fr;gap:4px}
+ .source-library-period{flex-direction:row;flex-wrap:wrap;gap:8px 16px;text-align:left}
+ .workspace-shell[data-workspace-shell] .source-library button.source-citation{min-height:44px}
+ .workspace-shell .observation-matrix th:first-child{position:sticky;left:0;z-index:1;background:var(--surface)}
+ .workspace-shell .observation-matrix thead th:first-child{background:var(--color-ground)}
+ .workspace-shell[data-workspace-shell] button.observation-value,.workspace-shell[data-workspace-shell] .matrix-calculation .paper-calculation{min-height:44px}
+ .paper-navigation{gap:18px}
+ .workspace-shell[data-workspace-shell] .paper-navigation button{max-width:220px;min-height:44px;flex:0 0 auto}
+ .paper-argument-heading{gap:6px 10px}
+ .paper-argument-heading h2{flex-basis:100%;font-size:17px}
+ .paper-validation{grid-template-columns:1fr;gap:6px}
+ .desk-tracking .tracking-empty{align-items:flex-start;flex-direction:column;gap:16px;min-height:0;padding-bottom:20px}
+ .workspace-shell[data-workspace-shell] .report-profile-switch button.desk-segment{min-height:44px}
+ #dialog>header>button,.workspace-shell[data-workspace-shell] .assistant-panel__close{width:44px;min-width:44px;height:44px;min-height:44px}
+ #dialog-content .source-navigation>button{min-height:44px}
+ #dialog>header{padding:12px 16px}
+ #dialog-content{padding:16px}
+ #dialog-content .source-api-summary{grid-template-columns:80px minmax(0,1fr);gap:8px 12px}
+}
+/* Desk reading stays unobstructed on phones; the same assistant opens on demand. */
+@media(max-width:700px){
+ .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode=desk] .assistant-region{position:fixed;right:16px;bottom:max(16px,env(safe-area-inset-bottom,0px));display:block;width:0;height:0;min-height:0;padding:0;border:0;background:transparent;pointer-events:none;z-index:30}
+ .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode=desk] .assistant-region .assistant-toggle{position:absolute;right:0;bottom:0;display:grid;place-items:center;width:52px;height:52px;padding:0;border:0;background:transparent;pointer-events:auto;box-shadow:none}
+ .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode=desk] .assistant-toggle>svg{width:52px;height:52px;overflow:visible;stroke:none}
+ .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode=desk] .assistant-panel{position:absolute;right:-4px;bottom:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;width:calc(100vw - 24px);height:min(640px,calc(100dvh - 88px));max-width:calc(100vw - 24px);overflow:hidden;border:1px solid var(--rule);border-radius:14px;background:var(--surface);box-shadow:0 12px 36px var(--color-surface-shadow);opacity:0;visibility:hidden;pointer-events:none}
+ .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode=desk] .assistant-region.is-open .assistant-panel{opacity:1;visibility:visible;pointer-events:auto}
+ .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode=desk] .assistant-region.is-open .assistant-toggle{visibility:hidden;pointer-events:none}
+ .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode=desk] .assistant-panel__head{display:flex;align-items:center;justify-content:space-between;min-height:52px;padding:8px 12px 8px 16px;border-bottom:1px solid var(--rule)}
+ .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode=desk] .assistant-panel__head strong{font-size:14px;font-weight:500}
+ .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode=desk] .assistant-panel__transcript{display:block;min-height:0;overflow:auto}
+ .workspace-shell.workspace-shell--desk[data-workspace-shell][data-mode=desk] .assistant-panel .desk-command-dock__body{min-width:0;grid-row:3}
+}
+@media(prefers-reduced-motion:reduce){.desk-disclosure>summary::before{transition:none}}
+
+.paper-corrections{margin:0 0 24px;padding:0 0 16px;border-bottom:1px solid var(--rule)}
+.paper-corrections ol,.report-correction-list{margin:8px 0;padding-inline-start:22px}
+.paper-corrections p,.report-correction-list p{white-space:pre-wrap;overflow-wrap:anywhere}
+.report-correction-state{margin:0 0 12px;font-size:14px}
+.report-correction-state button{min-height:44px;padding:0;border:0;border-radius:0;background:none;color:var(--color-brand-signature);text-align:start;text-decoration:underline;text-underline-offset:3px}
+
+.report-version-record>p{margin:0}
+.report-version-record+.report-version-record{border-top:1px solid var(--line);margin-top:16px;padding-top:16px}
+.report-version-link{display:inline-flex;align-items:center;min-height:44px;overflow-wrap:anywhere;color:var(--color-brand-signature);text-decoration:underline;text-underline-offset:3px}
+#dialog-content .report-version-record h3{font-size:14px;margin:4px 0}

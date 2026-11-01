@@ -1,0 +1,12 @@
+/* OH task-search visuals are in the byte-identical theme-overrides.css.
+ * Reset RH's domain-dialog header and compensate only browser preview zoom. */
+.task-search-dialog{box-sizing:border-box;font-size:14px;overflow:auto;overscroll-behavior:contain}
+.task-search-dialog header{position:static;padding:0;border:0;background:transparent;justify-content:initial}
+.task-search-dialog input{width:auto;min-height:44px;font-size:14px}
+.task-search-dialog header button{min-width:44px;min-height:44px;flex:none}
+.task-search-dialog>div button{min-height:44px}
+.task-search-dialog>p[role=status]{font-size:14px;margin:12px 0 0}
+.task-search-dialog :is(input,button):focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+html[data-browser-scale] .task-search-dialog{width:min(540px,calc(var(--rh-viewport-width) - 40px));max-height:calc(var(--rh-viewport-height) * .7)}
+.task-rail .rail-section-label:has(.rail-task-search){display:flex;align-items:center;justify-content:space-between;gap:8px}
+@media(max-width:700px){.task-rail .rail-task-search{width:44px;height:44px;flex:none}}

@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="rh-source-key" content="internet"><meta name="rh-chart-renderer" content="ECharts 6.0.0 offline SVG"><title>港股互联网：深度回调后的估值与利润率修复</title><style>/*
+THESIS: Complete research content is the artifact; navigation stays out of print.
+OWN-WORLD: Demo paper, ink, red rules, blue comparison charts and system text.
+STORY: Read the conclusion, inspect arguments, check figures and source limits.
+FIRST VIEWPORT: Left chapter directory and a readable report title/conclusion.
+FORM: Extend the user's established Demo reader; no new visual-world selection.
+*/
+:root {
+  --paper:#FFFDFB;
+  --surface:#F5F2EF;
+  --ink:#292427;
+  --muted:#6E6569;
+  --red:#B8102D;
+  --blue:#3D607F;
+  --rule:#DED8D6;
+  --report-size:15px;
+  --directory-width:144px;
+  --content-width:940px;
+  --page-padding:28px;
+  color-scheme:light;
+  font-family:"PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  font-size:var(--report-size);
+  color:var(--ink);
+  background:var(--paper);
+  font-variant-numeric:tabular-nums;
+}
+* { box-sizing:border-box; }
+body { margin:0; padding-left:var(--directory-width); line-height:1.9; }
+a { color:var(--red); }
+:focus-visible { outline:2px solid var(--red); outline-offset:3px; }
+.skip-link { position:absolute; top:8px; left:8px; padding:10px 16px; background:var(--paper); transform:translateY(-150%); z-index:3; }
+.skip-link:focus { transform:none; }
+.report-directory { position:fixed; inset:0 auto 0 0; width:var(--directory-width); padding:24px 8px; background:var(--surface); border-right:1px solid var(--rule); }
+.report-directory nav { display:grid; gap:8px; }
+.report-directory a { display:flex; align-items:center; min-height:44px; padding:8px 12px; font-size:14px; color:var(--muted); text-decoration:none; border-radius:8px; }
+.report-directory a:hover { color:var(--red); background:var(--paper); }
+.report-sheet { max-width:var(--content-width); min-width:0; padding:30px var(--page-padding) 48px; margin:0 auto; overflow-wrap:anywhere; }
+h1,h2,h3,figcaption,caption { font-weight:600; text-wrap:balance; }
+h1 { max-width:26em; margin:0 0 27px; font-size:clamp(25px,3vw,30px); line-height:1.45; letter-spacing:-.025em; }
+h2,.evidence-section-title { margin:36px 0 18px; font-size:21px; line-height:1.55; }
+h3 { margin:26px 0 12px; font-size:18px; line-height:1.65; }
+p { margin:0 0 14px; max-width:75ch; }
+section { scroll-margin-top:28px; }
+.report-summary { border-top:2px solid var(--red); padding-top:18px; }
+.report-summary h2 { margin-top:0; color:var(--red); font-size:15px; }
+.conclusion { font-size:17px; line-height:1.95; font-weight:500; }
+.report-meta { display:flex; flex-wrap:wrap; gap:8px 22px; padding:10px 0 18px; margin:0; border-bottom:1px solid var(--rule); color:var(--muted); font-size:13px; }
+.report-meta dd { margin:0; }
+.logic-block { padding-bottom:14px; border-bottom:1px solid var(--rule); }
+.source-note,.archive-source,.historical-note { color:var(--muted); font-size:13px; line-height:1.85; }
+.source-note { margin-top:14px; }
+.chart-grid,.catch-up-grid,.comparison-grid,.instrument-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:24px; }
+.comparison-grid,.instrument-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.chart-box,.report-chart { min-width:0; margin:0; }
+.chart-box { border-bottom:1px solid var(--rule); padding:12px 0; }
+.report-chart { break-inside:avoid; container-type:inline-size; }
+.report-chart figcaption { font-size:16px; margin:8px 0; line-height:1.5; }
+.report-chart svg { display:block; width:100%; height:auto; max-width:100%; }
+.report-chart .chart-svg-medium,.report-chart .chart-svg-narrow { display:none; }
+@container (max-width:639px) {
+  .report-chart .chart-svg-wide { display:none; }
+  .report-chart .chart-svg-medium { display:block; }
+}
+@container (max-width:399px) {
+  .report-chart .chart-svg-medium { display:none; }
+  .report-chart .chart-svg-narrow { display:block; }
+}
+.chart-values { margin:8px 0 14px; }
+summary { color:var(--muted); font-size:13px; cursor:pointer; min-height:44px; padding:10px 0; }
+summary:hover { color:var(--red); }
+.chart-boundary { color:var(--muted); font-size:13px; line-height:1.8; }
+.report-metric-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:14px 20px; padding:18px 0; margin:18px 0 22px; border-block:1px solid var(--rule); }
+.report-metric span,.report-metric small { display:block; font-size:13px; color:var(--muted); }
+.report-metric strong { display:block; font-size:21px; line-height:1.6; margin:4px 0; font-weight:600; }
+.catch-up-grid { align-items:center; margin:24px 0; }
+.catch-up-steps { display:grid; gap:18px; }
+.catch-up-step strong { display:block; font-size:15px; }
+.catch-up-step span { display:block; color:var(--muted); font-size:14px; margin-top:4px; }
+.comparison-grid,.instrument-grid { margin:24px 0; }
+.report-table-wrap { overflow-x:auto; max-width:100%; margin:0 0 20px; }
+table { width:100%; border-collapse:collapse; font-size:13px; line-height:1.75; }
+caption { text-align:left; padding:2px 0 12px; color:var(--ink); font-size:16px; }
+th,td { padding:9px 10px; text-align:left; vertical-align:top; border-bottom:1px solid var(--rule); }
+th { background:var(--surface); border-top:1px solid var(--rule); font-weight:600; }
+.pe-table td:nth-child(even) { white-space:nowrap; text-align:right; }
+.instrument-card { padding:16px 0; border-top:1px solid var(--rule); }
+.instrument-card strong { font-size:15px; }
+.instrument-card p { font-size:14px; color:var(--muted); margin:10px 0; }
+.instrument-tags { display:flex; flex-wrap:wrap; gap:12px; color:var(--blue); font-size:13px; }
+.archive-table-grid { margin:26px 0; }
+.report-verification { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; margin:20px 0; }
+.report-verification h3 { font-size:15px; color:var(--red); margin:0 0 10px; }
+.report-verification p { font-size:14px; }
+.risk-note { font-size:14px; padding-top:20px; border-top:1px solid var(--rule); }
+.historical-note { padding-top:16px; margin-top:20px; border-top:1px solid var(--rule); }
+.visually-hidden { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media (max-width:1100px) {
+  .chart-grid,.catch-up-grid,.comparison-grid { grid-template-columns:minmax(0,1fr); }
+}
+@media (max-width:800px) {
+  :root { --page-padding:22px; }
+  body { padding:0; }
+  .report-directory { position:sticky; inset:auto; top:0; z-index:2; width:100%; padding:8px; border-right:0; border-bottom:1px solid var(--rule); }
+  .report-directory nav { grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; }
+  .report-directory a { padding:8px 2px; justify-content:center; font-size:13px; line-height:1.5; }
+  .report-sheet { padding-top:28px; }
+  section { scroll-margin-top:84px; }
+}
+@media (max-width:520px) {
+  :root { --page-padding:18px; }
+  .instrument-grid,.report-verification { grid-template-columns:minmax(0,1fr); gap:14px; }
+  .report-metric-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  th,td { padding:8px 6px; }
+}
+@media print {
+  @page { size:A4; margin:15mm; }
+  body { padding:0; font-size:11pt; }
+  .report-directory,.skip-link { display:none; }
+  .report-sheet { max-width:none; margin:0; padding:0; }
+  h1 { font-size:22pt; }
+  h2,.evidence-section-title { font-size:15pt; break-after:avoid; page-break-after:avoid; }
+  h3,caption,figcaption { break-after:avoid; page-break-after:avoid; }
+  p { orphans:3; widows:3; }
+  table { font-size:10pt; }
+  thead { display:table-header-group; }
+  tr,.report-chart,.report-metric,.instrument-card,.report-table-wrap,table { break-inside:avoid; page-break-inside:avoid; }
+  .report-table-wrap { overflow:visible; }
+  /* WebKit can split a grid item's caption from its chart despite break-inside.
+     Normal print flow keeps each complete figure and short source table together. */
+  .chart-grid,.catch-up-grid,.comparison-grid { display:block; }
+  .chart-grid > * + *,.catch-up-grid > * + *,.comparison-grid > * + * { margin-top:24px; }
+  /* An inline block is indivisible in WebKit pagination. Grid items are not:
+     the FY3PE label previously printed on a different page from its value. */
+  .report-metric-strip { display:block; }
+  .report-metric { display:inline-block; vertical-align:top; width:25%; padding:0 14px 14px 0; }
+  .report-chart { container-type:normal; }
+  .report-chart .chart-svg-wide { display:block; }
+  .report-chart .chart-svg-medium,.report-chart .chart-svg-narrow { display:none; }
+  .chart-values summary { display:none; }
+  .chart-values::details-content { content-visibility:visible; }
+  .chart-values > :not(summary) { display:block; }
+  .source-note,.archive-source,.historical-note { font-size:10pt; }
+  * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+}
+</style></head><body>
+<a class="skip-link" href="#reportTitle">跳至报告</a><aside class="report-directory" aria-label="报告目录"><nav><a href="#reportSummary">1.核心结论</a><a href="#reportArguments">2.研究论点</a><a href="#reportEvidenceSection">3.数据与图表</a><a href="#reportVerification">4.口径与风险</a></nav></aside><main class="report-sheet" aria-label="完整历史报告"><h1 id="reportTitle">港股互联网：深度回调后的估值与利润率修复</h1><section id="reportSummary" class="report-summary"><h2>1.核心结论</h2><p class="conclusion">港股互联网ETF（513330）从4月初0.4355跌至6月底0.3518，Q2下跌19.22%，全周期振幅34.82%；7月随战略调整信号明确和估值触底反弹15.39%，8月首个交易日再涨2.17%至0.4144。腾讯、阿里、美团和快手等平台资产在A股没有直接对标，当前估值接近历史均值下方1倍标准差，企业开始收缩低效业务并聚焦利润率，形成稀缺资产、低估值与战略拐点的共同修复逻辑。</p><dl class="report-meta"><div><dd>研究口径：港股互联网板块</dd></div><div><dd>观察标的：恒生互联网ETF（513330.SH）</dd></div><div><dd>方向：谨慎看多</dd></div><div><dd>覆盖期：2026年Q2及7月反弹窗口</dd></div><div><dd>报告日期2026年8月4日 · 行情截至8月3日</dd></div></dl></section><section id="reportArguments"><h2>2.研究论点</h2><section class="logic-block" id="reportLogic1"><h3>2.1 Q2估值下跌创造低位，7月战略调整触发V形反转</h3><p>ETF 513330在4月、5月和6月分别下跌4.00%、7.29%和13.48%，从4月初0.4355跌至6月底0.3518，Q2累计下跌19.22%。区间高点为0.4511，最低为0.3346，最大回撤25.8%。月度涨跌与Q2起止点采用不同口径，不能直接复合。</p><p>原材料将压力归因为行业竞争加剧、南向资金放缓和AI应用端货币化路径不清晰。消费者服务板块预期收入增速为-26%；南向资金12月日均10.9亿港元，低于全年日均60亿港元。</p><p>6月底互联网企业开始收缩低效业务、聚焦核心利润率。7月ETF由0.3515升至0.4056，反弹15.39%；8月首个交易日上涨2.17%，8月3日净值为0.4144，距4月高点仍低8.1%。</p><p class="source-note">来源口径：原材料ETF行情、资金与行业资料；原PDF未列具体数据源。</p></section><section class="logic-block" id="reportLogic2"><h3>2.2 港股平台资产提供A股应用层缺位下的观察窗口</h3><p>A股科技板块以AI硬件、算力、半导体和国产替代为主，纯互联网应用平台相对缺位。腾讯、阿里、美团和快手等超级平台主要在香港上市，形成硬件在A股、应用在港股的互补格局。</p><p>恒生科技指数为4875.61点，距Q2低点反弹超过15%。港股互联网估值位于历史均值下方约1倍标准差。若企业由规模扩张转向利润率的战略调整兑现，平台龙头可能同时获得盈利和估值修复。</p><p class="source-note">研究范围：港股互联网平台与A股AI、芯片ETF横截面对比。</p></section></section><section class="report-evidence-section" id="reportEvidenceSection"><h2>3.数据与图表</h2><div class="report-metric-strip"><div class="report-metric"><span>最新净值</span><strong>0.4144</strong><small>8月3日</small></div><div class="report-metric"><span>Q2跌幅</span><strong>-19.22%</strong><small>低至0.3346</small></div><div class="report-metric"><span>7月反弹</span><strong>+15.39%</strong><small>V形修复</small></div><div class="report-metric"><span>全周期振幅</span><strong>34.82%</strong><small>高弹性</small></div><div class="report-metric"><span>距4月高点</span><strong>-8.1%</strong><small>高点0.4511</small></div></div><div class="chart-grid"><figure class="report-chart" data-chart="internet-0"><figcaption>港股互联网ETF月度涨跌</figcaption><svg class="chart-svg chart-svg-wide" role="img" aria-label="港股互联网ETF月度涨跌" viewBox="0 0 760 350" width="760" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 760 350">
+<rect width="760" height="350" x="0" y="0" fill="none"></rect>
+<path d="M77.4 271.5L736 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-wide-cls-93"></path>
+<path d="M77.4 241.5L736 241.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-wide-cls-93"></path>
+<path d="M77.4 211.5L736 211.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-wide-cls-93"></path>
+<path d="M77.4 181.5L736 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-wide-cls-93"></path>
+<path d="M77.4 151.5L736 151.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-wide-cls-93"></path>
+<path d="M77.4 121.5L736 121.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-wide-cls-93"></path>
+<path d="M77.4 92.5L736 92.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-wide-cls-93"></path>
+<path d="M77.4 62.5L736 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-wide-cls-93"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(77.44 42)" fill="#292427">%</text>
+<path d="M77.4 181.5L736 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-internet-0-wide-cls-93"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 271)" fill="#54555a">-15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 241.1429)" fill="#54555a">-10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 211.2857)" fill="#54555a">-5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 181.4286)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 151.5714)" fill="#54555a">5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 121.7143)" fill="#54555a">10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 91.8571)" fill="#54555a">15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 62)" fill="#54555a">20%</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(143.296 279)" fill="none" pointer-events="visible" class="rh-internet-0-wide-cls-93"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(143.296 279)" fill="#54555a">4月</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(275.008 279)" fill="none" pointer-events="visible" class="rh-internet-0-wide-cls-93"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(275.008 279)" fill="#54555a">5月</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(406.72 279)" fill="none" pointer-events="visible" class="rh-internet-0-wide-cls-93"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(406.72 279)" fill="#54555a">6月</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(538.432 279)" fill="none" pointer-events="visible" class="rh-internet-0-wide-cls-93"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(538.432 279)" fill="#54555a">7月</text>
+<path d="M-33 0l65.9 0l0 21l-65.9 0Z" transform="translate(670.144 279)" fill="none" pointer-events="visible" class="rh-internet-0-wide-cls-93"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(670.144 279)" fill="#54555a">8月至3日</text>
+<path d="M124.3 181.4l38 0l0 23.9l-38 0Z" fill="url(#rh-internet-0-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-internet-0-wide-cls-94"></path>
+<path d="M256 181.4l38 0l0 43.5l-38 0Z" fill="url(#rh-internet-0-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-internet-0-wide-cls-94"></path>
+<path d="M387.7 181.4l38 0l0 80.5l-38 0Z" fill="url(#rh-internet-0-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-internet-0-wide-cls-94"></path>
+<path d="M519.4 181.4l38 0l0 -91.9l-38 0Z" fill="url(#rh-internet-0-wide-g1)" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-internet-0-wide-cls-95"></path>
+<path d="M651.1 181.4l38 0l0 -13l-38 0Z" fill="url(#rh-internet-0-wide-g1)" ecmeta_series_index="0" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-internet-0-wide-cls-95"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-0-wide-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-0-wide-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-internet-0-wide-cls-93:hover {
+pointer-events:none;
+}
+.rh-internet-0-wide-cls-94:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-internet-0-wide-cls-95:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-medium" role="img" aria-label="港股互联网ETF月度涨跌" viewBox="0 0 480 350" width="480" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 480 350">
+<rect width="480" height="350" x="0" y="0" fill="none"></rect>
+<path d="M77.4 271.5L456 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-medium-cls-96"></path>
+<path d="M77.4 241.5L456 241.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-medium-cls-96"></path>
+<path d="M77.4 211.5L456 211.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-medium-cls-96"></path>
+<path d="M77.4 181.5L456 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-medium-cls-96"></path>
+<path d="M77.4 151.5L456 151.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-medium-cls-96"></path>
+<path d="M77.4 121.5L456 121.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-medium-cls-96"></path>
+<path d="M77.4 92.5L456 92.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-medium-cls-96"></path>
+<path d="M77.4 62.5L456 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-medium-cls-96"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(77.44 42)" fill="#292427">%</text>
+<path d="M77.4 181.5L456 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-internet-0-medium-cls-96"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 271)" fill="#54555a">-15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 241.1429)" fill="#54555a">-10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 211.2857)" fill="#54555a">-5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 181.4286)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 151.5714)" fill="#54555a">5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 121.7143)" fill="#54555a">10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 91.8571)" fill="#54555a">15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 62)" fill="#54555a">20%</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(115.296 279)" fill="none" pointer-events="visible" class="rh-internet-0-medium-cls-96"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(115.296 279)" fill="#54555a">4月</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(191.008 279)" fill="none" pointer-events="visible" class="rh-internet-0-medium-cls-96"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(191.008 279)" fill="#54555a">5月</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(266.72 279)" fill="none" pointer-events="visible" class="rh-internet-0-medium-cls-96"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(266.72 279)" fill="#54555a">6月</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(342.432 279)" fill="none" pointer-events="visible" class="rh-internet-0-medium-cls-96"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(342.432 279)" fill="#54555a">7月</text>
+<path d="M-33 0l65.9 0l0 21l-65.9 0Z" transform="translate(418.144 279)" fill="none" pointer-events="visible" class="rh-internet-0-medium-cls-96"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(418.144 279)" fill="#54555a">8月至3日</text>
+<path d="M96.3 181.4l38 0l0 23.9l-38 0Z" fill="url(#rh-internet-0-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-internet-0-medium-cls-97"></path>
+<path d="M172 181.4l38 0l0 43.5l-38 0Z" fill="url(#rh-internet-0-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-internet-0-medium-cls-97"></path>
+<path d="M247.7 181.4l38 0l0 80.5l-38 0Z" fill="url(#rh-internet-0-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-internet-0-medium-cls-97"></path>
+<path d="M323.4 181.4l38 0l0 -91.9l-38 0Z" fill="url(#rh-internet-0-medium-g1)" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-internet-0-medium-cls-98"></path>
+<path d="M399.1 181.4l38 0l0 -13l-38 0Z" fill="url(#rh-internet-0-medium-g1)" ecmeta_series_index="0" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-internet-0-medium-cls-98"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-0-medium-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-0-medium-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-internet-0-medium-cls-96:hover {
+pointer-events:none;
+}
+.rh-internet-0-medium-cls-97:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-internet-0-medium-cls-98:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-narrow" role="img" aria-label="港股互联网ETF月度涨跌" viewBox="0 0 320 380" width="320" height="380" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 320 380">
+<rect width="320" height="380" x="0" y="0" fill="none"></rect>
+<path d="M46.4 256.5L312 256.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-narrow-cls-99"></path>
+<path d="M46.4 230.5L312 230.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-narrow-cls-99"></path>
+<path d="M46.4 205.5L312 205.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-narrow-cls-99"></path>
+<path d="M46.4 179.5L312 179.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-narrow-cls-99"></path>
+<path d="M46.4 154.5L312 154.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-narrow-cls-99"></path>
+<path d="M46.4 129.5L312 129.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-narrow-cls-99"></path>
+<path d="M46.4 103.5L312 103.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-narrow-cls-99"></path>
+<path d="M46.4 78.5L312 78.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-0-narrow-cls-99"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="-6.5" transform="translate(46.42 58)" fill="#292427">%</text>
+<path d="M46.4 179.5L312 179.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-internet-0-narrow-cls-99"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 256)" fill="#54555a">-15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 230.5714)" fill="#54555a">-10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 205.1429)" fill="#54555a">-5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 179.7143)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 154.2857)" fill="#54555a">5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 128.8571)" fill="#54555a">10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 103.4286)" fill="#54555a">15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 78)" fill="#54555a">20%</text>
+<path d="M-10.1 0l20.3 0l0 18l-20.3 0Z" transform="translate(72.978 264)" fill="none" pointer-events="visible" class="rh-internet-0-narrow-cls-99"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(72.978 264)" fill="#54555a">4月</text>
+<path d="M-10.1 0l20.3 0l0 18l-20.3 0Z" transform="translate(126.094 264)" fill="none" pointer-events="visible" class="rh-internet-0-narrow-cls-99"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(126.094 264)" fill="#54555a">5月</text>
+<path d="M-10.1 0l20.3 0l0 18l-20.3 0Z" transform="translate(179.21 264)" fill="none" pointer-events="visible" class="rh-internet-0-narrow-cls-99"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(179.21 264)" fill="#54555a">6月</text>
+<path d="M-10.1 0l20.3 0l0 18l-20.3 0Z" transform="translate(232.326 264)" fill="none" pointer-events="visible" class="rh-internet-0-narrow-cls-99"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(232.326 264)" fill="#54555a">7月</text>
+<path d="M-16.6 0l33.3 0l0 36l-33.3 0Z" transform="translate(285.442 264)" fill="none" pointer-events="visible" class="rh-internet-0-narrow-cls-99"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(285.442 264)" fill="#54555a">8月至</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(285.442 264)" fill="#54555a">3日</text>
+<path d="M54.7 179.7l36.7 0l0 20.3l-36.7 0Z" fill="url(#rh-internet-0-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-internet-0-narrow-cls-100"></path>
+<path d="M107.8 179.7l36.7 0l0 37.1l-36.7 0Z" fill="url(#rh-internet-0-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-internet-0-narrow-cls-100"></path>
+<path d="M160.9 179.7l36.7 0l0 68.6l-36.7 0Z" fill="url(#rh-internet-0-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-internet-0-narrow-cls-100"></path>
+<path d="M214 179.7l36.7 0l0 -78.3l-36.7 0Z" fill="url(#rh-internet-0-narrow-g1)" ecmeta_series_index="0" ecmeta_data_index="3" ecmeta_ssr_type="chart" class="rh-internet-0-narrow-cls-101"></path>
+<path d="M267.1 179.7l36.7 0l0 -11l-36.7 0Z" fill="url(#rh-internet-0-narrow-g1)" ecmeta_series_index="0" ecmeta_data_index="4" ecmeta_ssr_type="chart" class="rh-internet-0-narrow-cls-101"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-0-narrow-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-0-narrow-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-internet-0-narrow-cls-99:hover {
+pointer-events:none;
+}
+.rh-internet-0-narrow-cls-100:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-internet-0-narrow-cls-101:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><details class="chart-values"><summary>查看图表数值</summary><div class="report-table-wrap" tabindex="0" role="region" aria-label="港股互联网ETF月度涨跌"><table><thead><tr><th scope="col">观察对象</th><th scope="col">月度涨跌（%）</th></tr></thead><tbody><tr><td>4月</td><td>-4</td></tr><tr><td>5月</td><td>-7.29</td></tr><tr><td>6月</td><td>-13.48</td></tr><tr><td>7月</td><td>15.39</td></tr><tr><td>8月至3日</td><td>2.17</td></tr></tbody></table></div></details></figure><figure class="report-chart" data-chart="internet-1"><figcaption>2026年7月港股互联网与A股科技表现</figcaption><svg class="chart-svg chart-svg-wide" role="img" aria-label="2026年7月港股互联网与A股科技表现" viewBox="0 0 760 350" width="760" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 760 350">
+<rect width="760" height="350" x="0" y="0" fill="none"></rect>
+<path d="M77.4 220.5L736 220.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-wide-cls-102"></path>
+<path d="M77.4 200.5L736 200.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-wide-cls-102"></path>
+<path d="M77.4 180.5L736 180.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-wide-cls-102"></path>
+<path d="M77.4 161.5L736 161.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-wide-cls-102"></path>
+<path d="M77.4 141.5L736 141.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-wide-cls-102"></path>
+<path d="M77.4 121.5L736 121.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-wide-cls-102"></path>
+<path d="M77.4 101.5L736 101.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-wide-cls-102"></path>
+<path d="M77.4 82.5L736 82.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-wide-cls-102"></path>
+<path d="M77.4 62.5L736 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-wide-cls-102"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(77.44 42)" fill="#292427">%</text>
+<path d="M77.4 141.5L736 141.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-internet-1-wide-cls-102"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 220)" fill="#54555a">-20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 200.25)" fill="#54555a">-15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 180.5)" fill="#54555a">-10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 160.75)" fill="#54555a">-5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 141)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 121.25)" fill="#54555a">5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 101.5)" fill="#54555a">10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 81.75)" fill="#54555a">15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 62)" fill="#54555a">20%</text>
+<path d="M-61.8 0l123.7 0l0 42l-123.7 0Z" transform="translate(187.2 228)" fill="none" pointer-events="visible" class="rh-internet-1-wide-cls-102"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" xml:space="preserve" y="10.5" transform="translate(187.2 228)" fill="#54555a">港股互联网ETF 5</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="31.5" transform="translate(187.2 228)" fill="#54555a">13330</text>
+<path d="M-45 0l90.1 0l0 42l-90.1 0Z" transform="translate(406.72 228)" fill="none" pointer-events="visible" class="rh-internet-1-wide-cls-102"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" xml:space="preserve" y="10.5" transform="translate(406.72 228)" fill="#54555a">A股AI ETF 5</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="31.5" transform="translate(406.72 228)" fill="#54555a">15050</text>
+<path d="M-55.7 0l111.4 0l0 42l-111.4 0Z" transform="translate(626.24 228)" fill="none" pointer-events="visible" class="rh-internet-1-wide-cls-102"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" xml:space="preserve" y="10.5" transform="translate(626.24 228)" fill="#54555a">A股芯片ETF 15</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="31.5" transform="translate(626.24 228)" fill="#54555a">9995</text>
+<path d="M168.2 141l38 0l0 -60.8l-38 0Z" fill="url(#rh-internet-1-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-internet-1-wide-cls-103"></path>
+<path d="M387.7 141l38 0l0 70.2l-38 0Z" fill="url(#rh-internet-1-wide-g1)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-internet-1-wide-cls-104"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-1-wide-g0">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-1-wide-g1">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-internet-1-wide-cls-102:hover {
+pointer-events:none;
+}
+.rh-internet-1-wide-cls-103:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-internet-1-wide-cls-104:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-medium" role="img" aria-label="2026年7月港股互联网与A股科技表现" viewBox="0 0 480 350" width="480" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 480 350">
+<rect width="480" height="350" x="0" y="0" fill="none"></rect>
+<path d="M77.4 199.5L456 199.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-medium-cls-105"></path>
+<path d="M77.4 182.5L456 182.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-medium-cls-105"></path>
+<path d="M77.4 165.5L456 165.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-medium-cls-105"></path>
+<path d="M77.4 147.5L456 147.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-medium-cls-105"></path>
+<path d="M77.4 130.5L456 130.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-medium-cls-105"></path>
+<path d="M77.4 113.5L456 113.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-medium-cls-105"></path>
+<path d="M77.4 96.5L456 96.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-medium-cls-105"></path>
+<path d="M77.4 79.5L456 79.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-medium-cls-105"></path>
+<path d="M77.4 62.5L456 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-medium-cls-105"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(77.44 42)" fill="#292427">%</text>
+<path d="M77.4 130.5L456 130.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-internet-1-medium-cls-105"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 199)" fill="#54555a">-20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 181.875)" fill="#54555a">-15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 164.75)" fill="#54555a">-10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 147.625)" fill="#54555a">-5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 130.5)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 113.375)" fill="#54555a">5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 96.25)" fill="#54555a">10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 79.125)" fill="#54555a">15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(69.44 62)" fill="#54555a">20%</text>
+<path d="M-45.4 0l90.7 0l0 63l-90.7 0Z" transform="translate(140.5333 207)" fill="none" pointer-events="visible" class="rh-internet-1-medium-cls-105"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(140.5333 207)" fill="#54555a">港股互联网E</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" xml:space="preserve" y="31.5" transform="translate(140.5333 207)" fill="#54555a">TF 513</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="52.5" transform="translate(140.5333 207)" fill="#54555a">330</text>
+<path d="M-28.6 0l57.1 0l0 63l-57.1 0Z" transform="translate(266.72 207)" fill="none" pointer-events="visible" class="rh-internet-1-medium-cls-105"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" xml:space="preserve" y="10.5" transform="translate(266.72 207)" fill="#54555a">A股AI E</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" xml:space="preserve" y="31.5" transform="translate(266.72 207)" fill="#54555a">TF 515</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="52.5" transform="translate(266.72 207)" fill="#54555a">050</text>
+<path d="M-39.6 0l79.2 0l0 63l-79.2 0Z" transform="translate(392.9067 207)" fill="none" pointer-events="visible" class="rh-internet-1-medium-cls-105"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(392.9067 207)" fill="#54555a">A股芯片ET</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" xml:space="preserve" y="31.5" transform="translate(392.9067 207)" fill="#54555a">F 1599</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="52.5" transform="translate(392.9067 207)" fill="#54555a">95</text>
+<path d="M121.5 130.5l38 0l0 -52.7l-38 0Z" fill="url(#rh-internet-1-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-internet-1-medium-cls-106"></path>
+<path d="M247.7 130.5l38 0l0 60.8l-38 0Z" fill="url(#rh-internet-1-medium-g1)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-internet-1-medium-cls-107"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-1-medium-g0">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-1-medium-g1">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-internet-1-medium-cls-105:hover {
+pointer-events:none;
+}
+.rh-internet-1-medium-cls-106:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-internet-1-medium-cls-107:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-narrow" role="img" aria-label="2026年7月港股互联网与A股科技表现" viewBox="0 0 320 380" width="320" height="380" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 320 380">
+<rect width="320" height="380" x="0" y="0" fill="none"></rect>
+<path d="M46.4 202.5L312 202.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-narrow-cls-108"></path>
+<path d="M46.4 186.5L312 186.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-narrow-cls-108"></path>
+<path d="M46.4 171.5L312 171.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-narrow-cls-108"></path>
+<path d="M46.4 155.5L312 155.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-narrow-cls-108"></path>
+<path d="M46.4 140.5L312 140.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-narrow-cls-108"></path>
+<path d="M46.4 124.5L312 124.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-narrow-cls-108"></path>
+<path d="M46.4 109.5L312 109.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-narrow-cls-108"></path>
+<path d="M46.4 93.5L312 93.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-narrow-cls-108"></path>
+<path d="M46.4 78.5L312 78.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-internet-1-narrow-cls-108"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="-6.5" transform="translate(46.42 58)" fill="#292427">%</text>
+<path d="M46.4 140.5L312 140.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-internet-1-narrow-cls-108"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 202)" fill="#54555a">-20%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 186.5)" fill="#54555a">-15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 171)" fill="#54555a">-10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 155.5)" fill="#54555a">-5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 140)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 124.5)" fill="#54555a">5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 109)" fill="#54555a">10%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 93.5)" fill="#54555a">15%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(38.42 78)" fill="#54555a">20%</text>
+<path d="M-19.5 0l39 0l0 90l-39 0Z" transform="translate(90.6833 210)" fill="none" pointer-events="visible" class="rh-internet-1-narrow-cls-108"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(90.6833 210)" fill="#54555a">港股互</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(90.6833 210)" fill="#54555a">联网E</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" xml:space="preserve" y="45" transform="translate(90.6833 210)" fill="#54555a">TF </text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="63" transform="translate(90.6833 210)" fill="#54555a">513</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="81" transform="translate(90.6833 210)" fill="#54555a">330</text>
+<path d="M-15.2 0l30.4 0l0 90l-30.4 0Z" transform="translate(179.21 210)" fill="none" pointer-events="visible" class="rh-internet-1-narrow-cls-108"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(179.21 210)" fill="#54555a">A股A</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" xml:space="preserve" y="27" transform="translate(179.21 210)" fill="#54555a">I E</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" xml:space="preserve" y="45" transform="translate(179.21 210)" fill="#54555a">TF </text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="63" transform="translate(179.21 210)" fill="#54555a">515</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="81" transform="translate(179.21 210)" fill="#54555a">050</text>
+<path d="M-17.4 0l34.7 0l0 90l-34.7 0Z" transform="translate(267.7367 210)" fill="none" pointer-events="visible" class="rh-internet-1-narrow-cls-108"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(267.7367 210)" fill="#54555a">A股芯</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(267.7367 210)" fill="#54555a">片ET</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" xml:space="preserve" y="45" transform="translate(267.7367 210)" fill="#54555a">F 1</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="63" transform="translate(267.7367 210)" fill="#54555a">599</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="81" transform="translate(267.7367 210)" fill="#54555a">95</text>
+<path d="M71.7 140l38 0l0 -47.7l-38 0Z" fill="url(#rh-internet-1-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-internet-1-narrow-cls-109"></path>
+<path d="M160.2 140l38 0l0 55.1l-38 0Z" fill="url(#rh-internet-1-narrow-g1)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-internet-1-narrow-cls-110"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-1-narrow-g0">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-internet-1-narrow-g1">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-internet-1-narrow-cls-108:hover {
+pointer-events:none;
+}
+.rh-internet-1-narrow-cls-109:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-internet-1-narrow-cls-110:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><details class="chart-values"><summary>查看图表数值</summary><div class="report-table-wrap" tabindex="0" role="region" aria-label="2026年7月港股互联网与A股科技表现"><table><thead><tr><th scope="col">观察对象</th><th scope="col">7月涨跌（%）</th></tr></thead><tbody><tr><td>港股互联网ETF 513330</td><td>15.39</td></tr><tr><td>A股AI ETF 515050</td><td>-17.76</td></tr><tr><td>A股芯片ETF 159995</td><td>NA</td></tr></tbody></table></div></details></figure></div><div class="archive-table-grid"><div class="report-table-wrap" tabindex="0" role="region" aria-label="港股互联网行情路径"><table><caption>港股互联网行情路径</caption><thead><tr><th scope="col">指标</th><th scope="col">数值</th><th scope="col">时间或口径</th></tr></thead><tbody><tr><td>4月初至6月底</td><td>0.4355至0.3518</td><td>Q2跌幅-19.22%</td></tr><tr><td>区间高低点</td><td>0.4511至0.3346</td><td>最大回撤-25.8%</td></tr><tr><td>7月路径</td><td>0.3515至0.4056</td><td>反弹+15.39%</td></tr><tr><td>最新净值</td><td>0.4144</td><td>8月3日，距高点-8.1%</td></tr><tr><td>恒生科技指数</td><td>4875.61</td><td>距Q2低点反弹超15%</td></tr></tbody></table></div><div class="report-table-wrap" tabindex="0" role="region" aria-label="Q2压力与7月转折"><table><caption>Q2压力与7月转折</caption><thead><tr><th scope="col">维度</th><th scope="col">原材料事实</th><th scope="col">研究含义</th></tr></thead><tbody><tr><td>行业竞争</td><td>消费者服务预期收入增速-26%</td><td>低效投入压制利润率</td></tr><tr><td>南向资金</td><td>12月日均10.9亿港元</td><td>低于全年日均60亿港元</td></tr><tr><td>AI应用</td><td>货币化路径不清晰</td><td>估值缺少新增量</td></tr><tr><td>战略调整</td><td>收缩低效业务</td><td>利润率拐点前兆</td></tr><tr><td>估值位置</td><td>均值下方约1倍标准差</td><td>修复空间仍在</td></tr></tbody></table></div><div class="report-table-wrap" tabindex="0" role="region" aria-label="港股平台资产的A股缺位价值"><table><caption>港股平台资产的A股缺位价值</caption><thead><tr><th scope="col">维度</th><th scope="col">港股互联网特征</th></tr></thead><tbody><tr><td>资产稀缺</td><td>腾讯、阿里、美团、快手在A股无对标</td></tr><tr><td>平台壁垒</td><td>用户、流量与商业闭环完整</td></tr><tr><td>战略方向</td><td>由规模扩张转向利润率</td></tr><tr><td>弹性</td><td>区间振幅34.82%</td></tr><tr><td>催化</td><td>财报、降息预期与AI应用落地</td></tr></tbody></table></div></div><p class="source-note">来源口径：原材料公开行情、估值、资金与行业资料。行情截至2026年8月3日，报告发布于8月4日；原PDF未列具体数据源。A股芯片ETF柱未印精确值，保留为NA。</p></section><section id="reportVerification"><h2>4.口径与风险</h2><div class="report-metric-strip"><div class="report-metric"><span>Q2累计跌幅</span><strong>-19.22%</strong><small>4月至6月</small></div><div class="report-metric"><span>7月反弹</span><strong>+15.39%</strong><small>V形修复</small></div><div class="report-metric"><span>全周期振幅</span><strong>34.82%</strong><small>高弹性特征</small></div></div><div class="report-verification"><div><h3>数据边界</h3><p>Q2起止点与月度涨跌采用不同口径，不能直接复合</p></div><div><h3>待核验项</h3><p>行情、估值、资金数据来源与芯片ETF精确涨跌未披露</p></div></div><p>原PDF未列行情、估值与资金数据来源</p><p class="risk-note">风险提示：行业监管变化、平台竞争加剧、宏观需求走弱、AI商业化不及预期、南向资金放缓或利润率改善无法兑现。</p><p class="source-note">来源口径：原材料中的公开ETF行情、估值、资金与行业资料，行情截至2026年8月3日，报告发布于8月4日；原PDF未列具体数据源。内部使用标识已删除；期权结构、报价与产品比较未纳入。本报告为Demo，不构成投资建议。</p><p class="historical-note">历史报告样例，非实时研究。完整保留现有Demo已整理的研究内容。</p></section></main></body></html>

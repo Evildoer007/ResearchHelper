@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="rh-source-key" content="ipo"><meta name="rh-chart-renderer" content="ECharts 6.0.0 offline SVG"><title>大型IPO窗口期：短期冲击与修复规律</title><style>/*
+THESIS: Complete research content is the artifact; navigation stays out of print.
+OWN-WORLD: Demo paper, ink, red rules, blue comparison charts and system text.
+STORY: Read the conclusion, inspect arguments, check figures and source limits.
+FIRST VIEWPORT: Left chapter directory and a readable report title/conclusion.
+FORM: Extend the user's established Demo reader; no new visual-world selection.
+*/
+:root {
+  --paper:#FFFDFB;
+  --surface:#F5F2EF;
+  --ink:#292427;
+  --muted:#6E6569;
+  --red:#B8102D;
+  --blue:#3D607F;
+  --rule:#DED8D6;
+  --report-size:15px;
+  --directory-width:144px;
+  --content-width:940px;
+  --page-padding:28px;
+  color-scheme:light;
+  font-family:"PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  font-size:var(--report-size);
+  color:var(--ink);
+  background:var(--paper);
+  font-variant-numeric:tabular-nums;
+}
+* { box-sizing:border-box; }
+body { margin:0; padding-left:var(--directory-width); line-height:1.9; }
+a { color:var(--red); }
+:focus-visible { outline:2px solid var(--red); outline-offset:3px; }
+.skip-link { position:absolute; top:8px; left:8px; padding:10px 16px; background:var(--paper); transform:translateY(-150%); z-index:3; }
+.skip-link:focus { transform:none; }
+.report-directory { position:fixed; inset:0 auto 0 0; width:var(--directory-width); padding:24px 8px; background:var(--surface); border-right:1px solid var(--rule); }
+.report-directory nav { display:grid; gap:8px; }
+.report-directory a { display:flex; align-items:center; min-height:44px; padding:8px 12px; font-size:14px; color:var(--muted); text-decoration:none; border-radius:8px; }
+.report-directory a:hover { color:var(--red); background:var(--paper); }
+.report-sheet { max-width:var(--content-width); min-width:0; padding:30px var(--page-padding) 48px; margin:0 auto; overflow-wrap:anywhere; }
+h1,h2,h3,figcaption,caption { font-weight:600; text-wrap:balance; }
+h1 { max-width:26em; margin:0 0 27px; font-size:clamp(25px,3vw,30px); line-height:1.45; letter-spacing:-.025em; }
+h2,.evidence-section-title { margin:36px 0 18px; font-size:21px; line-height:1.55; }
+h3 { margin:26px 0 12px; font-size:18px; line-height:1.65; }
+p { margin:0 0 14px; max-width:75ch; }
+section { scroll-margin-top:28px; }
+.report-summary { border-top:2px solid var(--red); padding-top:18px; }
+.report-summary h2 { margin-top:0; color:var(--red); font-size:15px; }
+.conclusion { font-size:17px; line-height:1.95; font-weight:500; }
+.report-meta { display:flex; flex-wrap:wrap; gap:8px 22px; padding:10px 0 18px; margin:0; border-bottom:1px solid var(--rule); color:var(--muted); font-size:13px; }
+.report-meta dd { margin:0; }
+.logic-block { padding-bottom:14px; border-bottom:1px solid var(--rule); }
+.source-note,.archive-source,.historical-note { color:var(--muted); font-size:13px; line-height:1.85; }
+.source-note { margin-top:14px; }
+.chart-grid,.catch-up-grid,.comparison-grid,.instrument-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:24px; }
+.comparison-grid,.instrument-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.chart-box,.report-chart { min-width:0; margin:0; }
+.chart-box { border-bottom:1px solid var(--rule); padding:12px 0; }
+.report-chart { break-inside:avoid; container-type:inline-size; }
+.report-chart figcaption { font-size:16px; margin:8px 0; line-height:1.5; }
+.report-chart svg { display:block; width:100%; height:auto; max-width:100%; }
+.report-chart .chart-svg-medium,.report-chart .chart-svg-narrow { display:none; }
+@container (max-width:639px) {
+  .report-chart .chart-svg-wide { display:none; }
+  .report-chart .chart-svg-medium { display:block; }
+}
+@container (max-width:399px) {
+  .report-chart .chart-svg-medium { display:none; }
+  .report-chart .chart-svg-narrow { display:block; }
+}
+.chart-values { margin:8px 0 14px; }
+summary { color:var(--muted); font-size:13px; cursor:pointer; min-height:44px; padding:10px 0; }
+summary:hover { color:var(--red); }
+.chart-boundary { color:var(--muted); font-size:13px; line-height:1.8; }
+.report-metric-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:14px 20px; padding:18px 0; margin:18px 0 22px; border-block:1px solid var(--rule); }
+.report-metric span,.report-metric small { display:block; font-size:13px; color:var(--muted); }
+.report-metric strong { display:block; font-size:21px; line-height:1.6; margin:4px 0; font-weight:600; }
+.catch-up-grid { align-items:center; margin:24px 0; }
+.catch-up-steps { display:grid; gap:18px; }
+.catch-up-step strong { display:block; font-size:15px; }
+.catch-up-step span { display:block; color:var(--muted); font-size:14px; margin-top:4px; }
+.comparison-grid,.instrument-grid { margin:24px 0; }
+.report-table-wrap { overflow-x:auto; max-width:100%; margin:0 0 20px; }
+table { width:100%; border-collapse:collapse; font-size:13px; line-height:1.75; }
+caption { text-align:left; padding:2px 0 12px; color:var(--ink); font-size:16px; }
+th,td { padding:9px 10px; text-align:left; vertical-align:top; border-bottom:1px solid var(--rule); }
+th { background:var(--surface); border-top:1px solid var(--rule); font-weight:600; }
+.pe-table td:nth-child(even) { white-space:nowrap; text-align:right; }
+.instrument-card { padding:16px 0; border-top:1px solid var(--rule); }
+.instrument-card strong { font-size:15px; }
+.instrument-card p { font-size:14px; color:var(--muted); margin:10px 0; }
+.instrument-tags { display:flex; flex-wrap:wrap; gap:12px; color:var(--blue); font-size:13px; }
+.archive-table-grid { margin:26px 0; }
+.report-verification { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; margin:20px 0; }
+.report-verification h3 { font-size:15px; color:var(--red); margin:0 0 10px; }
+.report-verification p { font-size:14px; }
+.risk-note { font-size:14px; padding-top:20px; border-top:1px solid var(--rule); }
+.historical-note { padding-top:16px; margin-top:20px; border-top:1px solid var(--rule); }
+.visually-hidden { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media (max-width:1100px) {
+  .chart-grid,.catch-up-grid,.comparison-grid { grid-template-columns:minmax(0,1fr); }
+}
+@media (max-width:800px) {
+  :root { --page-padding:22px; }
+  body { padding:0; }
+  .report-directory { position:sticky; inset:auto; top:0; z-index:2; width:100%; padding:8px; border-right:0; border-bottom:1px solid var(--rule); }
+  .report-directory nav { grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; }
+  .report-directory a { padding:8px 2px; justify-content:center; font-size:13px; line-height:1.5; }
+  .report-sheet { padding-top:28px; }
+  section { scroll-margin-top:84px; }
+}
+@media (max-width:520px) {
+  :root { --page-padding:18px; }
+  .instrument-grid,.report-verification { grid-template-columns:minmax(0,1fr); gap:14px; }
+  .report-metric-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  th,td { padding:8px 6px; }
+}
+@media print {
+  @page { size:A4; margin:15mm; }
+  body { padding:0; font-size:11pt; }
+  .report-directory,.skip-link { display:none; }
+  .report-sheet { max-width:none; margin:0; padding:0; }
+  h1 { font-size:22pt; }
+  h2,.evidence-section-title { font-size:15pt; break-after:avoid; page-break-after:avoid; }
+  h3,caption,figcaption { break-after:avoid; page-break-after:avoid; }
+  p { orphans:3; widows:3; }
+  table { font-size:10pt; }
+  thead { display:table-header-group; }
+  tr,.report-chart,.report-metric,.instrument-card,.report-table-wrap,table { break-inside:avoid; page-break-inside:avoid; }
+  .report-table-wrap { overflow:visible; }
+  /* WebKit can split a grid item's caption from its chart despite break-inside.
+     Normal print flow keeps each complete figure and short source table together. */
+  .chart-grid,.catch-up-grid,.comparison-grid { display:block; }
+  .chart-grid > * + *,.catch-up-grid > * + *,.comparison-grid > * + * { margin-top:24px; }
+  /* An inline block is indivisible in WebKit pagination. Grid items are not:
+     the FY3PE label previously printed on a different page from its value. */
+  .report-metric-strip { display:block; }
+  .report-metric { display:inline-block; vertical-align:top; width:25%; padding:0 14px 14px 0; }
+  .report-chart { container-type:normal; }
+  .report-chart .chart-svg-wide { display:block; }
+  .report-chart .chart-svg-medium,.report-chart .chart-svg-narrow { display:none; }
+  .chart-values summary { display:none; }
+  .chart-values::details-content { content-visibility:visible; }
+  .chart-values > :not(summary) { display:block; }
+  .source-note,.archive-source,.historical-note { font-size:10pt; }
+  * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+}
+</style></head><body>
+<a class="skip-link" href="#reportTitle">跳至报告</a><aside class="report-directory" aria-label="报告目录"><nav><a href="#reportSummary">1.核心结论</a><a href="#reportArguments">2.研究论点</a><a href="#reportEvidenceSection">3.数据与图表</a><a href="#reportVerification">4.口径与风险</a></nav></aside><main class="report-sheet" aria-label="完整历史报告"><h1 id="reportTitle">大型IPO窗口期：短期冲击与修复规律</h1><section id="reportSummary" class="report-summary"><h2>1.核心结论</h2><p class="conclusion">长鑫科技IPO对A股流动性的影响定性为交易层面的短期冲击，并非系统性资金抽离。历史超大IPO样本显示，冲击集中在上市首日，随后3个交易日基本修复；当前市场成交仍较充裕，中证500在科技暴露、估值水平和成分股市值三个维度具备截面比较优势。</p><dl class="report-meta"><div><dd>研究口径：A股全市场、半导体产业链与主要宽基指数</dd></div><div><dd>观察标的：中证500指数</dd></div><div><dd>判断：上市日冲击，随后进入修复窗口</dd></div><div><dd>时间窗口：2026年7月10日至8月上旬</dd></div><div><dd>数据截至2026年7月</dd></div></dl></section><section id="reportArguments"><h2>2.研究论点</h2><section class="logic-block" id="reportLogic1"><h3>2.1 历史超大IPO冲击集中在上市日，短期内完成修复</h3><p>申购前后全A承压，上市首日全A收益中位数为-1.4%，随后3个交易日内基本填平。原图观察窗口覆盖申购前9至13日、申购日、上市前2日、上市首日和上市后3至5日。</p><p>历史样本给出三项发现：上市日冲击最大且3日修复；临近上市日，风格由小盘转向高流动性大盘；所属行业上市前上涨、上市日承压，约5个交易日后逐步修复，只有业绩传导方向更具持续性。</p><p class="source-note">数据来源：Wind、国泰海通证券研究；原材料未披露中间点位与样本方法。</p></section><section class="logic-block" id="reportLogic2"><h3>2.2 中芯国际案例显示主题交易会在上市后分化</h3><p>中芯国际688981的2020年IPO案例呈现三个阶段。T-20至T-2为预热期，对标股先行，产业链配套与战略配售受益方向跟涨，机构和游资进入后逐步兑现。</p><p>上市首日资金虹吸最明显，全市场承压，对标股回落；T+5以后领涨方向切换，只有具备真实业绩传导的方向继续走强，纯主题跟风股回落归位。</p><p class="source-note">案例：中芯国际688981，2020年；阶段划分沿用原材料。</p></section><section class="logic-block" id="reportLogic3"><h3>2.3 中证500在科技暴露、估值与市值维度具备比较优势</h3><p>中证500泛科技与成长行业权重为43.5%，市盈率为41.37倍，成分股平均市值为417亿元。三项指标共同呈现科技暴露较高、估值弹性适中和流动性较充裕的截面特征。</p><p class="source-note">数据来源：Wind、国泰海通证券研究。</p></section></section><section class="report-evidence-section" id="reportEvidenceSection"><h2>3.数据与图表</h2><div class="report-metric-strip"><div class="report-metric"><span>上市日全A收益</span><strong>-1.4%</strong><small>历史中位数</small></div><div class="report-metric"><span>修复时间</span><strong>3日</strong><small>基本填平</small></div><div class="report-metric"><span>科技成长权重</span><strong>43.5%</strong><small>中证500</small></div><div class="report-metric"><span>市盈率</span><strong>41.37x</strong><small>中证500</small></div><div class="report-metric"><span>平均市值</span><strong>417亿元</strong><small>成分股</small></div></div><div class="chart-grid"><figure class="report-chart" data-chart="ipo-0"><figcaption>超大IPO上市前后全A收益路径</figcaption><svg class="chart-svg chart-svg-wide" role="img" aria-label="超大IPO上市前后全A收益路径" viewBox="0 0 760 350" width="760" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 760 350">
+<rect width="760" height="350" x="0" y="0" fill="none"></rect>
+<path d="M81.9 271.5L736 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-wide-cls-33"></path>
+<path d="M81.9 236.5L736 236.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-wide-cls-33"></path>
+<path d="M81.9 201.5L736 201.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-wide-cls-33"></path>
+<path d="M81.9 166.5L736 166.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-wide-cls-33"></path>
+<path d="M81.9 131.5L736 131.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-wide-cls-33"></path>
+<path d="M81.9 97.5L736 97.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-wide-cls-33"></path>
+<path d="M81.9 62.5L736 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-wide-cls-33"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(81.92 42)" fill="#292427">%</text>
+<path d="M81.9 97.5L736 97.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-ipo-0-wide-cls-33"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 271)" fill="#54555a">-1.5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 236.1667)" fill="#54555a">-1.2%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 201.3333)" fill="#54555a">-0.9%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 166.5)" fill="#54555a">-0.6%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 131.6667)" fill="#54555a">-0.3%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 96.8333)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 62)" fill="#54555a">0.3%</text>
+<path d="M-53.4 0l106.9 0l0 21l-106.9 0Z" transform="translate(81.92 279)" fill="none" pointer-events="visible" class="rh-ipo-0-wide-cls-33"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(81.92 279)" fill="#54555a">申购前9至13日</text>
+<path d="M-24 0l48 0l0 21l-48 0Z" transform="translate(212.736 279)" fill="none" pointer-events="visible" class="rh-ipo-0-wide-cls-33"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(212.736 279)" fill="#54555a">申购日</text>
+<path d="M-36.5 0l73 0l0 21l-73 0Z" transform="translate(343.552 279)" fill="none" pointer-events="visible" class="rh-ipo-0-wide-cls-33"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(343.552 279)" fill="#54555a">上市前2日</text>
+<path d="M-32 0l64 0l0 21l-64 0Z" transform="translate(474.368 279)" fill="none" pointer-events="visible" class="rh-ipo-0-wide-cls-33"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(474.368 279)" fill="#54555a">上市首日</text>
+<path d="M-36.5 0l73 0l0 21l-73 0Z" transform="translate(605.184 279)" fill="none" pointer-events="visible" class="rh-ipo-0-wide-cls-33"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(605.184 279)" fill="#54555a">上市后3日</text>
+<path d="M-36.5 0l73 0l0 21l-73 0Z" transform="translate(736 279)" fill="none" pointer-events="visible" class="rh-ipo-0-wide-cls-33"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(736 279)" fill="#54555a">上市后5日</text>
+<g clip-path="url(#rh-ipo-0-wide-c0)">
+<path d="M81.9 85.2L212.7 120.1L343.6 166.5L474.4 259.4L605.2 137.5L736 96.8" fill="none" pointer-events="visible" stroke="#466F97" stroke-width="2.5" stroke-linejoin="bevel" class="rh-ipo-0-wide-cls-35"></path>
+</g>
+<defs >
+<clipPath id="rh-ipo-0-wide-c0">
+<path d="M80 60.8l658 0l0 211.5l-658 0Z" fill="#000" class="rh-ipo-0-wide-cls-34"></path>
+</clipPath>
+</defs>
+<style ><![CDATA[
+.rh-ipo-0-wide-cls-33:hover {
+pointer-events:none;
+}
+.rh-ipo-0-wide-cls-34:hover {
+cursor:pointer;
+fill:rgba(0,0,0,1);
+}
+.rh-ipo-0-wide-cls-35:hover {
+cursor:pointer;
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-medium" role="img" aria-label="超大IPO上市前后全A收益路径" viewBox="0 0 480 350" width="480" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 480 350">
+<rect width="480" height="350" x="0" y="0" fill="none"></rect>
+<path d="M81.9 220.5L456 220.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-medium-cls-36"></path>
+<path d="M81.9 193.5L456 193.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-medium-cls-36"></path>
+<path d="M81.9 167.5L456 167.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-medium-cls-36"></path>
+<path d="M81.9 141.5L456 141.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-medium-cls-36"></path>
+<path d="M81.9 114.5L456 114.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-medium-cls-36"></path>
+<path d="M81.9 88.5L456 88.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-medium-cls-36"></path>
+<path d="M81.9 62.5L456 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-medium-cls-36"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(81.92 42)" fill="#292427">%</text>
+<path d="M81.9 88.5L456 88.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-ipo-0-medium-cls-36"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 220)" fill="#54555a">-1.5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 193.6667)" fill="#54555a">-1.2%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 167.3333)" fill="#54555a">-0.9%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 141)" fill="#54555a">-0.6%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 114.6667)" fill="#54555a">-0.3%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 88.3333)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(73.92 62)" fill="#54555a">0.3%</text>
+<path d="M-41 0l81.9 0l0 42l-81.9 0Z" transform="translate(81.92 228)" fill="none" pointer-events="visible" class="rh-ipo-0-medium-cls-36"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(81.92 228)" fill="#54555a">申购前9至1</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="31.5" transform="translate(81.92 228)" fill="#54555a">3日</text>
+<path d="M-24 0l48 0l0 21l-48 0Z" transform="translate(156.736 228)" fill="none" pointer-events="visible" class="rh-ipo-0-medium-cls-36"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(156.736 228)" fill="#54555a">申购日</text>
+<path d="M-36.5 0l73 0l0 21l-73 0Z" transform="translate(231.552 228)" fill="none" pointer-events="visible" class="rh-ipo-0-medium-cls-36"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(231.552 228)" fill="#54555a">上市前2日</text>
+<path d="M-32 0l64 0l0 21l-64 0Z" transform="translate(306.368 228)" fill="none" pointer-events="visible" class="rh-ipo-0-medium-cls-36"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(306.368 228)" fill="#54555a">上市首日</text>
+<path d="M-36.5 0l73 0l0 21l-73 0Z" transform="translate(381.184 228)" fill="none" pointer-events="visible" class="rh-ipo-0-medium-cls-36"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(381.184 228)" fill="#54555a">上市后3日</text>
+<path d="M-36.5 0l73 0l0 21l-73 0Z" transform="translate(456 228)" fill="none" pointer-events="visible" class="rh-ipo-0-medium-cls-36"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(456 228)" fill="#54555a">上市后5日</text>
+<g clip-path="url(#rh-ipo-0-medium-c0)">
+<path d="M81.9 79.6L156.7 105.9L231.6 141L306.4 211.2L381.2 119.1L456 88.3" fill="none" pointer-events="visible" stroke="#466F97" stroke-width="2.5" stroke-linejoin="bevel" class="rh-ipo-0-medium-cls-38"></path>
+</g>
+<defs >
+<clipPath id="rh-ipo-0-medium-c0">
+<path d="M80 60.8l378 0l0 160.5l-378 0Z" fill="#000" class="rh-ipo-0-medium-cls-37"></path>
+</clipPath>
+</defs>
+<style ><![CDATA[
+.rh-ipo-0-medium-cls-36:hover {
+pointer-events:none;
+}
+.rh-ipo-0-medium-cls-37:hover {
+cursor:pointer;
+fill:rgba(0,0,0,1);
+}
+.rh-ipo-0-medium-cls-38:hover {
+cursor:pointer;
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-narrow" role="img" aria-label="超大IPO上市前后全A收益路径" viewBox="0 0 320 380" width="320" height="380" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 320 380">
+<rect width="320" height="380" x="0" y="0" fill="none"></rect>
+<path d="M50.1 238.5L312 238.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-narrow-cls-39"></path>
+<path d="M50.1 211.5L312 211.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-narrow-cls-39"></path>
+<path d="M50.1 184.5L312 184.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-narrow-cls-39"></path>
+<path d="M50.1 158.5L312 158.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-narrow-cls-39"></path>
+<path d="M50.1 131.5L312 131.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-narrow-cls-39"></path>
+<path d="M50.1 104.5L312 104.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-narrow-cls-39"></path>
+<path d="M50.1 78.5L312 78.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-ipo-0-narrow-cls-39"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="-6.5" transform="translate(50.06 58)" fill="#292427">%</text>
+<path d="M50.1 104.5L312 104.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-ipo-0-narrow-cls-39"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(42.06 238)" fill="#54555a">-1.5%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(42.06 211.3333)" fill="#54555a">-1.2%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(42.06 184.6667)" fill="#54555a">-0.9%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(42.06 158)" fill="#54555a">-0.6%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(42.06 131.3333)" fill="#54555a">-0.3%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(42.06 104.6667)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(42.06 78)" fill="#54555a">0.3%</text>
+<path d="M-19.5 0l39 0l0 54l-39 0Z" transform="translate(50.06 246)" fill="none" pointer-events="visible" class="rh-ipo-0-narrow-cls-39"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(50.06 246)" fill="#54555a">申购前</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(50.06 246)" fill="#54555a">9至1</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="45" transform="translate(50.06 246)" fill="#54555a">3日</text>
+<path d="M-19.5 0l39 0l0 18l-39 0Z" transform="translate(102.448 246)" fill="none" pointer-events="visible" class="rh-ipo-0-narrow-cls-39"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(102.448 246)" fill="#54555a">申购日</text>
+<path d="M-19.5 0l39 0l0 36l-39 0Z" transform="translate(154.836 246)" fill="none" pointer-events="visible" class="rh-ipo-0-narrow-cls-39"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(154.836 246)" fill="#54555a">上市前</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(154.836 246)" fill="#54555a">2日</text>
+<path d="M-19.5 0l39 0l0 36l-39 0Z" transform="translate(207.224 246)" fill="none" pointer-events="visible" class="rh-ipo-0-narrow-cls-39"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(207.224 246)" fill="#54555a">上市首</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(207.224 246)" fill="#54555a">日</text>
+<path d="M-19.5 0l39 0l0 36l-39 0Z" transform="translate(259.612 246)" fill="none" pointer-events="visible" class="rh-ipo-0-narrow-cls-39"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(259.612 246)" fill="#54555a">上市后</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(259.612 246)" fill="#54555a">3日</text>
+<path d="M-19.5 0l39 0l0 36l-39 0Z" transform="translate(312 246)" fill="none" pointer-events="visible" class="rh-ipo-0-narrow-cls-39"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(312 246)" fill="#54555a">上市后</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(312 246)" fill="#54555a">5日</text>
+<g clip-path="url(#rh-ipo-0-narrow-c0)">
+<path d="M50.1 95.8L102.4 122.4L154.8 158L207.2 229.1L259.6 135.8L312 104.7" fill="none" pointer-events="visible" stroke="#466F97" stroke-width="2.5" stroke-linejoin="bevel" class="rh-ipo-0-narrow-cls-41"></path>
+</g>
+<defs >
+<clipPath id="rh-ipo-0-narrow-c0">
+<path d="M48 76.8l266 0l0 162.5l-266 0Z" fill="#000" class="rh-ipo-0-narrow-cls-40"></path>
+</clipPath>
+</defs>
+<style ><![CDATA[
+.rh-ipo-0-narrow-cls-39:hover {
+pointer-events:none;
+}
+.rh-ipo-0-narrow-cls-40:hover {
+cursor:pointer;
+fill:rgba(0,0,0,1);
+}
+.rh-ipo-0-narrow-cls-41:hover {
+cursor:pointer;
+}
+
+]]>
+
+</style>
+</svg><details class="chart-values"><summary>查看图表数值</summary><div class="report-table-wrap" tabindex="0" role="region" aria-label="超大IPO上市前后全A收益路径"><table><thead><tr><th scope="col">观察对象</th><th scope="col">原图形态重绘（%）</th></tr></thead><tbody><tr><td>申购前9至13日</td><td>0.1</td></tr><tr><td>申购日</td><td>-0.2</td></tr><tr><td>上市前2日</td><td>-0.6</td></tr><tr><td>上市首日</td><td>-1.4</td></tr><tr><td>上市后3日</td><td>-0.35</td></tr><tr><td>上市后5日</td><td>0</td></tr></tbody></table></div></details></figure></div><div class="archive-table-grid"><div class="report-table-wrap" tabindex="0" role="region" aria-label="长鑫科技IPO关键节点"><table><caption>长鑫科技IPO关键节点</caption><thead><tr><th scope="col">日期</th><th scope="col">节点</th><th scope="col">市场含义</th></tr></thead><tbody><tr><td>7月10日</td><td>发行公告</td><td>确定发行价区间</td></tr><tr><td>7月16日</td><td>网上网下申购</td><td>机构与个人申购</td></tr><tr><td>7月17日</td><td>公布中签结果</td><td>中签率公告</td></tr><tr><td>7月18日</td><td>中签缴款</td><td>资金冻结约3日</td></tr><tr><td>7月21日至23日</td><td>资金解冻</td><td>冻结资金回笼</td></tr><tr><td>8月上旬</td><td>预计上市</td><td>冲击观察窗口</td></tr></tbody></table></div><div class="report-table-wrap" tabindex="0" role="region" aria-label="历史超大IPO三项发现"><table><caption>历史超大IPO三项发现</caption><thead><tr><th scope="col">发现</th><th scope="col">原材料结论</th><th scope="col">时间</th></tr></thead><tbody><tr><td>市场冲击</td><td>上市首日全A收益中位数-1.4%，随后基本填平</td><td>约3个交易日</td></tr><tr><td>风格轮动</td><td>小盘向高流动性大盘切换</td><td>临近上市日</td></tr><tr><td>行业修复</td><td>所属行业先涨后跌，业绩传导方向更持续</td><td>约5个交易日</td></tr></tbody></table></div><div class="report-table-wrap" tabindex="0" role="region" aria-label="中芯国际IPO三阶段分化"><table><caption>中芯国际IPO三阶段分化</caption><thead><tr><th scope="col">阶段</th><th scope="col">窗口</th><th scope="col">市场表现</th></tr></thead><tbody><tr><td>预热</td><td>T-20至T-2</td><td>对标股先行，配套及战略配售受益方向跟涨，逐步兑现</td></tr><tr><td>冲击</td><td>上市首日</td><td>全市场承压，资金虹吸，对标股回落</td></tr><tr><td>分化</td><td>T+5以后</td><td>领涨股切换，业绩传导方向持续，跟风股回落</td></tr></tbody></table></div></div><p class="source-note">数据来源：Wind、国泰海通证券研究。路径图仅将原材料明确标注的-1.4%与3日修复作为精确值，其余节点按原图形态重绘，不作精确数值使用。</p></section><section id="reportVerification"><h2>4.口径与风险</h2><div class="report-metric-strip"><div class="report-metric"><span>上市日冲击</span><strong>-1.4%</strong><small>全A收益中位数</small></div><div class="report-metric"><span>三日后表现</span><strong>基本填平</strong><small>历史超大IPO样本</small></div><div class="report-metric"><span>泛科技成长权重</span><strong>43.5%</strong><small>中证500</small></div></div><div class="report-verification"><div><h3>数据边界</h3><p>路径中间点仅按原图形态重绘，精确值未披露</p></div><div><h3>待核验项</h3><p>历史样本方法、最终募资规模与上市日仍需确认</p></div></div><p>原材料未披露路径中间点位与历史样本方法</p><p class="risk-note">风险提示：发行规模超预期、上市时间变化、市场成交收缩、主题交易提前透支或风险偏好快速下降。历史IPO样本不代表未来表现。</p><p class="source-note">数据来源：Wind、国泰海通证券研究。出品机构、业务部门及内部标识已脱敏；产品方案、交易要素与报价未纳入。本报告为Demo，不构成投资建议。</p><p class="historical-note">历史报告样例，非实时研究。完整保留现有Demo已整理的研究内容。</p></section></main></body></html>

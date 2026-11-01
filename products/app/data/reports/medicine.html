@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="rh-source-key" content="medicine"><meta name="rh-chart-renderer" content="ECharts 6.0.0 offline SVG"><title>港股创新药：稀缺价值与Q2回调后的复苏</title><style>/*
+THESIS: Complete research content is the artifact; navigation stays out of print.
+OWN-WORLD: Demo paper, ink, red rules, blue comparison charts and system text.
+STORY: Read the conclusion, inspect arguments, check figures and source limits.
+FIRST VIEWPORT: Left chapter directory and a readable report title/conclusion.
+FORM: Extend the user's established Demo reader; no new visual-world selection.
+*/
+:root {
+  --paper:#FFFDFB;
+  --surface:#F5F2EF;
+  --ink:#292427;
+  --muted:#6E6569;
+  --red:#B8102D;
+  --blue:#3D607F;
+  --rule:#DED8D6;
+  --report-size:15px;
+  --directory-width:144px;
+  --content-width:940px;
+  --page-padding:28px;
+  color-scheme:light;
+  font-family:"PingFang SC","Microsoft YaHei",system-ui,-apple-system,sans-serif;
+  font-size:var(--report-size);
+  color:var(--ink);
+  background:var(--paper);
+  font-variant-numeric:tabular-nums;
+}
+* { box-sizing:border-box; }
+body { margin:0; padding-left:var(--directory-width); line-height:1.9; }
+a { color:var(--red); }
+:focus-visible { outline:2px solid var(--red); outline-offset:3px; }
+.skip-link { position:absolute; top:8px; left:8px; padding:10px 16px; background:var(--paper); transform:translateY(-150%); z-index:3; }
+.skip-link:focus { transform:none; }
+.report-directory { position:fixed; inset:0 auto 0 0; width:var(--directory-width); padding:24px 8px; background:var(--surface); border-right:1px solid var(--rule); }
+.report-directory nav { display:grid; gap:8px; }
+.report-directory a { display:flex; align-items:center; min-height:44px; padding:8px 12px; font-size:14px; color:var(--muted); text-decoration:none; border-radius:8px; }
+.report-directory a:hover { color:var(--red); background:var(--paper); }
+.report-sheet { max-width:var(--content-width); min-width:0; padding:30px var(--page-padding) 48px; margin:0 auto; overflow-wrap:anywhere; }
+h1,h2,h3,figcaption,caption { font-weight:600; text-wrap:balance; }
+h1 { max-width:26em; margin:0 0 27px; font-size:clamp(25px,3vw,30px); line-height:1.45; letter-spacing:-.025em; }
+h2,.evidence-section-title { margin:36px 0 18px; font-size:21px; line-height:1.55; }
+h3 { margin:26px 0 12px; font-size:18px; line-height:1.65; }
+p { margin:0 0 14px; max-width:75ch; }
+section { scroll-margin-top:28px; }
+.report-summary { border-top:2px solid var(--red); padding-top:18px; }
+.report-summary h2 { margin-top:0; color:var(--red); font-size:15px; }
+.conclusion { font-size:17px; line-height:1.95; font-weight:500; }
+.report-meta { display:flex; flex-wrap:wrap; gap:8px 22px; padding:10px 0 18px; margin:0; border-bottom:1px solid var(--rule); color:var(--muted); font-size:13px; }
+.report-meta dd { margin:0; }
+.logic-block { padding-bottom:14px; border-bottom:1px solid var(--rule); }
+.source-note,.archive-source,.historical-note { color:var(--muted); font-size:13px; line-height:1.85; }
+.source-note { margin-top:14px; }
+.chart-grid,.catch-up-grid,.comparison-grid,.instrument-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:24px; }
+.comparison-grid,.instrument-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.chart-box,.report-chart { min-width:0; margin:0; }
+.chart-box { border-bottom:1px solid var(--rule); padding:12px 0; }
+.report-chart { break-inside:avoid; container-type:inline-size; }
+.report-chart figcaption { font-size:16px; margin:8px 0; line-height:1.5; }
+.report-chart svg { display:block; width:100%; height:auto; max-width:100%; }
+.report-chart .chart-svg-medium,.report-chart .chart-svg-narrow { display:none; }
+@container (max-width:639px) {
+  .report-chart .chart-svg-wide { display:none; }
+  .report-chart .chart-svg-medium { display:block; }
+}
+@container (max-width:399px) {
+  .report-chart .chart-svg-medium { display:none; }
+  .report-chart .chart-svg-narrow { display:block; }
+}
+.chart-values { margin:8px 0 14px; }
+summary { color:var(--muted); font-size:13px; cursor:pointer; min-height:44px; padding:10px 0; }
+summary:hover { color:var(--red); }
+.chart-boundary { color:var(--muted); font-size:13px; line-height:1.8; }
+.report-metric-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:14px 20px; padding:18px 0; margin:18px 0 22px; border-block:1px solid var(--rule); }
+.report-metric span,.report-metric small { display:block; font-size:13px; color:var(--muted); }
+.report-metric strong { display:block; font-size:21px; line-height:1.6; margin:4px 0; font-weight:600; }
+.catch-up-grid { align-items:center; margin:24px 0; }
+.catch-up-steps { display:grid; gap:18px; }
+.catch-up-step strong { display:block; font-size:15px; }
+.catch-up-step span { display:block; color:var(--muted); font-size:14px; margin-top:4px; }
+.comparison-grid,.instrument-grid { margin:24px 0; }
+.report-table-wrap { overflow-x:auto; max-width:100%; margin:0 0 20px; }
+table { width:100%; border-collapse:collapse; font-size:13px; line-height:1.75; }
+caption { text-align:left; padding:2px 0 12px; color:var(--ink); font-size:16px; }
+th,td { padding:9px 10px; text-align:left; vertical-align:top; border-bottom:1px solid var(--rule); }
+th { background:var(--surface); border-top:1px solid var(--rule); font-weight:600; }
+.pe-table td:nth-child(even) { white-space:nowrap; text-align:right; }
+.instrument-card { padding:16px 0; border-top:1px solid var(--rule); }
+.instrument-card strong { font-size:15px; }
+.instrument-card p { font-size:14px; color:var(--muted); margin:10px 0; }
+.instrument-tags { display:flex; flex-wrap:wrap; gap:12px; color:var(--blue); font-size:13px; }
+.archive-table-grid { margin:26px 0; }
+.report-verification { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; margin:20px 0; }
+.report-verification h3 { font-size:15px; color:var(--red); margin:0 0 10px; }
+.report-verification p { font-size:14px; }
+.risk-note { font-size:14px; padding-top:20px; border-top:1px solid var(--rule); }
+.historical-note { padding-top:16px; margin-top:20px; border-top:1px solid var(--rule); }
+.visually-hidden { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+@media (max-width:1100px) {
+  .chart-grid,.catch-up-grid,.comparison-grid { grid-template-columns:minmax(0,1fr); }
+}
+@media (max-width:800px) {
+  :root { --page-padding:22px; }
+  body { padding:0; }
+  .report-directory { position:sticky; inset:auto; top:0; z-index:2; width:100%; padding:8px; border-right:0; border-bottom:1px solid var(--rule); }
+  .report-directory nav { grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; }
+  .report-directory a { padding:8px 2px; justify-content:center; font-size:13px; line-height:1.5; }
+  .report-sheet { padding-top:28px; }
+  section { scroll-margin-top:84px; }
+}
+@media (max-width:520px) {
+  :root { --page-padding:18px; }
+  .instrument-grid,.report-verification { grid-template-columns:minmax(0,1fr); gap:14px; }
+  .report-metric-strip { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  th,td { padding:8px 6px; }
+}
+@media print {
+  @page { size:A4; margin:15mm; }
+  body { padding:0; font-size:11pt; }
+  .report-directory,.skip-link { display:none; }
+  .report-sheet { max-width:none; margin:0; padding:0; }
+  h1 { font-size:22pt; }
+  h2,.evidence-section-title { font-size:15pt; break-after:avoid; page-break-after:avoid; }
+  h3,caption,figcaption { break-after:avoid; page-break-after:avoid; }
+  p { orphans:3; widows:3; }
+  table { font-size:10pt; }
+  thead { display:table-header-group; }
+  tr,.report-chart,.report-metric,.instrument-card,.report-table-wrap,table { break-inside:avoid; page-break-inside:avoid; }
+  .report-table-wrap { overflow:visible; }
+  /* WebKit can split a grid item's caption from its chart despite break-inside.
+     Normal print flow keeps each complete figure and short source table together. */
+  .chart-grid,.catch-up-grid,.comparison-grid { display:block; }
+  .chart-grid > * + *,.catch-up-grid > * + *,.comparison-grid > * + * { margin-top:24px; }
+  /* An inline block is indivisible in WebKit pagination. Grid items are not:
+     the FY3PE label previously printed on a different page from its value. */
+  .report-metric-strip { display:block; }
+  .report-metric { display:inline-block; vertical-align:top; width:25%; padding:0 14px 14px 0; }
+  .report-chart { container-type:normal; }
+  .report-chart .chart-svg-wide { display:block; }
+  .report-chart .chart-svg-medium,.report-chart .chart-svg-narrow { display:none; }
+  .chart-values summary { display:none; }
+  .chart-values::details-content { content-visibility:visible; }
+  .chart-values > :not(summary) { display:block; }
+  .source-note,.archive-source,.historical-note { font-size:10pt; }
+  * { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+}
+</style></head><body>
+<a class="skip-link" href="#reportTitle">跳至报告</a><aside class="report-directory" aria-label="报告目录"><nav><a href="#reportSummary">1.核心结论</a><a href="#reportArguments">2.研究论点</a><a href="#reportEvidenceSection">3.数据与图表</a><a href="#reportVerification">4.口径与风险</a></nav></aside><main class="report-sheet" aria-label="完整历史报告"><h1 id="reportTitle">港股创新药：稀缺价值与Q2回调后的复苏</h1><section id="reportSummary" class="report-summary"><h2>1.核心结论</h2><p class="conclusion">港股创新药板块在Q2经历深度回调，港股创新药ETF（513120）从5月高点1.2285跌至6月底1.0633，Q2跌幅为13.45%，7月随政策落地反弹9.30%。港股集中了A股稀缺的纯创新药管线型企业。样本企业2025年营收增长15.28%、归母净利润增长125.19%并实现扭亏；2026年上半年BD出海交易额达到1100亿美元。独立商保创新药目录与8年价格保护机制改善支付预期，板块仍处反弹中段。</p><dl class="report-meta"><div><dd>研究口径：港股创新药板块</dd></div><div><dd>观察标的：港股创新药ETF（513120.SH）</dd></div><div><dd>方向：谨慎看多</dd></div><div><dd>覆盖期：2026年Q2及7月反弹窗口</dd></div><div><dd>报告日期2026年8月4日 · 行情截至8月3日</dd></div></dl></section><section id="reportArguments"><h2>2.研究论点</h2><section class="logic-block" id="reportLogic1"><h3>2.1 Q2深度回调释放估值压力，7月政策催化反转</h3><p>ETF 513120从5月高点1.2285跌至6月底1.0633，Q2下跌13.45%，全周期振幅25.01%。回调原因包括前期获利了结，以及中美地缘不确定性对风险偏好的压制。</p><p>6月29日，国家医保局首次设立独立商保创新药目录并配套8年价格保护机制，成为行情转折点。7月ETF由1.0624升至1.1612，反弹9.30%；8月3日净值为1.1482，距5月高点仍低6.5%。原材料同时称指定ETF份额增加超过15亿份。</p><p class="source-note">来源口径：原材料ETF行情与政策节点；行情截至8月3日，报告发布于8月4日。</p></section><section class="logic-block" id="reportLogic2"><h3>2.2 港股创新药具备A股不可替代的稀缺性</h3><p>A股医药资产主要集中于传统药企、器械和CXO，纯创新药管线型公司相对缺位。港股18A制度允许未盈利Biotech上市，形成百济神州、信达生物、康方生物等创新药资产集群。</p><p>样本企业2025年合计营收同比增长15.28%，归母净利润同比增长125.19%并实现扭亏。2026年上半年BD出海交易额为1100亿美元，约为2025年全年的八成；商保目录为高临床价值创新药打开医保之外的支付空间。</p><p class="source-note">来源口径：原材料企业样本、BD交易与政策资料；样本公司清单未披露。</p></section></section><section class="report-evidence-section" id="reportEvidenceSection"><h2>3.数据与图表</h2><div class="report-metric-strip"><div class="report-metric"><span>最新净值</span><strong>1.1482</strong><small>8月3日</small></div><div class="report-metric"><span>Q2跌幅</span><strong>-13.45%</strong><small>5月至6月</small></div><div class="report-metric"><span>7月反弹</span><strong>+9.30%</strong><small>政策催化</small></div><div class="report-metric"><span>全周期振幅</span><strong>25.01%</strong><small>高弹性</small></div><div class="report-metric"><span>BD出海</span><strong>1100亿美元</strong><small>2026H1</small></div></div><div class="chart-grid"><figure class="report-chart" data-chart="medicine-0"><figcaption>港股创新药ETF月度涨跌</figcaption><svg class="chart-svg chart-svg-wide" role="img" aria-label="港股创新药ETF月度涨跌" viewBox="0 0 760 350" width="760" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 760 350">
+<rect width="760" height="350" x="0" y="0" fill="none"></rect>
+<path d="M72.2 271.5L736 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-wide-cls-84"></path>
+<path d="M72.2 241.5L736 241.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-wide-cls-84"></path>
+<path d="M72.2 211.5L736 211.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-wide-cls-84"></path>
+<path d="M72.2 181.5L736 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-wide-cls-84"></path>
+<path d="M72.2 151.5L736 151.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-wide-cls-84"></path>
+<path d="M72.2 121.5L736 121.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-wide-cls-84"></path>
+<path d="M72.2 92.5L736 92.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-wide-cls-84"></path>
+<path d="M72.2 62.5L736 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-wide-cls-84"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(72.16 42)" fill="#292427">%</text>
+<path d="M72.2 181.5L736 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-medicine-0-wide-cls-84"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 271)" fill="#54555a">-9%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 241.1429)" fill="#54555a">-6%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 211.2857)" fill="#54555a">-3%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 181.4286)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 151.5714)" fill="#54555a">3%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 121.7143)" fill="#54555a">6%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 91.8571)" fill="#54555a">9%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 62)" fill="#54555a">12%</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(155.14 279)" fill="none" pointer-events="visible" class="rh-medicine-0-wide-cls-84"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(155.14 279)" fill="#54555a">5月</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(321.1 279)" fill="none" pointer-events="visible" class="rh-medicine-0-wide-cls-84"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(321.1 279)" fill="#54555a">6月</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(487.06 279)" fill="none" pointer-events="visible" class="rh-medicine-0-wide-cls-84"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(487.06 279)" fill="#54555a">7月</text>
+<path d="M-33 0l65.9 0l0 21l-65.9 0Z" transform="translate(653.02 279)" fill="none" pointer-events="visible" class="rh-medicine-0-wide-cls-84"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(653.02 279)" fill="#54555a">8月至3日</text>
+<path d="M136.1 181.4l38 0l0 89.1l-38 0Z" fill="url(#rh-medicine-0-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-medicine-0-wide-cls-85"></path>
+<path d="M302.1 181.4l38 0l0 36.1l-38 0Z" fill="url(#rh-medicine-0-wide-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-medicine-0-wide-cls-85"></path>
+<path d="M468.1 181.4l38 0l0 -92.6l-38 0Z" fill="url(#rh-medicine-0-wide-g1)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-medicine-0-wide-cls-86"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-medicine-0-wide-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-medicine-0-wide-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-medicine-0-wide-cls-84:hover {
+pointer-events:none;
+}
+.rh-medicine-0-wide-cls-85:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-medicine-0-wide-cls-86:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-medium" role="img" aria-label="港股创新药ETF月度涨跌" viewBox="0 0 480 350" width="480" height="350" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 480 350">
+<rect width="480" height="350" x="0" y="0" fill="none"></rect>
+<path d="M72.2 271.5L456 271.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-medium-cls-87"></path>
+<path d="M72.2 241.5L456 241.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-medium-cls-87"></path>
+<path d="M72.2 211.5L456 211.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-medium-cls-87"></path>
+<path d="M72.2 181.5L456 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-medium-cls-87"></path>
+<path d="M72.2 151.5L456 151.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-medium-cls-87"></path>
+<path d="M72.2 121.5L456 121.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-medium-cls-87"></path>
+<path d="M72.2 92.5L456 92.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-medium-cls-87"></path>
+<path d="M72.2 62.5L456 62.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-medium-cls-87"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="-8" transform="translate(72.16 42)" fill="#292427">%</text>
+<path d="M72.2 181.5L456 181.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-medicine-0-medium-cls-87"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 271)" fill="#54555a">-9%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 241.1429)" fill="#54555a">-6%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 211.2857)" fill="#54555a">-3%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 181.4286)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 151.5714)" fill="#54555a">3%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 121.7143)" fill="#54555a">6%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 91.8571)" fill="#54555a">9%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:16px;font-family:Arial;" transform="translate(64.16 62)" fill="#54555a">12%</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(120.14 279)" fill="none" pointer-events="visible" class="rh-medicine-0-medium-cls-87"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(120.14 279)" fill="#54555a">5月</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(216.1 279)" fill="none" pointer-events="visible" class="rh-medicine-0-medium-cls-87"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(216.1 279)" fill="#54555a">6月</text>
+<path d="M-12.5 0l25 0l0 21l-25 0Z" transform="translate(312.06 279)" fill="none" pointer-events="visible" class="rh-medicine-0-medium-cls-87"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(312.06 279)" fill="#54555a">7月</text>
+<path d="M-33 0l65.9 0l0 21l-65.9 0Z" transform="translate(408.02 279)" fill="none" pointer-events="visible" class="rh-medicine-0-medium-cls-87"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:16px;font-family:Arial;" y="10.5" transform="translate(408.02 279)" fill="#54555a">8月至3日</text>
+<path d="M101.1 181.4l38 0l0 89.1l-38 0Z" fill="url(#rh-medicine-0-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-medicine-0-medium-cls-88"></path>
+<path d="M197.1 181.4l38 0l0 36.1l-38 0Z" fill="url(#rh-medicine-0-medium-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-medicine-0-medium-cls-88"></path>
+<path d="M293.1 181.4l38 0l0 -92.6l-38 0Z" fill="url(#rh-medicine-0-medium-g1)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-medicine-0-medium-cls-89"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-medicine-0-medium-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-medicine-0-medium-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-medicine-0-medium-cls-87:hover {
+pointer-events:none;
+}
+.rh-medicine-0-medium-cls-88:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-medicine-0-medium-cls-89:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><svg class="chart-svg chart-svg-narrow" role="img" aria-label="港股创新药ETF月度涨跌" viewBox="0 0 320 380" width="320" height="380" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" baseProfile="full" viewBox="0 0 320 380">
+<rect width="320" height="380" x="0" y="0" fill="none"></rect>
+<path d="M42.1 256.5L312 256.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-narrow-cls-90"></path>
+<path d="M42.1 230.5L312 230.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-narrow-cls-90"></path>
+<path d="M42.1 205.5L312 205.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-narrow-cls-90"></path>
+<path d="M42.1 179.5L312 179.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-narrow-cls-90"></path>
+<path d="M42.1 154.5L312 154.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-narrow-cls-90"></path>
+<path d="M42.1 129.5L312 129.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-narrow-cls-90"></path>
+<path d="M42.1 103.5L312 103.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-narrow-cls-90"></path>
+<path d="M42.1 78.5L312 78.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-dasharray="4,2" class="rh-medicine-0-narrow-cls-90"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="-6.5" transform="translate(42.13 58)" fill="#292427">%</text>
+<path d="M42.1 179.5L312 179.5" fill="none" pointer-events="visible" stroke="#DED8D6" stroke-linecap="round" class="rh-medicine-0-narrow-cls-90"></path>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(34.13 256)" fill="#54555a">-9%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(34.13 230.5714)" fill="#54555a">-6%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(34.13 205.1429)" fill="#54555a">-3%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(34.13 179.7143)" fill="#54555a">0%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(34.13 154.2857)" fill="#54555a">3%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(34.13 128.8571)" fill="#54555a">6%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(34.13 103.4286)" fill="#54555a">9%</text>
+<text dominant-baseline="central" text-anchor="end" style="font-size:13px;font-family:Arial;" transform="translate(34.13 78)" fill="#54555a">12%</text>
+<path d="M-10.1 0l20.3 0l0 18l-20.3 0Z" transform="translate(75.8638 264)" fill="none" pointer-events="visible" class="rh-medicine-0-narrow-cls-90"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(75.8638 264)" fill="#54555a">5月</text>
+<path d="M-10.1 0l20.3 0l0 18l-20.3 0Z" transform="translate(143.3313 264)" fill="none" pointer-events="visible" class="rh-medicine-0-narrow-cls-90"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(143.3313 264)" fill="#54555a">6月</text>
+<path d="M-10.1 0l20.3 0l0 18l-20.3 0Z" transform="translate(210.7988 264)" fill="none" pointer-events="visible" class="rh-medicine-0-narrow-cls-90"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(210.7988 264)" fill="#54555a">7月</text>
+<path d="M-16.6 0l33.3 0l0 36l-33.3 0Z" transform="translate(278.2663 264)" fill="none" pointer-events="visible" class="rh-medicine-0-narrow-cls-90"></path>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="9" transform="translate(278.2663 264)" fill="#54555a">8月至</text>
+<text dominant-baseline="central" text-anchor="middle" style="font-size:13px;font-family:Arial;" y="27" transform="translate(278.2663 264)" fill="#54555a">3日</text>
+<path d="M56.9 179.7l38 0l0 75.9l-38 0Z" fill="url(#rh-medicine-0-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="0" ecmeta_ssr_type="chart" class="rh-medicine-0-narrow-cls-91"></path>
+<path d="M124.3 179.7l38 0l0 30.8l-38 0Z" fill="url(#rh-medicine-0-narrow-g0)" ecmeta_series_index="0" ecmeta_data_index="1" ecmeta_ssr_type="chart" class="rh-medicine-0-narrow-cls-91"></path>
+<path d="M191.8 179.7l38 0l0 -78.8l-38 0Z" fill="url(#rh-medicine-0-narrow-g1)" ecmeta_series_index="0" ecmeta_data_index="2" ecmeta_ssr_type="chart" class="rh-medicine-0-narrow-cls-92"></path>
+<defs >
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-medicine-0-narrow-g0">
+<stop offset="0%" stop-color="#466F97"></stop>
+<stop offset="100%" stop-color="#B2C6D8"></stop>
+</linearGradient>
+<linearGradient gradientUnits="objectBoundingBox" x1="0" y1="0" x2="0" y2="1" id="rh-medicine-0-narrow-g1">
+<stop offset="0%" stop-color="#B8102D"></stop>
+<stop offset="100%" stop-color="#E6A1B0"></stop>
+</linearGradient>
+</defs>
+<style ><![CDATA[
+.rh-medicine-0-narrow-cls-90:hover {
+pointer-events:none;
+}
+.rh-medicine-0-narrow-cls-91:hover {
+cursor:pointer;
+fill:[object Object];
+}
+.rh-medicine-0-narrow-cls-92:hover {
+cursor:pointer;
+fill:[object Object];
+}
+
+]]>
+
+</style>
+</svg><details class="chart-values"><summary>查看图表数值</summary><div class="report-table-wrap" tabindex="0" role="region" aria-label="港股创新药ETF月度涨跌"><table><thead><tr><th scope="col">观察对象</th><th scope="col">月度涨跌（%）</th></tr></thead><tbody><tr><td>5月</td><td>-8.95</td></tr><tr><td>6月</td><td>-3.63</td></tr><tr><td>7月</td><td>9.3</td></tr><tr><td>8月至3日</td><td>NA</td></tr></tbody></table></div></details></figure></div><div class="archive-table-grid"><div class="report-table-wrap" tabindex="0" role="region" aria-label="创新药行情与政策节点"><table><caption>创新药行情与政策节点</caption><thead><tr><th scope="col">指标</th><th scope="col">数值</th><th scope="col">时间或口径</th></tr></thead><tbody><tr><td>5月高点</td><td>1.2285</td><td>ETF 513120</td></tr><tr><td>6月底</td><td>1.0633</td><td>Q2跌幅-13.45%</td></tr><tr><td>7月路径</td><td>1.0624至1.1612</td><td>反弹+9.30%</td></tr><tr><td>最新净值</td><td>1.1482</td><td>8月3日，距高点-6.5%</td></tr><tr><td>政策节点</td><td>独立商保目录与8年价格保护</td><td>6月29日</td></tr></tbody></table></div><div class="report-table-wrap" tabindex="0" role="region" aria-label="创新药基本面与政策验证"><table><caption>创新药基本面与政策验证</caption><thead><tr><th scope="col">维度</th><th scope="col">数据或事实</th><th scope="col">研究含义</th></tr></thead><tbody><tr><td>样本营收</td><td>+15.28%</td><td>2025年保持增长</td></tr><tr><td>样本归母净利润</td><td>+125.19%</td><td>实现系统性扭亏</td></tr><tr><td>BD出海</td><td>1100亿美元</td><td>半年达到上年全年八成</td></tr><tr><td>支付改革</td><td>商保目录与8年保护</td><td>改善高价值药品支付空间</td></tr><tr><td>ETF资金</td><td>份额增超15亿份</td><td>回调期资金流入</td></tr></tbody></table></div><div class="report-table-wrap" tabindex="0" role="region" aria-label="港股相对A股的配置稀缺性"><table><caption>港股相对A股的配置稀缺性</caption><thead><tr><th scope="col">维度</th><th scope="col">港股创新药特征</th></tr></thead><tbody><tr><td>上市制度</td><td>18A支持未盈利Biotech上市</td></tr><tr><td>资产供给</td><td>纯创新药管线型公司集群</td></tr><tr><td>国际化</td><td>BD授权交易加速</td></tr><tr><td>盈利阶段</td><td>样本企业进入扭亏拐点</td></tr><tr><td>政策空间</td><td>商保目录打开第二支付曲线</td></tr></tbody></table></div></div><p class="source-note">来源口径：原材料公开行情、企业样本、BD交易与政策资料。行情截至2026年8月3日，报告发布于8月4日；原PDF未列具体数据源和样本清单，8月至今柱未标精确值。</p></section><section id="reportVerification"><h2>4.口径与风险</h2><div class="report-metric-strip"><div class="report-metric"><span>Q2累计跌幅</span><strong>-13.45%</strong><small>5月高点至6月底</small></div><div class="report-metric"><span>7月反弹</span><strong>+9.30%</strong><small>政策催化</small></div><div class="report-metric"><span>全周期振幅</span><strong>25.01%</strong><small>高弹性特征</small></div></div><div class="report-verification"><div><h3>数据边界</h3><p>8月至今柱无精确值，图表保留为NA</p></div><div><h3>待核验项</h3><p>行情来源、样本企业清单与BD统计口径未披露</p></div></div><p>原PDF未列行情来源与样本企业清单</p><p class="risk-note">风险提示：创新药临床数据、FDA审批、BD授权落地、地缘政治、南向资金流动与港元汇率均存在不确定性，板块波动较高。</p><p class="source-note">来源口径：原材料中的公开ETF行情、政策、企业样本与BD交易统计，行情截至2026年8月3日，报告发布于8月4日；原PDF未列数据供应商及样本清单。内部使用标识已删除；期权结构、报价与产品比较未纳入。本报告为Demo，不构成投资建议。</p><p class="historical-note">历史报告样例，非实时研究。完整保留现有Demo已整理的研究内容。</p></section></main></body></html>

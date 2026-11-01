@@ -1,0 +1,7 @@
+{
+  "python": "3.12",
+  "tools": ["xcrun", "hdiutil", "codesign", "xattr"],
+  "icon_assets": "pre-rendered-controlled",
+  "architecture": "arm64",
+  "platform": "Darwin"
+}

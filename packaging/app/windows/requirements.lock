@@ -1,0 +1,8 @@
+# Windows-only build dependencies; never auto-installed.
+pywin32-ctypes==0.2.3
+# Tinyshare's Windows device helper imports WMI from its opaque bytecode.
+WMI==1.5.1
+pywin32==311
+reportlab==5.0.0
+openpyxl==3.1.5
+et_xmlfile==2.0.0

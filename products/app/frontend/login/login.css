@@ -1,0 +1,30 @@
+/* Preserve the reference layout while accommodating the longer RH wordmark and first-run state. */
+.login-logo { height: 28px; max-width: 100%; }
+.login-logo [id$="-word-research"],
+.login-logo [id$="-word-helper"] { fill: var(--text, #252525); }
+html[data-theme="dark"] .login-logo [id$="-word-research"],
+html[data-theme="dark"] .login-logo [id$="-word-helper"] { fill: #e8eaed; }
+/* Match OH's disc diameter and baseline, not its shorter brand-name width. */
+.login-splash__fallback-logo,
+.login-splash__reference-logo { width: min(367.127989px, 53.539457vw); }
+#login-setup-note { margin: 0 0 20px; color: var(--text-muted, #62656b); font-size: 13px; line-height: 1.6; }
+[hidden] { display: none !important; }
+.login-page { --login-error: var(--login-brand); }
+html[data-theme="dark"] .login-page { --login-error: color-mix(in srgb, var(--color-brand-red) 60%, var(--color-ink)); }
+.login-input[aria-invalid="true"] { border-color: var(--login-error); }
+.login-input::placeholder { color: var(--login-ink-2); opacity: 1; }
+.login-status { color: var(--login-error); font-size: 13px; overflow-wrap: anywhere; }
+.login-input:read-only { opacity: .75; }
+/* Desktop follows OH geometry. Coarse pointers keep separated touch targets. */
+.login-eye::after { content: ""; position: absolute; inset: -5px; }
+.login-check { position: relative; }
+.login-check::after { content: ""; position: absolute; inset: -10px 0; }
+@media (pointer: coarse) {
+  .login-theme button { width: 44px; height: 44px; }
+  .login-eye { width: 44px; height: 44px; right: 0; }
+  .login-password .login-input { padding-right: 52px; }
+  .login-check { min-height: 44px; }
+  .login-check::after { inset: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .login-page { transition: none; } }
+@media (max-width: 520px) { .login-wrap { padding-top: 76px; padding-bottom: 28px; } }
