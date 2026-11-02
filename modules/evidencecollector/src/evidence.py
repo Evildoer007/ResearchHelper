@@ -1139,6 +1139,29 @@ def validate_source_request(task, source, operation, params, *, require_identity
     return params
 
 
+def record_request_purpose(record, need, question_ids):
+    """Keep each reuse reason beside the exact request and questions.
+
+    The source snapshot and hash stay unchanged. Older aggregate metadata is
+    retained without guessing a per-request mapping when aliases already exist.
+    """
+    purpose = need.get('selection_reason')
+    if not isinstance(purpose, str) or not purpose.strip():
+        return
+    entries = record.get('request_purposes')
+    if not isinstance(entries, list):
+        entries = []
+        prior = record.get('selection_reason')
+        identifiers = record.get('data_need_ids', [])
+        if isinstance(prior, str) and prior.strip() and isinstance(identifiers, list) and identifiers:
+            entries.append(dict(data_need_id=identifiers[0] if len(identifiers) == 1 else None,
+                question_ids=copy.deepcopy(record.get('question_ids', [])), selection_reason=prior.strip()))
+    selected = dict(data_need_id=need['id'], question_ids=list(question_ids), selection_reason=purpose.strip())
+    if selected not in entries:
+        entries.append(selected)
+    record['request_purposes'] = entries
+
+
 def snapshot_record(task, source, operation, params, payload, private_values=()):
     """Persist an actual business response, without calling or approving a provider."""
     if source not in ("ifind", "tinyshare", "wind"):
