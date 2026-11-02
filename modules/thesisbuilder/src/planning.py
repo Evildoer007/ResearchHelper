@@ -432,6 +432,59 @@ def draft_research_scope(task):
         rule=rule)
 
 
+def draft_research_context(task, limit=5000):
+    """Pass the task's research focus and actual acquisition purposes to writing.
+
+    Existing source records own this metadata. It remains a proposed purpose,
+    never a finding, an additional question, or authority to acquire more data.
+    """
+    from .draft_sources import source_issues
+    rejected = {row['artifact_id'] for row in source_issues(task) if not row.get('partial')}
+    questions = {row['id'] for row in task.get('questions', [])}
+    result = dict(version=1, binding=dict(task_id=task.get('id'), research_version=task.get('version'),
+        input_hash=task.get('input_hash')), entry_focus=ENTRY_FOCUS.get(task.get('entry'), ('', []))[0],
+        intent_goal=INTENT_GOALS.get(task.get('intent'), ''), source_purposes=[], omitted_purposes=0,
+        use='取数用途只说明待验证的问题，不证明判断成立；按原问题和实际证据取舍，不把初始用途当成结论。',
+        automatic_plan_change=False, financial_approval=False, extra_model_calls=0)
+    for source in task.get('source_records', []):
+        if (not isinstance(source, dict) or source.get('task_id') != task.get('id')
+                or source.get('research_version') != task.get('version') or source.get('id') in rejected):
+            continue
+        if source.get('operation') == 'get_limit_policy':
+            continue
+        entries = source.get('request_purposes')
+        if not isinstance(entries, list) or not entries:
+            entries = [dict(selection_reason=source.get('selection_reason'),
+                            question_ids=source.get('question_ids', []))]
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            purpose = entry.get('selection_reason')
+            if not isinstance(purpose, str) or not purpose.strip():
+                continue
+            supplied = entry.get('question_ids', [])
+            if not isinstance(supplied, list):
+                continue
+            selected = list(dict.fromkeys(ref for ref in supplied if isinstance(ref, str) and ref in questions))
+            if supplied and not selected:
+                continue
+            row = dict(source_id=source['id'], question_ids=selected, purpose=purpose.strip())
+            ident = entry.get('data_need_id')
+            if ident is not None:
+                identifiers = source.get('data_need_ids', [])
+                if not isinstance(ident, str) or not isinstance(identifiers, list) or ident not in identifiers:
+                    continue
+                row['data_need_id'] = ident
+            if row in result['source_purposes']:
+                continue
+            candidate = dict(result, source_purposes=result['source_purposes'] + [row])
+            if len(canonical(candidate)) > limit:
+                result['omitted_purposes'] += 1
+            else:
+                result['source_purposes'].append(row)
+    return result
+
+
 def thesis_obligations(task, question_ids, calculation_refs):
     """Find unsatisfied prerequisites of a determinate research judgment.
 
