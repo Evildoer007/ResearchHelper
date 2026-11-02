@@ -61,6 +61,46 @@ def _validated(content):
     return result
 
 
+def _calculation_dependencies(content):
+    """Resolve frozen arithmetic, including macro readings, for figure evidence.
+
+    Financial plot eligibility is narrower than arithmetic provenance. Reuse
+    the registered analyzer over the same owned cells; this is read-only local
+    arithmetic, not a new research result or an approval of the conclusion.
+    """
+    from .draft_analysis import analyze
+    from .contracts import market_date
+    draft = content.get('draft', {})
+    sources = [row for row in content.get('source_records', [])
+               if row.get('task_id') == content['task_id']
+               and row.get('research_version') == content['research_version']]
+    owned = {row['id'] for row in sources}
+    grouped = defaultdict(list)
+    for row in draft.get('facts', []):
+        grouped[row['id']].append(row)
+    facts = [rows[0] for rows in grouped.values() if len(rows) == 1 and rows[0].get('artifact_id') in owned]
+    try:
+        cutoff = date.fromisoformat(market_date(content['cutoff']))
+        facts = [row for row in facts if _day(row.get('period')) is not None and _day(row['period']) <= cutoff]
+        task = dict(id=content['task_id'], version=content['research_version'],
+                    input_hash=content.get('input_hash'), source_records=sources)
+        expected = analyze(task, facts)['results']
+        keys = ('method', 'method_version', 'code', 'period', 'data_refs', 'inputs',
+                'unit', 'value', 'minimum', 'maximum', 'display', 'condition', 'conditional_equal_scale')
+        identity = lambda item: fingerprint({key: item.get(key) for key in keys})
+        allowed = {identity(item) for item in expected}
+        by_id = {row['id']: row for row in facts}
+        grouped_results = defaultdict(list)
+        for item in draft.get('calculations', []):
+            grouped_results[item['id']].append(item)
+        return {ident: dict(rows[0], rows=[by_id[ref] for ref in rows[0]['data_refs']])
+                for ident, rows in grouped_results.items()
+                if len(rows) == 1 and not rows[0].get('financial_approval') and identity(rows[0]) in allowed}
+    except (ContractError, InvalidOperation, KeyError, TypeError, ValueError):
+        # A malformed old result must not interrupt prose or raw observations.
+        return {}
+
+
 def comparison_figures(content,raw_figures):
     """Return a comparable view while preserving all unrepresented raw series."""
     calculations=_validated(content)
@@ -307,7 +347,7 @@ def _topic_references(logic,facts):
 
 
 
-def _mechanism_figures(logic,index,facts):
+def _mechanism_figures(logic,index,facts,calculations=None):
     """Preserve every frozen step; small connected panels keep the path printable."""
     steps=(logic.get('mechanism') or {}).get('steps',[])
     if len(steps)<2 or any(not isinstance(step,dict) or not isinstance(step.get('label'),str)
@@ -316,11 +356,19 @@ def _mechanism_figures(logic,index,facts):
     # Balance long paths and repeat only their shared handoff node.
     count=ceil((len(steps)-1)/4)
     edges,remainder=divmod(len(steps)-1,count)
+    # A pathway can quote a registered change as well as an observation.
+    # Preserve its parent argument's computation dependencies in the figure
+    # inspector; do not pretend the step labels are a new numeric calculation.
+    calculations = calculations or {}
+    selected = [calculations[ref] for ref in dict.fromkeys(logic.get('calculation_refs', []))
+                if ref in calculations]
+    calculation_refs = [row['id'] for row in selected]
+    calculation_inputs = [ref for row in selected for ref in row['data_refs'] if ref in facts]
     result=[];start=0
     for segment in range(count):
         edge_count=edges+(1 if segment<remainder else 0)
         part=steps[start:start+edge_count+1]
-        refs=list(dict.fromkeys(ref for step in part for ref in step.get('data_refs',[]) if ref in facts))
+        refs=list(dict.fromkeys([ref for step in part for ref in step.get('data_refs',[]) if ref in facts] + calculation_inputs))
         nodes=[dict(id='step-'+str(start+i),name=step['label'],level=i,kind=step.get('kind','hypothesis'))
                for i,step in enumerate(part)]
         links=[dict(source=nodes[i]['id'],target=nodes[i+1]['id']) for i in range(len(nodes)-1)]
@@ -330,7 +378,7 @@ def _mechanism_figures(logic,index,facts):
         name='传导路径示意' if count==1 else '传导路径示意'+str(segment+1)
         result.append(dict(name=name,context='传导假设，非数值预测',field='mechanism',unit='',horizontal=False,type='graph',
             paper_logic=f'logic-{index}',coverage_kind='mechanism',min_height=minimum_height,
-            data_refs=refs,calculation_refs=[],workpaper_notes=[logic.get('analysis',''),logic.get('implication','')],risk=logic.get('risk',''),
+            data_refs=refs,calculation_refs=calculation_refs,workpaper_notes=[logic.get('analysis',''),logic.get('implication','')],risk=logic.get('risk',''),
             auto_visual=dict(version=1,scheme='evidence',data=dict(nodes=nodes,links=links,qualitative=True),reason='frozen_qualitative_mechanism')))
         start+=edge_count
     return result
@@ -503,13 +551,14 @@ def logic_figure_plan(content, *, report_profile='standard'):
     base=planned_figures(content,report_profile=report_profile)
     argument_series=_argument_series(content)
     calculations={row['id']:row for row in _validated(content)}
+    dependencies=_calculation_dependencies(content)
     owned={row['id'] for row in content.get('source_records',[]) if
            row.get('task_id')==content['task_id'] and row.get('research_version')==content['research_version']}
     facts={row['id']:row for row in content.get('draft',{}).get('facts',[]) if row.get('artifact_id') in owned}
     result=[];represented=set();covered_series_refs=set();original_rows=_observed_series_rows(content)
     for index,logic in enumerate(content.get('draft',{}).get('logics',[]),1):
         refs={ref for ref in draft_logic_data_refs(logic) if ref in facts}
-        refs.update(ref for ident in logic.get('calculation_refs',[]) if ident in calculations for ref in calculations[ident]['data_refs'])
+        refs.update(ref for ident in logic.get('calculation_refs',[]) if ident in dependencies for ref in dependencies[ident]['data_refs'])
         reference_origin='explicit'
         if not refs:
             refs=_topic_references(logic,facts);reference_origin='literal_topic_match'
@@ -547,7 +596,7 @@ def logic_figure_plan(content, *, report_profile='standard'):
             if comparison:
                 from .visual_selection import select_figures
                 candidates.extend(select_figures(content,[comparison]))
-        candidates.extend(_mechanism_figures(logic,index,facts))
+        candidates.extend(_mechanism_figures(logic,index,facts,dependencies))
         market=[spec for spec in candidates if spec.get('type')=='line' and spec.get('dates')]
         aligned=len(market)>1 and all(spec['dates']==market[0]['dates'] for spec in market)
         for number,spec in enumerate(candidates,1):
