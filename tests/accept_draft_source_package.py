@@ -218,6 +218,8 @@ def check_direct_report(text,kind):
 
 
 SCOPE_CASES = [
+    dict(name='structured_research', kind='investment', selected=None, mode='research', organization=None, structured=True),
+    dict(name='structured_mechanism', kind='mechanism', selected=None, mode='mechanism', organization='mechanism', structured=True, linked_data=True),
     dict(name='initial_fact', kind=None, selected='fact', mode='by_question', organization='fact'),
     dict(name='initial_comparison', kind=None, selected='comparison', mode='by_question', organization='comparison'),
     dict(name='initial_mechanism', kind=None, selected='mechanism', mode='by_question', organization='mechanism'),
@@ -245,6 +247,10 @@ def scoped_options(case):
 
 def scoped_report(case):
     logic = dict(title='提供的论述', analysis='本段正文应当原样保留。')
+    if case.get('structured'):
+        logic.pop('analysis')
+        logic['argument'] = dict(claim='本段正文应当原样保留。', evidence='保留实际依据。',
+                                 reasoning='观察与判断之间有具体传导。', condition='传导仍需实际条件成立。')
     if case['organization'] == 'mechanism':
         labels=case.get('steps',['潜在变化','传导条件','可能影响'])
         logic['mechanism'] = dict(steps=[dict(label=label,kind='condition' if index==1 else 'hypothesis')
@@ -263,7 +269,12 @@ def check_scoped(task, case):
     assert scope['mode'] == case['mode']
     assert not scope['changes_question_obligations'] and scope['extra_model_calls'] == 0
     assert task['draft_report'].get('organization') == case['organization']
-    assert task['draft_report']['logics'][0]['analysis'] == '本段正文应当原样保留。'
+    expected_logic = scoped_report(case)['logics'][0]
+    expected_analysis = ('\n'.join(expected_logic['argument'].values()) if case.get('structured') else
+                         expected_logic['analysis'])
+    assert task['draft_report']['logics'][0]['analysis'] == expected_analysis
+    if case.get('structured'):
+        assert task['draft_report']['logics'][0]['argument'] == expected_logic['argument']
     if case['organization']=='mechanism':
         assert [step['label'] for step in task['draft_report']['logics'][0]['mechanism']['steps']]==case.get('steps',['潜在变化','传导条件','可能影响'])
     if case.get('linked_data'):
@@ -278,6 +289,8 @@ def check_scoped_html(raw, case):
     tree = html.document_fromstring(raw)
     main = tree.xpath('//main')[0].text_content()
     assert '本段正文应当原样保留。' in main
+    if case.get('structured'):
+        assert all(value in main for value in scoped_report(case)['logics'][0]['argument'].values())
     direct = case['organization'] in ('fact', 'comparison')
     assert ('一、提供的论述' in main) == direct
     if case['organization'] == 'mechanism':
