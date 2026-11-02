@@ -150,11 +150,19 @@ def normalize_report(value, task, facts):
     for item in rows if isinstance(rows, list) else []:
         if not isinstance(item, dict):
             continue
-        analysis = text(item.get('analysis', item.get('logic')))
+        legacy_analysis = text(item.get('analysis', item.get('logic')))
+        argument = item.get('argument')
+        argument = {key: text(argument.get(key)) for key in ('claim', 'evidence', 'reasoning', 'condition')
+                    if text(argument.get(key))} if isinstance(argument, dict) else {}
+        paragraphs = [legacy_analysis] if legacy_analysis else []
+        paragraphs.extend(argument.values())
+        analysis = '\n'.join(dict.fromkeys(paragraphs))
         if analysis:
             logic = dict(title=text(item.get('title')) or '研究逻辑', analysis=analysis,
                 implication=text(item.get('implication')), risk=text(item.get('risk')),
                 status='待验证', workpaper_notes=notes(item.get('workpaper_notes',[])))
+            if argument:
+                logic['argument'] = argument
             for name, allowed in (('data_refs', fact_ids), ('source_refs', source_ids),('calculation_refs',calculation_ids)):
                 refs = item.get(name, [])
                 if not isinstance(refs, list):
@@ -176,8 +184,11 @@ def normalize_report(value, task, facts):
                         logic.setdefault('reference_notes',[]).append('部分引用未对应本任务资料，正文保留，待底稿补充。')
                     if re.search(r'\d',step['label']) and not refs:
                         logic.setdefault('reference_notes',[]).append('示意标签中的数字未关联资料，未生成该路径图。');steps=[];break
-                    steps.append(dict(label=text(step['label']),data_refs=list(dict.fromkeys(refs)),
-                                      kind=step.get('kind') if step.get('kind') in ('observation','hypothesis','condition') else 'hypothesis'))
+                    kind = step.get('kind') if step.get('kind') in ('observation', 'hypothesis', 'condition') else 'hypothesis'
+                    if kind == 'observation' and not refs:
+                        kind = 'hypothesis'
+                        logic.setdefault('reference_notes', []).append('未关联本任务数据的路径节点按假设展示。')
+                    steps.append(dict(label=text(step['label']),data_refs=list(dict.fromkeys(refs)),kind=kind))
                 if len(steps)>=2:logic['mechanism']=dict(steps=steps)
             logic['data_refs']=draft_logic_data_refs(logic)
             if logic.get('reference_notes'):logic['reference_notes']=list(dict.fromkeys(logic['reference_notes']))
