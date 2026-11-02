@@ -90,12 +90,25 @@ class DraftFigureTests(unittest.TestCase):
         before = copy.deepcopy(self.content)
         html = render(self.content, ROOT)
         self.assertEqual(self.content, before)
-        self.assertEqual(len(set(re.findall(r'id="(draft-chart-\d+)"', html))), 5)
-        third = html.split('id="logic-3"', 1)[1].split('id="logic-4"', 1)[0]
-        self.assertTrue('draft-chart-' in third)
-        self.assertTrue('经营活动产生的现金流量净额' in third)
-        self.assertTrue('connectNulls:false' in html)
-        self.assertTrue('<details' not in html)
+        # This older report has no registered arithmetic and no verified
+        # amount unit. Preserve its prose and raw internal figures without
+        # making absolute currency plots in the client publication.
+        from lxml import html as html_parser
+        client = html_parser.document_fromstring(html)
+        self.assertFalse(client.xpath('//main//div[@class="chart"]'))
+        detail = render(self.content, ROOT, report_profile='detailed')
+        tree = html_parser.document_fromstring(detail)
+        third = tree.get_element_by_id('logic-3')
+        self.assertTrue(third.xpath('.//div[@class="chart"]'))
+        self.assertIn('经营活动产生的现金流量净额', third.text_content())
+        self.assertGreaterEqual(len(tree.xpath('//main//div[@class="chart"]')), 5)
+        for logic in self.content['draft']['logics']:
+            self.assertIn(logic['analysis'], html)
+            self.assertIn(logic['analysis'], detail)
+        self.assertIn('connectNulls:false', detail)
+        self.assertNotIn('<details', html)
+        self.assertNotIn('<details', detail)
+        self.assertEqual(self.content, before)
 
 
 if __name__ == '__main__':
