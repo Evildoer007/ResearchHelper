@@ -226,8 +226,20 @@
    const plotWidth=Math.max(48,(size.width||520)-14-52-8-categoryWidth);
    const padding=Math.min(2,Math.max(.32,labelRoom/Math.max(24,plotWidth-labelRoom)));
    const span=maximum-minimum||Math.max(Math.abs(maximum)*.05,1);
+   // Label padding is presentation space, not an observed decimal value.
+   // Round the scale outward so its artificial bounds produce readable ticks.
+   const tickStep=10**Math.floor(Math.log10(span/5));
+   const outward=(value,direction)=>{
+    if(!(tickStep>0)||!Number.isFinite(tickStep))return value;
+    const boundary=direction(value/tickStep)*tickStep;
+    if(!Number.isFinite(boundary))return value;
+    const rounded=Number(boundary.toPrecision(12));
+    return direction===Math.floor?Math.min(value,rounded):Math.max(value,rounded);
+   };
+   const axisMinimum=outward(minimum-span*padding,Math.floor);
+   const axisMaximum=outward(maximum,Math.ceil);
    o={grid:{...base.grid,top:50,bottom:32,right:52},legend:legend(d.periods),
-    xAxis:value({scale:true,min:minimum-span*padding,max:maximum}),yAxis:category(d.labels,{inverse:true,axisLabel:{fontSize:font,color:p.ink,interval:0,hideOverlap:false}}),
+    xAxis:value({scale:true,min:axisMinimum,max:axisMaximum}),yAxis:category(d.labels,{inverse:true,axisLabel:{fontSize:font,color:p.ink,interval:0,hideOverlap:false}}),
     series:[{type:'custom',silent:true,renderItem:(_params,api)=>{
       const a=api.coord([api.value(1),api.value(0)]),b=api.coord([api.value(2),api.value(0)]);
       return {type:'line',shape:{x1:a[0],y1:a[1],x2:b[0],y2:b[1]},style:{stroke:p.muted,lineWidth:2}};
