@@ -93,14 +93,17 @@ class Session:
             result['first_report'] = dict(acquire='draft(defer_delivery=True, data_requests=...)',
                 read='status().draft_observations and sources()', write='draft(report=...)',
                 report_fields=['title', 'conclusion', 'logics', 'risks'],
-                logic_fields=['title', 'analysis', 'implication', 'risk'],
-                optional_logic_fields=['data_refs', 'source_refs','calculation_refs','knowledge_refs','workpaper_notes','mechanism'],
+                logic_fields=['title', 'implication', 'risk'],
+                logic_body_fields=['argument', 'analysis'],
+                optional_logic_fields=['argument', 'data_refs', 'source_refs','calculation_refs','knowledge_refs','workpaper_notes','mechanism'],
                 optional_report_fields=['workpaper_notes','reader_notes'],
                 reference_scope='data_refs使用本任务draft_observations的id，source_refs使用本任务资料id；knowledge_refs以id和version引用实际使用的锁定知识。缺少引用不阻断初稿。',
                 independent_review_required=False, local_model_calls=False)
-            from researchhelper.publication_content import client_report_brief
+            from researchhelper.publication_content import client_report_brief, report_writing_example
             result['first_report']['writing_brief']=client_report_brief(task)
-            from researchhelper.planning import draft_research_scope
+            result['first_report']['report_example']=report_writing_example(task)
+            from researchhelper.planning import draft_research_scope, draft_research_context
+            result['first_report']['research_context'] = draft_research_context(task)
             scope = draft_research_scope(task)
             if scope is not None:
                 result['first_report']['research_scope'] = scope
