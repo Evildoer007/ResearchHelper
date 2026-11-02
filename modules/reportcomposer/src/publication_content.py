@@ -6,17 +6,26 @@ PROFILES={'standard':'标准报告','detailed':'详细报告'}
 
 REPORT_CONDITION_BRIEF = ('数值阈值须注明来源、方法或用户设定；自行提出的条件只能作为待验证观察条件，不写成已经验证的转折或买卖规则。')
 
+# One business-argument rule also applies when the initial Chat scope has
+# not yet been classified. Choosing a presentation scope is not enough by itself.
+RESEARCH_LOGIC_BRIEF = (
+    '投资研究按经济含义组织逻辑，每条连接关键事实、经济机制、成立条件、投资含义和反证；'
+    '例如区分定价、利润或购买力等不同对象与路径，按问题取舍，不机械凑齐渠道或固定条数。'
+    '指标比较可作为论据，不用指标复述、缺项说明或风险声明单独凑一条策略；条件性假设可写，但与事实分开。'
+    '各条先给具体判断，再选最有解释力的数字；完整序列交给图表和底稿，核心结论不逐项重复。'
+)
+
 # Shared by the App model and the Skill host; no extra editing-model call.
 CLIENT_REPORT_BRIEF = (
     '面向客户写投研报告，参考紧凑的券商策略报告。结构为简短标题、核心结论、几条有区别的策略逻辑和必要风险。'
-    '核心结论先回答问题。投资研究按经济含义组织逻辑，每条连接关键事实、经济机制、成立条件、投资含义和反证；'
-    '例如区分定价、利润或购买力等不同对象与路径，按问题取舍，不机械凑齐渠道或固定条数。'
-    '指标比较可作为论据，不用指标复述、缺项说明或风险声明单独凑一条策略；条件性假设可写，但与事实分开。'
+    '核心结论先回答问题。' + RESEARCH_LOGIC_BRIEF +
     '标题与走势核对完整观测区间，样本内极值须保留实际月份和范围。'
     '正文写研究判断，不出现数据或计算内部编号、来源ID、核验进度、模型、接口或ResDesk。'
     '图表由交付程序按引用单独配图，正文不叙述JSON、绘图步骤或复现方法。'
     '数据、计算、来源和实际使用的知识各填引用字段；知识引用每项包含id和整数version。'
-    '必要传导可附mechanism.steps，每步给label、kind及已有data_refs；kind用observation、hypothesis或condition。'
+    '每条逻辑优先用argument分别写claim、evidence、reasoning、condition，围绕一个判断展开，不把多个独立渠道塞进最后一条。'
+    '确有传导内容时填写mechanism.steps，以同次写作的观察、条件和可能影响生成路径图；不为凑图制造关系。'
+    '每步给简短label、kind及已有data_refs；kind用observation、hypothesis或condition。'
     '单位未知的金额不写绝对数额，采用已登记相对变化；比较前提说明一次。'
     'workpaper_notes存口径与核验推敲，reader_notes只简述一次适用范围；改变判断的限制仍写相关论述。'
     'risks归纳真实经营、定价与传导风险，不逐条重复；不包含衍生品产品推荐。'
@@ -38,7 +47,8 @@ SCOPED_REPORT_COMMON = (
     'workpaper_notes放口径推敲与核验备注，实质影响结论的限制写进正文或风险；reader_notes只简述一次必要适用范围。'
     'risks只列与本次问题实际相关的不确定性，不制造无关经营风险或重复每条限制。'
     '数据、来源和计算引用填实际使用的引用字段，保留计算条件。共享内核按引用单独配图，不额外调用模型选图。'
-    '只有确有传导内容时才用mechanism.steps，不为事实核对制造机制、权重、概率或阈值。'
+    '机制解释优先用argument分别写claim、evidence、reasoning、condition，每条围绕一个解释及其竞争解释。'
+    '仅核对或直接比较时用analysis即可；只有确有传导内容时才用mechanism.steps，不制造机制、权重、概率或阈值。'
     '知识引用每项包含id和整数version；图表由程序按引用生成，正文不叙述JSON或绘图步骤。'
     '趋势和标题核对完整观测区间；原问题要求投资含义时，可提出明确标注的条件性假设，'
     '不把指标复述、缺项说明或风险声明单独列为策略逻辑。'
@@ -50,7 +60,40 @@ def client_report_brief(task=None):
     scope = draft_research_scope(task) if task is not None else None
     if scope is None or scope['mode'] == 'research':
         return CLIENT_REPORT_BRIEF
-    return SCOPED_REPORT_STYLES[scope['mode']] + SCOPED_REPORT_COMMON
+    brief = SCOPED_REPORT_STYLES[scope['mode']] + SCOPED_REPORT_COMMON
+    if scope['mode'] == 'by_question':
+        brief += '仅在按原问题选择report_scope为research时，采用以下投资论证要求：' + RESEARCH_LOGIC_BRIEF
+    return brief
+
+
+def report_writing_example(task=None):
+    """One executable writing shape for the App model and the Skill host.
+
+    A business argument is distinct from its observations. The fields guide
+    the same writing call; none is a new prerequisite for delivery.
+    """
+    from .planning import draft_research_scope
+    scope = draft_research_scope(task) if task is not None else None
+    mode = scope['mode'] if scope is not None else 'research'
+    logic = dict(title='一个具体判断的简短标题', implication='对原问题的含义。',
+                 risk='可能推翻本条判断的具体情况或竞争解释。',
+                 data_refs=[], source_refs=[], calculation_refs=[], knowledge_refs=[], workpaper_notes=[])
+    if mode in ('fact', 'comparison'):
+        logic['analysis'] = ('按原问题核对实际数字、日期和单位。' if mode == 'fact' else
+                             '按原问题的维度比较同口径数据，说明差异。')
+    else:
+        logic['argument'] = dict(
+            claim='围绕一个对象或经济渠道提出可检验判断；不把指标复述单列为策略。',
+            evidence='只选支持本判断的实际观察与登记计算，不重述全部序列。',
+            reasoning='解释观察如何影响该对象，区分事实、推断和竞争解释。',
+            condition='说明这条传导成立的具体前提；缺少验证时使用条件性表述。')
+        logic['mechanism'] = dict(steps=[
+            dict(label='本次观察', kind='observation', data_refs=[]),
+            dict(label='传导成立条件', kind='condition', data_refs=[]),
+            dict(label='条件成立时的可能影响', kind='hypothesis', data_refs=[])])
+    return dict(title='简短研究标题', conclusion='直接回答原问题，给出主要判断与关键分歧。',
+                logics=[logic], risks=['与原问题有关且尚未说明的主要风险'],
+                reader_notes=[], workpaper_notes=[])
 
 
 def draft_logic_heading(organization, index, title):
