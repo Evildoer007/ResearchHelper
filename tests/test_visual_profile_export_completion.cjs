@@ -24,6 +24,29 @@ test('numeric axes retain distinct fractional ticks when observations use intege
  assert.equal(new Set([98,98.5,99,99.5,100].map(format)).size,5);
  assert.equal(JSON.stringify(data),frozen);
 });
+test('padding bounds do not print floating-point tails from real indexed comparisons',()=>{
+ const data={labels:['收入','归母净利润'],periods:['2024','2025'],pairs:[[100,98.7940441671987],[100,95.46743641351]],unit:''};
+ const before=JSON.stringify(data),option=visuals.option('dumbbell',data),axis=option.xAxis;
+ const minimum=Math.min(...data.pairs.flat()),maximum=Math.max(...data.pairs.flat());
+ assert.ok(axis.min<minimum);assert.ok(axis.max>=maximum);
+ assert.ok(axis.axisLabel.formatter(axis.min).length<=8);
+ assert.ok(axis.axisLabel.formatter(axis.max).length<=8);
+ assert.equal(JSON.stringify(data),before);
+ assert.deepEqual(plain(option.series.slice(1).map(s=>s.data.map(p=>p.value[0]))),[[100,100],[98.7940441671987,95.46743641351]]);
+});
+test('outward bounds preserve signed and small decimal comparisons',()=>{
+ for(const pairs of [[[-.0012,-.0008],[0,.0004]],[[.000021,.000017],[.000019,.000022]]]){
+  const option=visuals.option('dumbbell',{labels:['a','b'],periods:['before','after'],pairs,unit:''});
+  assert.ok(option.xAxis.min<=Math.min(...pairs.flat()));assert.ok(option.xAxis.max>=Math.max(...pairs.flat()));
+  assert.notEqual(option.xAxis.axisLabel.formatter(option.xAxis.min),option.xAxis.axisLabel.formatter(option.xAxis.max));
+ }
+});
+test('close observations on a large scale cannot be clipped by rounded bounds',()=>{
+ const pairs=[[1e12+.1,1e12+.2],[1e12+.3,1e12+.4]];
+ const option=visuals.option('dumbbell',{labels:['a','b'],periods:['before','after'],pairs,unit:''});
+ assert.ok(option.xAxis.min<=Math.min(...pairs.flat()));assert.ok(option.xAxis.max>=Math.max(...pairs.flat()));
+ assert.ok(Number.isFinite(option.xAxis.min)&&Number.isFinite(option.xAxis.max));
+});
 test('paired endpoint labels face away from the connecting segment',()=>{
  const option=visuals.option('dumbbell',{labels:['a','b','c'],periods:['before','after'],pairs:[[100,98.79],[4,6],[3,3]],unit:''});
  const [before,after]=option.series.slice(1);
