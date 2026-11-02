@@ -23,7 +23,7 @@ from .evidence import (EvidenceCollector, FILING_REQUEST_REGISTRY, business_payl
                        extract_material, filing_record, material_record, snapshot_record,
                        validate_filing_original_request, validate_ifind_report_request,
                        available_security_codes, identity_resolutions)
-from .evidence import filing_candidate_choices
+from .evidence import filing_candidate_choices, record_request_purpose
 from .evidence import (FIELD_REGISTRY, reference_groups, current_snapshot_reference, api_calculation_context_contract,
                        expand_api_cell_selections, API_CELL_CHOICE_COVERAGE_VERSION, current_query_reference)
 from .financial_sources import FINANCIAL_METRIC_BINDING_VERSION, expand_financial_value_references, IFIND_METADATA_REGISTRY
@@ -3241,6 +3241,7 @@ class ResearchAgent:
                                 or current_query_reference(task, x) is not None)), None)
             if cached:
                 # Aliases are explicit references, not repeated independent evidence.
+                record_request_purpose(cached, need, selected)
                 cached["data_need_ids"] = list(dict.fromkeys(cached.get("data_need_ids", []) + [ident]))
                 cached["question_ids"] = list(dict.fromkeys(cached.get("question_ids", []) + selected))
                 self._journal(task)
@@ -3270,6 +3271,7 @@ class ResearchAgent:
                 self._save_model_checkpoint(task)
                 raw = self.collector.external(task, source, operation, params, self.source_credentials.get(source, {}))
                 raw.update(data_need_ids=[ident], question_ids=list(selected), selection_reason=need.get("selection_reason", "优先iFinD"))
+                record_request_purpose(raw, need, selected)
                 existing = next((item for item in records if item["id"] == raw["id"]), None)
                 if existing is None:
                     records.append(raw)
