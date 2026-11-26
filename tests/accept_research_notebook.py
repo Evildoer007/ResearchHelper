@@ -22,7 +22,7 @@ CHECKS = r'''
   check('retained sample has 20 clickable observations',await page.locator('.desk-sources [data-observation]').count()===20);
   check('retained sample compares five metrics in two matrices',await page.locator('.desk-sources .observation-matrix tbody tr').count()===5&&await page.locator('[data-source-group]').count()===2);
   check('original catalog and process initially closed',await page.locator('.source-library[open],.source-process[open]').count()===0);
-  check('source names do not repeat as buttons beside every observation',await page.locator('.desk-sources .source-library [data-source]').count()===6);
+  check('all six retained requests have one entry across originals and run history',await page.locator('.desk-sources .source-library-row [data-source]').count()===6);
   const number=page.locator('.desk-sources [data-draft-source="D7"]');await number.click();
   check('latest price opens retained original with exact value',await page.locator('#dialog[open]').innerText().then(t=>t.includes('1330.75')));
   check('latest price locator identifies exact original field',await page.locator('#dialog[open]').innerText().then(t=>t.includes('close')));
