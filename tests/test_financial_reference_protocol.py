@@ -9,6 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from researchhelper.contracts import ContractError, fingerprint
+from tests.test_financial_context_choices import legacy_financial_context
 from researchhelper.model import ModelService, ModelSettings
 from researchhelper.output_schema import (financial_reference_output_schema, financial_reference_prompt,
     decode_financial_references, decode_financial_extraction_output,
@@ -118,17 +119,17 @@ class FinancialReferenceProtocolTests(unittest.TestCase):
         task = copy.deepcopy(self.task); task['questions'][0]['method_needs'].append('fee_difference_v1')
         self.assertIsNone(financial_reference_output_schema(task, self.views))
 
-    def test_latest_failed_actual_view_can_be_addressed_without_reopening_research(self):
-        path = ROOT/'result/acceptance/one-sentence-research-rsxwvrir/task.json'
-        before = path.read_bytes(); task = json.loads(before)
-        views = task['reasoning_state']['reading']['bundle']['views']
+    def test_retained_view_keeps_short_addresses_across_independent_loads(self):
+        task, views, _, _ = legacy_financial_context()
+        before = fingerprint((task, views))
         schema = financial_reference_output_schema(task, views)
         presented = financial_reference_prompt(dict(untrusted_sources=views,
             evidence_contract=evidence_contract(task, views)), task)
         self.assertEqual(schema['properties']['version']['enum'], [8])
+        self.assertEqual(presented['financial_reference_binding'], self.presented['financial_reference_binding'])
         self.assertTrue(all(ref.startswith('quote_') for part in presented['untrusted_sources'][0]['parts']
-                            for ref,_ in part['quote_choices']))
-        self.assertEqual(path.read_bytes(), before)
+                            for ref, _ in part['quote_choices']))
+        self.assertEqual(fingerprint((task, views)), before)
 
     def test_official_transport_decodes_the_new_protocol_and_keeps_extraction_mode(self):
         service = self.service()
