@@ -8,8 +8,13 @@ OUTPUT=ROOT/'result/acceptance/resdesk-completion-current/native'
 
 class Page(BaseHTTPRequestHandler):
     def do_GET(self):
-        body=b'<!doctype html><html><body>Isolated save fixture</body></html>'
-        self.send_response(200);self.send_header('Content-Type','text/html');self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+        if self.path == '/artifact-export.js':
+            body = (ROOT/'products/app/frontend/ui/artifact-export.js').read_bytes()
+            mime = 'text/javascript'
+        else:
+            body = b'<!doctype html><html><body>Isolated save fixture</body></html>'
+            mime = 'text/html'
+        self.send_response(200);self.send_header('Content-Type',mime);self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
     def log_message(self,*args):pass
 
 def run():
