@@ -19,11 +19,14 @@ class APIExtractionGuidanceTests(unittest.TestCase):
         self.agent, self.task = self.fixture.agent, self.fixture.task
         self.fixture.record("ifind")
 
-    def test_required_and_optional_fields_exactly_match_allowed_model_fields(self):
+    def test_flat_api_fields_are_allowed_and_identity_is_an_explicit_choice(self):
         grammar = evidence_contract(self.task)["api_candidate_contract"]
-        self.assertEqual(set(grammar["required_spec_fields"]) | set(grammar["optional_fields"]), MODEL_EVIDENCE_FIELDS)
-        self.assertFalse(set(grammar["required_spec_fields"]) & set(grammar["optional_fields"]))
-        self.assertIn("identity", grammar["required_spec_fields"])
+        required, optional = set(grammar["required_spec_fields"]), set(grammar["optional_fields"])
+        choices = set(grammar["identity_submission"]["exactly_one"])
+        self.assertLessEqual(required | optional, MODEL_EVIDENCE_FIELDS)
+        self.assertTrue(required.isdisjoint(optional))
+        self.assertLessEqual({"identity", "direct_code_reference"}, choices)
+        self.assertLessEqual(choices, optional)
         self.assertNotIn("availability", grammar["required_spec_fields"])
         self.assertIn("availability", grammar["conditional_fields"])
 
@@ -40,7 +43,8 @@ class APIExtractionGuidanceTests(unittest.TestCase):
         grammar = evidence_contract(self.task)["api_candidate_contract"]
         cell = evidence_contract(self.task)["sources"][0]["api_cells"]["cells"][0]
         missing = set(grammar["required_spec_fields"]) - set(cell["proposal_fields"])
-        self.assertTrue({"identity", "publication", "review", "raw_value", "unit"} <= missing)
+        self.assertTrue({"publication", "review", "raw_value", "unit"} <= missing)
+        self.assertTrue(set(grammar["identity_submission"]["exactly_one"]).isdisjoint(cell["proposal_fields"]))
         self.assertFalse(grammar["automatic_adoption"])
         self.assertFalse(grammar["automatic_reference_repair"])
 
@@ -55,10 +59,15 @@ class APIExtractionGuidanceTests(unittest.TestCase):
                 patch.object(self.agent, "_save_model_checkpoint"), \
                 patch("researchhelper.engine.model_object", return_value=({"evidence_specs": []}, {})) as model:
             self.agent._extract_model_sources(self.task)
+            current = self.task["reasoning_state"]["extraction"]["input_digest"]
             self.agent._extract_model_sources(self.task)
-        self.assertEqual(model.call_count, 1)
-        current = dict(prior, api_candidate_version=API_EXTRACTION_GUIDANCE_VERSION)
-        self.assertEqual(self.task["reasoning_state"]["extraction"]["input_digest"], fingerprint(current))
+            self.assertEqual(model.call_count, 1)
+            with patch("researchhelper.engine.API_EXTRACTION_GUIDANCE_VERSION", API_EXTRACTION_GUIDANCE_VERSION + 1):
+                self.agent._extract_model_sources(self.task)
+                self.agent._extract_model_sources(self.task)
+            self.assertEqual(model.call_count, 2)
+        self.assertNotEqual(current, fingerprint(prior))
+        self.assertNotEqual(self.task["reasoning_state"]["extraction"]["input_digest"], current)
         self.assertEqual(fingerprint(self.task["ledger"]), before)
 
     def test_tool_reading_does_not_modify_task_or_field_registration(self):
@@ -89,7 +98,7 @@ class AcquiredAPIGuidanceTests(unittest.TestCase):
         task, record = self.fixture.acquired()
         evidence_contract(task)
         proposal = self.fixture.spec(task, record)
-        proposal.pop("identity")
+        proposal.pop("direct_code_reference")
         with self.assertRaises(ContractError):
             self.fixture.approved(task, record, proposal)
         self.assertFalse(task["evidence"])
