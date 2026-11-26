@@ -1,5 +1,6 @@
 """An interval need must not offer a point date that adoption will reject."""
 import copy
+import gzip
 import hashlib
 import json
 import unittest
@@ -16,8 +17,11 @@ SOURCE = ROOT / 'result/acceptance/one-sentence-research-_vvm3dyi/task.json'
 class OriginalPeriodNeedCompatibilityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.original = hashlib.sha256(SOURCE.read_bytes()).hexdigest()
-        cls.task = json.loads(SOURCE.read_text())
+        cls.source = SOURCE if SOURCE.is_file() else SOURCE.with_suffix('.json.gz')
+        cls.original = hashlib.sha256(cls.source.read_bytes()).hexdigest()
+        opener = gzip.open if cls.source.suffix == '.gz' else open
+        with opener(cls.source, 'rt', encoding='utf-8') as stream:
+            cls.task = json.load(stream)
         cls.views = cls.task['reasoning_state']['reading']['bundle']['views']
 
     def setUp(self):
@@ -27,7 +31,7 @@ class OriginalPeriodNeedCompatibilityTests(unittest.TestCase):
         self.choice = _original_span_choices(self.task, self.views)[0]
 
     def tearDown(self):
-        self.assertEqual(hashlib.sha256(SOURCE.read_bytes()).hexdigest(), self.original)
+        self.assertEqual(hashlib.sha256(self.source.read_bytes()).hexdigest(), self.original)
 
     def properties(self, slot):
         branch = self.schema['properties']['requirements']['properties'][slot['key']]['anyOf'][0]
