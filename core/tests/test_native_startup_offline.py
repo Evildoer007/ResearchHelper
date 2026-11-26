@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 import runpy
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -20,9 +21,13 @@ def render_documents():
     OUT.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="swift-renderer-", dir=OUT) as temporary:
         folder = Path(temporary)
+        resources = folder / "resources"
+        wordmark = resources / "app/web/login/wordmark.svg"
+        wordmark.parent.mkdir(parents=True)
+        shutil.copyfile(ROOT / "products/app/frontend/login/wordmark.svg", wordmark)
         probe = folder / "renderer.swift"
         probe.write_text("import Foundation\n" + function + "\n" + '''
-        let resources = URL(fileURLWithPath: ''' + json.dumps(str(ROOT)) + ''')
+        let resources = URL(fileURLWithPath: ''' + json.dumps(str(resources)) + ''')
         var documents: [String: String] = [:]
         for theme in ["light", "dark", "untrusted-value"] {
             documents[theme] = try researchHelperStartupHTML(resources: resources, theme: theme)
@@ -35,9 +40,11 @@ def render_documents():
         print(String(data: data, encoding: .utf8)!)
         ''')
         binary = folder / "renderer"
-        flags = runpy.run_path(str(ROOT / "packaging/assemble_release.py"))["swift_options"]()
+        build = runpy.run_path(str(ROOT / "packaging/app/build_app.py"))
+        build["swift_options"].__globals__["OUTPUT"] = folder / "compiler-cache"
+        flags = build["swift_options"]()
         subprocess.run(["xcrun", "swiftc", *flags, str(probe), "-o", str(binary)],
-                       check=True, capture_output=True, timeout=45)
+                       check=True, capture_output=True, timeout=180)
         value = subprocess.run([str(binary)], check=True, capture_output=True, text=True, timeout=10)
         return json.loads(value.stdout)
 
@@ -71,13 +78,13 @@ class NativeStartupTests(unittest.TestCase):
             self.assertNotIn("<input", document)
 
     def test_login_is_shielded_before_first_paint_and_retains_timeouts(self):
-        self.assertIn("['/','/login/index.html'].includes(location.pathname)", self.source)
+        self.assertIn("location.protocol === 'http:' && ['/', '/login/index.html'].includes(location.pathname)", self.source)
         self.assertIn("document.documentElement.classList.add('login-boot');", self.source)
         self.assertIn("injectionTime: .atDocumentStart", self.source)
         self.assertNotIn("padding:72px", self.source)
         self.assertIn("withTimeInterval: 25", self.source)
-        self.assertIn("withTimeInterval: 20", self.source)
-        self.assertIn("内置启动画面无法读取", self.source)
+        self.assertIn("DispatchQueue.main.asyncAfter(deadline: .now() + 20, execute: watchdog)", self.source)
+        self.assertIn("login document owns the single launch animation", self.source)
         self.assertNotIn('url.scheme == "file"', self.source)
 
     def test_native_theme_receivers_are_registered_validated_and_released(self):
@@ -87,14 +94,15 @@ class NativeStartupTests(unittest.TestCase):
         self.assertEqual(self.source.count('removeScriptMessageHandler(forName: "researchhelperTheme")'), 2)
         self.assertIn("attributeFilter:['data-theme']", self.source)
         self.assertIn('UserDefaults.standard.set(preference, forKey: "researchhelper.nativeThemePreference")', self.source)
-        self.assertIn("if(!['light','dark','auto'].includes(localStorage.getItem('researchhelper.theme')))", self.source)
+        self.assertIn("if (!['light', 'dark', 'auto'].includes(localStorage.getItem('researchhelper.theme')))", self.source)
         html = (ROOT / "products/app/frontend/index.html").read_text()
         self.assertIn('<script src="login/theme-bootstrap.js"></script>', html)
         self.assertNotIn("document.documentElement.dataset.theme='light'", html)
 
     def test_auto_appearance_inherits_appkit_instead_of_fixing_webkit_media(self):
-        self.assertIn('window.appearance = savedPreference == "auto" ? nil : NSAppearance', self.source)
-        self.assertIn('window.appearance = preference == "auto" ? nil : NSAppearance', self.source)
+        self.assertIn('let appearance = savedPreference == "auto" ? nil : NSAppearance', self.source)
+        self.assertIn('let appearance = preference == "auto" ? nil : NSAppearance', self.source)
+        self.assertEqual(self.source.count('window.appearance = appearance'), 2)
         self.assertEqual(self.source.count('applyNativeTheme(theme, preference: preference)'), 2)
 
 
@@ -102,7 +110,7 @@ def save_documents():
     documents = render_documents()
     record = {"documents": documents, "renderer": "compiled_production_swift_function",
         "appkit_launched": False, "source_hashes": {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
-            for name in ("app/native/ResearchHelperApp.swift", "app/web/login/wordmark.svg",
+            for name in ("products/app/desktop/macos/ResearchHelperApp.swift", "products/app/frontend/login/wordmark.svg",
                          "core/tests/test_native_startup_offline.py")}}
     (OUT / "documents.json").write_text(json.dumps(record, ensure_ascii=False, indent=2))
     return record
