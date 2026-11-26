@@ -72,7 +72,7 @@ class AnalysisOutputStructureTests(unittest.TestCase):
         before = fingerprint(self.task)
         contract = analysis_contract(self.task)
         self.assertEqual(contract["output_structure"], {
-            "version": 2, "answers": {"type": "object", "key": "question_id", "empty": {}},
+            "version": ANALYSIS_OUTPUT_VERSION, "answers": {"type": "object", "key": "question_id", "empty": {}},
             "theses": {"type": "array", "empty": []}})
         self.assertEqual(fingerprint(self.task), before)
 
@@ -109,8 +109,8 @@ class AnalysisOutputStructureTests(unittest.TestCase):
         diagnostic = self.task["ledger"]["dispatches"][-1]["output_contract"]
         self.assertTrue(diagnostic["field_structure"]["accepted"])
         self.assertEqual(diagnostic["field_structure"]["invalid_fields"], [])
-        self.assertEqual(diagnostic["analysis_output_version"], 2)
-        self.assertEqual(self.task["reasoning_state"]["analysis"]["receipt"]["analysis_output_version"], 2)
+        self.assertEqual(diagnostic["analysis_output_version"], ANALYSIS_OUTPUT_VERSION)
+        self.assertEqual(self.task["reasoning_state"]["analysis"]["receipt"]["analysis_output_version"], ANALYSIS_OUTPUT_VERSION)
 
     def test_host_stub_creates_no_synthetic_ledger_dispatch(self):
         before = copy.deepcopy(self.task["ledger"])
