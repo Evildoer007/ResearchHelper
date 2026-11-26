@@ -59,7 +59,7 @@ class DraftRegisteredPlanningTests(unittest.TestCase):
             limits=dict(data_requests=12,model_calls=2,seconds=180))
 
     def schema(self):
-        tools=data_request_contract(self.task)
+        tools=data_request_contract(self.task,first_report=True)
         tools['tools']=[tool for tool in tools['tools'] if tool['source'] in ('ifind','official')]
         return _planning_description(self.task,tools)
 
@@ -115,6 +115,49 @@ class DraftRegisteredPlanningTests(unittest.TestCase):
         self.assertTrue(all('example' not in tool and 'parameter_keys' not in tool for tool in prompt['tools']))
         self.assertEqual(canonical(description),before)
 
+    def test_grouped_metadata_is_lossless_and_keeps_the_wire_schema(self):
+        tools=data_request_contract(self.task,first_report=True)
+        tools['tools']=[t for t in tools['tools'] if t['source'] in ('ifind','official')]
+        before=canonical(tools)
+        description,schema,prompt=_planning_description(self.task,tools)
+        from researchhelper.output_schema import acquisition_output_schema
+        self.assertEqual(schema,acquisition_output_schema(self.task,dict(data_request_contract=tools)))
+        self.assertEqual(canonical(description['data_request_contract']),before)
+        for original,projected in zip(tools['tools'],prompt['tools']):
+            restored=copy.deepcopy(projected)
+            if 'field_definition_groups' in restored:
+                restored['field_definitions']={field:group['definition'] for group in restored.pop('field_definition_groups') for field in group['fields']}
+                self.assertEqual(restored['field_definitions'],original['field_definitions'])
+            grouped=restored.get('registered_financial_contexts')
+            if isinstance(grouped,dict):
+                restored['registered_financial_contexts']=[dict(grouped['shared'],**row) for row in grouped['items']]
+                self.assertEqual(restored['registered_financial_contexts'],original['registered_financial_contexts'])
+            if original.get('request_description')==original.get('capability_roadmap',{}).get('guidance') and original.get('request_description'):
+                self.assertNotIn('request_description',projected)
+                self.assertIn(original['request_description'],canonical(projected))
+        self.assertEqual(canonical(tools),before)
+        # Compare the exact previous presentation, not an unrelated baseline.
+        excluded={'example','examples','parameter_keys','metadata_parameter_schema','fixed_parameters',
+            'fixed_parameters_by_mode','parameter_shapes','parameter_options','family_shapes','field_parameters'}
+        previous=dict(copy.deepcopy(tools),tools=[{k:v for k,v in t.items() if k not in excluded} for t in tools['tools']])
+        self.assertLess(len(canonical(prompt)),len(canonical(previous)))
+        self.assertEqual([(t['source'],t['operation']) for t in prompt['tools']],[(t['source'],t['operation']) for t in tools['tools']])
+
+    def test_distinct_field_and_scope_definitions_are_not_merged(self):
+        from researchhelper.draft_workflow import _group_planning_metadata
+        tool=dict(field_definitions={'a':[dict(type='cumulative')],'b':[dict(type='cumulative')],
+             'c':[dict(type='point_in_time',unit='shares')]},registered_financial_contexts=[
+             dict(indicator='a',applicable_codes=['600519.SH'],applicable_periods=['20260630'],financial_approval=False),
+             dict(indicator='b',applicable_codes=['000001.SZ'],applicable_periods=['20241231'],financial_approval=False)])
+        original=copy.deepcopy(tool);projected=_group_planning_metadata(copy.deepcopy(tool))
+        if 'field_definition_groups' in projected:
+            restored={field:group['definition'] for group in projected['field_definition_groups'] for field in group['fields']}
+        else:restored=projected['field_definitions']
+        self.assertEqual(restored,original['field_definitions'])
+        contexts=projected['registered_financial_contexts']
+        if isinstance(contexts,dict):contexts=[dict(contexts['shared'],**row) for row in contexts['items']]
+        self.assertEqual(contexts,original['registered_financial_contexts'])
+
     def test_custom_non_structured_adapter_keeps_its_existing_json_channel(self):
         class Custom:
             def reason(inner,task,messages,**options):
@@ -154,12 +197,101 @@ class DraftRegisteredPlanningTests(unittest.TestCase):
         self.assertEqual(description['data_request_contract']['callable_codes'],[])
         self.assertTrue(len(canonical(prompt))<len(canonical(tools)))
 
+    def test_same_failed_transport_is_not_retried_in_the_same_batch(self):
+        from researchhelper.contracts import charge
+        attempted=[]
+        request=dict(id='price',source='ifind',operation='cmd_history_quotation',parameters=dict(codes='600519.SH',
+            indicators='close',startdate='2026-10-28',enddate='2026-10-28',functionpara=dict(Currency='RMB',CPS='1',Fill='Omit')))
+        def acquire(task,requests,*,first_report=False):
+            self.assertTrue(first_report)
+            attempted.extend(copy.deepcopy(requests));charge(task['ledger'],'data_requests')
+            raise ContractError('Synthetic failed supplier call')
+        engine=SimpleNamespace(_check_run_control=lambda _:None,_acquire_sources=acquire)
+        duplicate=dict(copy.deepcopy(request),id='same_request_another_name')
+        changed=copy.deepcopy(request);changed['parameters']['enddate']='2026-10-29';changed['id']='new_window'
+        with patch('researchhelper.draft_workflow._checkpoint'):
+            _acquire(engine,self.task,[request,duplicate,changed])
+        self.assertEqual(len(attempted),2)
+        self.assertEqual(self.task['ledger']['used']['data_requests'],2)
+        self.assertEqual([row['status'] for row in self.task['draft_source_attempts']],['未取得','已跳过重复失败请求','未取得'])
+        # An explicit later batch is not silently treated as a same-run retry.
+        self.task['batch']+=1
+        with patch('researchhelper.draft_workflow._checkpoint'):_acquire(engine,self.task,[request])
+        self.assertEqual(len(attempted),3)
+
+    def test_fresh_discovery_is_followed_even_if_another_request_returned_numbers(self):
+        self.task['ledger']['limits']['model_calls']=3
+        from researchhelper.draft_workflow import _acquire_planned
+        from researchhelper.contracts import fingerprint
+        price=dict(id='price',source='ifind',operation='cmd_history_quotation',parameters=dict(codes='600519.SH',
+            indicators='close',startdate='2026-10-28',enddate='2026-10-28',functionpara={}))
+        metadata=dict(id='fields',source='ifind',operation='get_indicators',parameters=dict(indicators=['成本'],market='股票'))
+        extra=dict(copy.deepcopy(price),id='open');extra['parameters']['indicators']='open'
+        plans=[]
+        def plan(engine,task,attempt):
+            plans.append(attempt);charge(task['ledger'],'model_calls')
+            return [price,metadata] if attempt==1 else [extra]
+        def acquire(engine,task,requests):
+            for request in requests:
+                field=request['parameters'].get('indicators')
+                snapshot=dict(errorcode=0,tables=[dict(thscode='600519.SH',time=['2026-10-28'],table={field:[100]})]) if isinstance(field,str) else dict(code=0,data=[])
+                row=dict(id='source-'+request['id'],task_id=task['id'],research_version=task['version'],
+                    source='ifind',operation=request['operation'],kind='api',status='成功待核验',parameters=request['parameters'],
+                    data_need_ids=[request['id']],snapshot=snapshot,hash=fingerprint(snapshot))
+                task['source_records'].append(row);task.setdefault('draft_source_attempts',[]).append(dict(proposed=copy.deepcopy(request),binding=dict(task_id=task['id'],research_version=task['version'],input_hash=task.get('input_hash'))))
+        with patch('researchhelper.draft_workflow._plan',side_effect=plan),patch('researchhelper.draft_workflow._acquire',side_effect=acquire),patch('researchhelper.draft_workflow._checkpoint'):
+            self.assertTrue(_acquire_planned(SimpleNamespace(),self.task))
+        self.assertEqual(plans,[1,2]);self.assertEqual(self.task['draft_acquisition_coverage']['unresolved'],[])
+
+    def test_failed_transport_without_new_information_does_not_spend_another_plan(self):
+        self.task['ledger']['limits']['model_calls']=3
+        from researchhelper.draft_workflow import _acquire_planned
+        from researchhelper.contracts import fingerprint
+        request=dict(id='failed',source='ifind',operation='cmd_history_quotation',parameters=dict(codes='600519.SH',indicators='close'))
+        plans=[]
+        def plan(engine,task,attempt):plans.append(attempt);charge(task['ledger'],'model_calls');return [request]
+        def acquire(engine,task,requests):
+            snapshot=dict(errorcode=-1)
+            task['source_records'].append(dict(id='failed-response',task_id=task['id'],research_version=task['version'],
+                source='ifind',operation=request['operation'],kind='api',status='业务失败',data_need_ids=['failed'],snapshot=snapshot,hash=fingerprint(snapshot)))
+            task['draft_source_attempts']=[dict(proposed=request,binding=dict(task_id=task['id'],research_version=task['version'],input_hash=task.get('input_hash')))]
+        with patch('researchhelper.draft_workflow._plan',side_effect=plan),patch('researchhelper.draft_workflow._acquire',side_effect=acquire),patch('researchhelper.draft_workflow._checkpoint'):
+            self.assertTrue(_acquire_planned(SimpleNamespace(),self.task))
+        self.assertEqual(plans,[1]);self.assertTrue(self.task['draft_acquisition_coverage']['unresolved'])
+        self.assertFalse(self.task['draft_acquisition_coverage']['blocks_report'])
+
+    def test_two_discovery_supplements_preserve_the_writing_reserve_and_checkpoint(self):
+        from researchhelper.draft_workflow import _acquire_planned,_retained_plan
+        from researchhelper.contracts import fingerprint
+        self.task['ledger']['limits']['model_calls']=4
+        chain=[dict(id='discover',source='ifind',operation='get_indicators',parameters=dict(indicators=['成本'],market='股票')),
+               dict(id='parameters',source='ifind',operation='get_indicator_params',parameters=dict(indicator='field',func_name='基础函数')),
+               dict(id='price',source='ifind',operation='cmd_history_quotation',parameters=dict(codes='600519.SH',
+                    indicators='close',startdate='2026-10-28',enddate='2026-10-28',functionpara={}))]
+        plans=[]
+        def plan(engine,task,attempt):plans.append(attempt);charge(task['ledger'],'model_calls');return [chain[attempt-1]]
+        def acquire(engine,task,requests):
+            for request in requests:
+                snapshot=dict(errorcode=0,tables=[dict(thscode='600519.SH',time=['2026-10-28'],table=dict(close=[100]))]) if request['operation']=='cmd_history_quotation' else dict(code=0,data=[])
+                task['source_records'].append(dict(id='source-'+request['id'],task_id=task['id'],research_version=task['version'],
+                    kind='api',source='ifind',operation=request['operation'],parameters=request['parameters'],status='成功待核验',
+                    data_need_ids=[request['id']],snapshot=snapshot,hash=fingerprint(snapshot)))
+                task.setdefault('draft_source_attempts',[]).append(dict(proposed=request,
+                    binding=dict(task_id=task['id'],research_version=task['version'],input_hash=task.get('input_hash'))))
+        with patch('researchhelper.draft_workflow._plan',side_effect=plan),patch('researchhelper.draft_workflow._acquire',side_effect=acquire),patch('researchhelper.draft_workflow._checkpoint'):
+            self.assertTrue(_acquire_planned(SimpleNamespace(),self.task))
+        self.assertEqual(plans,[1,2,3]);self.assertEqual(self.task['ledger']['used']['model_calls'],3)
+        self.assertEqual(self.task['ledger']['reserve']['model_calls'],1)
+        self.assertEqual(_retained_plan(self.task)['attempt'],3)
+        self.assertEqual(self.task['draft_acquisition_coverage']['unresolved'],[])
+
     def test_failed_optional_request_is_recorded_without_discarding_the_next(self):
         accepted=[]
         good=dict(id='price',source='ifind',operation='cmd_history_quotation',parameters=dict(codes='600519.SH',
             indicators='close',startdate='2026-10-28',enddate='2026-10-28',functionpara=dict(Currency='RMB',CPS='1',Fill='Omit')))
         bad=copy.deepcopy(good);bad['parameters']['indicators']='not_registered'
-        def acquire(task,requests):
+        def acquire(task,requests,*,first_report=False):
+            self.assertTrue(first_report)
             for item in requests:
                 validate_market_request(task,'ifind','cmd_history_quotation',item['parameters'])
                 accepted.append(item)
