@@ -14,6 +14,7 @@
    return host;
   });
   instances.get(root)?.destroy();
+  const originalMinimums=slots.map(host=>host.style.minHeight);
   const DATA=data,SPECS=specs,charts=[],selected=new Map();
   let disposed=false;
   const inspect=(target,rowIndex)=>{
@@ -29,14 +30,25 @@ const label={fontFamily:style.font,fontSize:style.labelSize,color:style.axisLabe
 const signed=value=>(value>0?'+':'')+Number(value).toFixed(2)+'%';
 const text=(x,y,value,extra={})=>({type:'text',x,y,style:{text:value,font:style.labelSize+'px '+style.font,fill:style.ink,...extra}});
 const line=(x1,y1,x2,y2,color=style.rule)=>({type:'line',shape:{x1,y1,x2,y2},style:{stroke:color,lineWidth:.8}});
-const valueAxis=(min,max,interval)=>({type:'value',min,max,interval,axisLine:{show:false,lineStyle:{color:style.ink,width:1.2}},axisTick:{show:false,lineStyle:{color:style.ink}},axisLabel:{...label,color:style.axisLabel,formatter:value=>value+'%'},splitLine:{show:true,lineStyle:{color:style.rule,type:'dashed',width:.7}}});
-const categoryAxis=data=>({type:'category',data,inverse:true,axisLine:{show:false},axisTick:{show:false},axisLabel:{...label,hideOverlap:false,margin:8},splitLine:{show:false}});
+const frame={axisLine:{show:true,onZero:false,lineStyle:{color:style.muted,width:1}},
+ axisTick:{show:true,length:3,alignWithLabel:true,lineStyle:{color:style.muted}},splitLine:{show:false}};
+const valueAxis=(min,max,interval)=>({type:'value',min,max,interval,...frame,axisLabel:{...label,color:style.axisLabel,formatter:value=>value+'%'}});
+const categoryAxis=data=>({type:'category',data,inverse:true,...frame,axisLabel:{...label,hideOverlap:false,margin:8}});
+function scatterGeometry(width,count){
+ const narrow=width<520;
+ const grid={left:narrow?42:43,right:narrow?18:Math.round(width*.50),top:40,height:narrow?135:124,containLabel:false};
+ const plotRight=width-grid.right,ledgerX=narrow?4:plotRight+18,ledgerY=narrow?219:30;
+ const ledgerWidth=width-ledgerX-5,rowHeight=narrow?22:24;
+ // Preserve the plot and every disclosed row when the ledger moves beneath it.
+ const minimumHeight=Math.ceil(Math.max(grid.top+grid.height+33,
+  ledgerY+22+Math.max(0,count-1)*rowHeight+style.labelSize+8));
+ return {narrow,grid,ledgerX,ledgerY,ledgerWidth,rowHeight,minimumHeight};
+}
 function render(spec,chart){
  const option={animation:false,textStyle:label,color:style.palette,tooltip:{trigger:'item',renderMode:'richText',confine:true,textStyle:{...label,color:style.paper},backgroundColor:style.ink,borderColor:style.ruleStrong}};
  if(spec.scheme==='scatter'){
-  const width=chart.getWidth(),narrow=width<520,active=selected.get(spec.target)??0;
-  const grid={left:narrow?42:43,right:narrow?18:Math.round(width*.50),top:40,height:narrow?135:124,containLabel:false};
-  const plotRight=width-grid.right,ledgerX=narrow?4:plotRight+18,ledgerY=narrow?219:30,ledgerWidth=width-ledgerX-5,rowHeight=narrow?22:24;
+  const width=chart.getWidth(),active=selected.get(spec.target)??0;
+  const {narrow,grid,ledgerX,ledgerY,ledgerWidth,rowHeight}=scatterGeometry(width,spec.data.points.length);
   option.grid=grid;option.xAxis={...valueAxis(-40,40,20),name:'1.14至5.31股价涨跌',nameLocation:'middle',nameGap:23,nameTextStyle:{...label,color:style.muted},axisLine:{show:true,onZero:false,lineStyle:{color:style.ink,width:1.2}},axisTick:{show:true,lineStyle:{color:style.ink}},minorTick:{show:true,splitNumber:4,length:3,lineStyle:{color:style.rule}}};
   option.yAxis=valueAxis(-40,40,20);
   option.tooltip.formatter=value=>{const row=spec.data.points[value.dataIndex];return row.name+'\n股价：'+signed(row.x)+'\nQ1营收：'+signed(row.y)+'\n'+row.feature};
@@ -44,8 +56,7 @@ function render(spec,chart){
   option.series=[{name:'板块对照',type:'scatter',symbolSize:value=>value[2]===active?12:7,
    data:spec.data.points.map((row,index)=>({name:row.name,value:[row.x,row.y,index],itemStyle:{color:index===active?style.primary:style.benchmark,opacity:1,borderColor:style.paper,borderWidth:index===active?2:1},label:{show:true,position:positions[index],distance:index===0?7:5,color:index===active?style.primary:style.ink,fontWeight:index===active?700:400}})),
    label:{...label,formatter:value=>value.name},labelLayout:{hideOverlap:false},emphasis:{scale:1.3},
-   markArea:{silent:true,itemStyle:{color:style.surface},data:[[{xAxis:-40,yAxis:0},{xAxis:0,yAxis:40}]]},
-   markLine:{silent:true,symbol:'none',animation:false,label:{show:false},lineStyle:{color:style.rule,width:.7,type:'dashed'},data:spec.data.points.map(row=>[{coord:[row.x,-40]},{coord:[row.x,row.y]}])}}];
+   markArea:{silent:true,itemStyle:{color:style.surface},data:[[{xAxis:-40,yAxis:0},{xAxis:0,yAxis:40}]]}}];
   option.graphic=[text(3,0,spec.data.context.quadrants.down_up+'/'+spec.data.context.sample_count+'个列示板块：股价跌、营收增',{font:'700 12px '+style.font,fill:style.primary}),text(grid.left,21,'Q1营收同比',{fill:style.muted}),
    text(ledgerX,ledgerY,'板块',{font:'700 11px '+style.font}),
    text(ledgerX+ledgerWidth*.40,ledgerY,'股价',{textAlign:'right',fill:style.muted}),
@@ -60,14 +71,14 @@ function render(spec,chart){
    })];
  }
  if(spec.scheme==='ranked_bar'){
-  const d=spec.data,width=chart.getWidth(),grid={left:62,right:90,top:25,bottom:23,containLabel:false},mean=d.context.mean,meanX=grid.left+mean/80*(width-grid.left-grid.right);
+  const d=spec.data,width=chart.getWidth(),height=chart.getHeight(),grid={left:62,right:90,top:25,bottom:23,containLabel:false},mean=d.context.mean,meanX=grid.left+mean/80*(width-grid.left-grid.right);
   option.grid=grid;option.xAxis=valueAxis(0,80,40);option.yAxis=categoryAxis(d.labels);
   option.tooltip.formatter=value=>{const index=value.value[0],gap=d.context.deviations_pp[index];return d.labels[index]+'\nQ1营收同比：+'+d.values[index]+'%\n材料三家均值：'+mean+'%\n较均值：'+(gap>0?'+':'')+gap+'个百分点'};
-  option.graphic=[text(meanX,3,'三家均值'+mean+'%',{textAlign:'center',fill:style.muted}),text(width-3,3,'较三家均值',{textAlign:'right',fill:style.muted})];
+  option.graphic=[{...line(meanX,grid.top,meanX,height-grid.bottom,style.muted),style:{stroke:style.muted,lineWidth:.8,lineDash:[2,2]},silent:true,z:1},
+   text(meanX,3,'三家均值'+mean+'%',{textAlign:'center',fill:style.muted}),text(width-3,3,'较三家均值',{textAlign:'right',fill:style.muted})];
   option.series=[{type:'custom',data:d.values.map((value,index)=>[index,value]),encode:{x:1,y:0},renderItem:(_params,api)=>{
-   const index=api.value(0),value=api.value(1),start=api.coord([0,index]),end=api.coord([value,index]),railEnd=api.coord([80,index]),reference=api.coord([mean,index]),gap=d.context.deviations_pp[index],half=api.size([0,1])[1]/2;
-   const children=[{type:'line',shape:{x1:reference[0],y1:reference[1]-half,x2:reference[0],y2:reference[1]+half},style:{stroke:style.ink,lineWidth:.7,lineDash:[2,2]}},
-    {type:'line',shape:{x1:start[0],y1:start[1]+6,x2:railEnd[0],y2:railEnd[1]+6},style:{stroke:style.rule,lineWidth:.6}}];
+   const index=api.value(0),value=api.value(1),end=api.coord([value,index]),gap=d.context.deviations_pp[index];
+   const children=[];
    for(let unit=0;unit<value;unit++){
     const point=api.coord([unit+.5,index]),major=(unit+1)%10===0;
     children.push({type:'line',shape:{x1:point[0],y1:point[1]+5,x2:point[0],y2:point[1]-(major?8:4)},style:{stroke:style.primary,lineWidth:major?1.1:.7,opacity:major?1:.7}});
@@ -94,13 +105,15 @@ function render(spec,chart){
  }
  if(spec.scheme==='cash_index'){
   const width=chart.getWidth(),d=spec.data;
-  option.grid={left:13,right:12,top:44,bottom:22,containLabel:false};option.xAxis=categoryAxis(['2024','同比变化','2025']);option.xAxis.inverse=false;option.xAxis.axisLabel={...label,margin:7};option.yAxis={type:'value',min:0,max:150,show:false};
+  option.grid={left:30,right:12,top:44,bottom:22,containLabel:false};
+  option.xAxis={...categoryAxis(['2024','同比变化','2025']),inverse:false,axisLabel:{...label,margin:7}};
+  option.yAxis={type:'value',min:0,max:150,interval:50,...frame,axisLabel:{...label,margin:5}};
   option.tooltip.formatter=value=>['2024年基准指数100，不表示现金分红金额','同比增长'+d.growth+'%，指数增加'+d.increment,'2025年指数'+d.currentIndex+'，实际现金分红'+d.cash+'亿元'][value.dataIndex];
   option.series=[{type:'custom',data:[[0,0,d.baseIndex],[1,d.baseIndex,d.currentIndex],[2,0,d.currentIndex]],encode:{x:0,y:[1,2]},renderItem:(params,api)=>{
    const index=api.value(0),lo=api.value(1),hi=api.value(2),a=api.coord([index,lo]),b=api.coord([index,hi]),half=Math.min(18,api.size([1,0])[0]*.25),color=index===0?style.benchmark:style.primary;
    const children=[{type:'rect',shape:{x:a[0]-half,y:b[1],width:half*2,height:Math.max(1,a[1]-b[1])},style:{fill:color}},
     {type:'text',x:b[0],y:b[1]-13,style:{text:index===1?'+'+d.increment:String(hi),font:'11px '+style.font,fill:style.ink,textAlign:'center'}}];
-   if(index<2){const next=api.coord([index+1,hi]);children.push({type:'line',shape:{x1:b[0]+half,y1:b[1],x2:next[0]-half,y2:b[1]},style:{stroke:style.muted,lineWidth:.7,lineDash:[2,2]}})}
+   if(index<2){const next=api.coord([index+1,hi]);children.push({type:'line',shape:{x1:b[0]+half,y1:b[1],x2:next[0]-half,y2:b[1]},style:{stroke:style.ruleStrong,lineWidth:.7}})}
    return{type:'group',children};
   }}];option.graphic=[text(2,0,d.cash+'亿元',{font:'700 17px '+style.font}),text(width-2,2,'同比+'+d.growth+'%',{textAlign:'right',font:'700 12px '+style.font,fill:style.primary}),text(3,22,'规模指数，2024=100',{fill:style.muted})];
  }
@@ -131,28 +144,45 @@ function focusSector(target,index){
  if(selected.get(target)===index)return true;
  selected.set(target,index);render(SPECS[position],charts[position]);return true;
 }
+function resizeAndRender(index){
+ const spec=SPECS[index],host=slots[index],chart=charts[index];
+ host.style.minHeight=originalMinimums[index];
+ if(spec.scheme==='scatter'){
+  const required=scatterGeometry(host.clientWidth,spec.data.points.length).minimumHeight;
+  if(host.clientHeight<required)host.style.minHeight=required+'px';
+ }
+ chart.resize({width:host.clientWidth,height:host.clientHeight,animation:{duration:0}});
+ render(spec,chart);chart.getZr().flush();
+}
 for(const [index,spec] of SPECS.entries()){
  if(spec.scheme==='scatter')selected.set(spec.target,0);
- const chart=echarts.init(slots[index],null,{renderer:'svg'});charts.push(chart);render(spec,chart);
+ const chart=echarts.init(slots[index],null,{renderer:'svg'});charts.push(chart);resizeAndRender(index);
  if(spec.scheme==='scatter'){
   chart.on('mouseover',event=>{if(event.seriesType==='scatter')focusSector(spec.target,event.dataIndex)});
   chart.on('click',event=>{if(event.seriesType==='scatter')inspect(spec.target,event.dataIndex)});
   chart.getZr().on('globalout',()=>focusSector(spec.target,0));
  }
 }
-const redraw=()=>{if(!disposed)charts.forEach((chart,index)=>{chart.resize();render(SPECS[index],chart)})};
+const redraw=()=>{if(!disposed)charts.forEach((chart,index)=>resizeAndRender(index))};
 const printReset=()=>{for(const target of selected.keys())selected.set(target,0);redraw()};
+let redrawFrame=null;
+const observer=typeof global.ResizeObserver==='function'?new global.ResizeObserver(()=>{
+ if(disposed||redrawFrame!==null)return;
+ redrawFrame=global.requestAnimationFrame(()=>{redrawFrame=null;redraw()});
+}):null;
+if(observer)slots.forEach(host=>observer.observe(host));
 global.addEventListener('resize',redraw);
 global.addEventListener('beforeprint',printReset);
 global.addEventListener('afterprint',printReset);
 const instance={data:DATA,specs:SPECS,charts,style,focusSector,selection:target=>selected.get(target),redraw,
  destroy(){
   if(disposed)return;
-  disposed=true;
+  disposed=true;observer?.disconnect();
+  if(redrawFrame!==null)global.cancelAnimationFrame(redrawFrame);
   global.removeEventListener('resize',redraw);
   global.removeEventListener('beforeprint',printReset);
   global.removeEventListener('afterprint',printReset);
-  for(const chart of charts)chart.dispose();
+  for(const [index,chart] of charts.entries()){chart.dispose();slots[index].style.minHeight=originalMinimums[index]}
   selected.clear();
   if(instances.get(root)===instance)instances.delete(root);
  }};
