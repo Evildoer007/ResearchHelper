@@ -1,6 +1,7 @@
 """Discovery is navigation, never automatic membership or evidence approval."""
 import copy
 import json
+from pathlib import Path
 import tempfile
 import unittest
 
@@ -168,7 +169,12 @@ class ObjectDiscoveryTests(unittest.TestCase):
         self.assertNotIn('results', tool['object_discovery'])
         request = dict(id='discover', source='ifind', operation='smart_stock_picking',
                        parameters=self.params, question_ids=['q1'], selection_reason='确定研究候选')
-        self.assertTrue(any(_matches(request, schema) for schema in _planned_request_schemas(self.task)))
+        wire = copy.deepcopy(request)
+        wire['parameters'] = dict(query_kind='object_discovery', topic='证券', discovery_kind='行业')
+        self.assertTrue(any(_matches(wire, schema) for schema in _planned_request_schemas(self.task)))
+        from researchhelper.financial_sources import semantic_query_parameters
+        self.assertEqual(semantic_query_parameters(wire['parameters']), request['parameters'])
+        self.assertFalse(any(_matches(request, schema) for schema in _planned_request_schemas(self.task)))
 
     def test_business_research_does_not_stop_at_candidate_directory(self):
         source = self.retained()
@@ -202,15 +208,22 @@ class ObjectDiscoveryTests(unittest.TestCase):
                                         evidence_need_scopes={'检索返回': 'query_provenance'})
         self.assertTrue(with_discovery_coverage(self.task, [source], dict(ready=True))['ready'])
 
-    def test_actual_retained_samples_readonly_and_incomplete(self):
-        root = ROOT / 'result/acceptance/ifind-industry-discovery-onnqxz3t'
-        for index, query in enumerate(('证券行业股票', '算力产业链股票'), 1):
-            path = root / ('response-' + str(index) + '.json')
+    def test_fifty_synthetic_rows_remain_incomplete_and_immutable(self):
+        # Historical acceptance output is expendable. This explicit synthetic
+        # fixture checks pagination semantics without claiming a real query.
+        payload = dict(errorcode=0, tables=[dict(table={
+            '股票代码': ['600' + str(index).zfill(3) + '.SH' for index in range(1, 51)],
+            '股票简称': ['合成验收样本' + str(index) for index in range(1, 51)]})])
+        with tempfile.TemporaryDirectory(prefix='synthetic-discovery-') as directory:
+            path = Path(directory) / 'synthetic-response.json'
+            path.write_text(json.dumps(payload, ensure_ascii=False))
             original = path.read_bytes()
-            result = discovery_response(self.task, dict(searchstring=query, searchtype='stock'), json.loads(original))
-            self.assertEqual(result['row_count'], 50)
-            self.assertEqual(result['provider_completeness'], '未证实')
-            self.assertEqual(path.read_bytes(), original)
+            for query in ('证券行业股票', '算力产业链股票'):
+                result = discovery_response(self.task, dict(searchstring=query, searchtype='stock'), json.loads(original))
+                self.assertEqual(result['row_count'], 50)
+                self.assertEqual(result['provider_completeness'], '未证实')
+                self.assertEqual(len(result['candidates']), 50)
+                self.assertEqual(path.read_bytes(), original)
 
     def test_candidate_universe_is_not_the_research_calculation_sample(self):
         self.retained()
