@@ -4,6 +4,7 @@ import json
 import re
 import tempfile
 import unittest
+from lxml import html
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
@@ -57,12 +58,13 @@ class BrokerSixEvidenceTests(unittest.TestCase):
         for target in self.specs:
             self.assertIn('id="'+target+'"',paper)
             self.assertIn('id="basis-'+target+'"',paper)
-        main=paper.split('<main>',1)[1].split('</main>',1)[0]
-        self.assertEqual(main.count('class="strategy"'),3)
+        main=html.document_fromstring(paper).find('.//main')
+        self.assertEqual(len(main.xpath('.//section[starts-with(@id,"logic-")]')),3)
         for token in ['非银','医药','食品饮料','地产','银行','九成以上','1.5万亿元','69.59%','512000.SH']:
-            self.assertIn(token,main)
-        for token in ['figure-note','sector-context','valuation-ledger','<details']:
-            self.assertNotIn(token,main)
+            self.assertIn(token,main.text_content())
+        for token in ['figure-note','sector-context','valuation-ledger']:
+            self.assertFalse(main.xpath('.//*[contains(concat(" ",normalize-space(@class)," "),$token)]',token=' '+token+' '))
+        self.assertFalse(main.xpath('.//details|.//summary'))
 
     def test_private_identifiers_external_resources_and_products_are_absent(self):
         paper=module.render(self.data)
