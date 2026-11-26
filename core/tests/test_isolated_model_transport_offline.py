@@ -31,6 +31,11 @@ ROOT = Path(__file__).resolve().parents[2]
 SECRET = "ISOLATED_FIXTURE_NOT_A_REAL_KEY"
 
 
+def model_fixture_worker(connection, deadline):
+    with patch('researchhelper.https_transport.bundled_ca_file', return_value=os.environ['SSL_CERT_FILE']):
+        _model_http_worker(connection, deadline)
+
+
 def dns_stall(connection, deadline):
     def stalled(*args, **kwargs):
         time.sleep(30)
@@ -68,6 +73,7 @@ class IsolatedModelTransportTests(unittest.TestCase):
         self.journal = []
         self.service = IsolatedModelService(self.settings, offline=False,
             journal=lambda task: self.journal.append(copy.deepcopy(task)))
+        self.service.worker_target = model_fixture_worker
         self.service.MAX_WAIT_SECONDS = 2
         self.environment = patch.dict(os.environ, {"SSL_CERT_FILE": str(self.cert), "NO_PROXY": "*", "no_proxy": "*"})
         self.environment.start()
@@ -270,7 +276,7 @@ class IsolatedModelTransportTests(unittest.TestCase):
         for offline, empty in ((True, False), (False, True)):
             self.service.offline = offline
             if empty:
-                self.settings.save({"endpoint": "", "model": "", "api_key": ""})
+                self.settings.save({"endpoint": "", "model": "", "api_key": "", "clear_key": True})
             task = self.task()
             with patch("researchhelper.model.multiprocessing.get_context") as context:
                 with self.assertRaises(ContractError):
@@ -289,11 +295,7 @@ class PublicationFixtureTransportTests(unittest.TestCase):
     request = publication.PublicationAppBoundaryTests.request
     login = publication.PublicationAppBoundaryTests.login
 
-    def setUp(self):
-        publication.PublicationAppBoundaryTests.setUp(self)
-        model = self.server.agent.model
-        self.assertIsInstance(model, IsolatedModelService)
-        self.server.agent.model = ModelService(model.settings, offline=model.offline, journal=model.journal)
+    setUp = publication.PublicationAppBoundaryTests.setUp
 
     def test_original_auth_publication_assertions_with_explicit_mock_transport(self):
         publication.PublicationAppBoundaryTests.test_supplier_supplement_preserves_answer_but_cannot_borrow_its_publication(self)
