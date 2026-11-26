@@ -29,6 +29,7 @@ struct CurrentNativeSettingsAcceptance {
         NSApp.finishLaunching()
         let owner = ResearchHelperApp()
         owner.runtimeURL = url
+        owner.uiScale = 0.9
         owner.window = ResearchHelperWindow(contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         owner.window.isReleasedWhenClosed = false
@@ -53,6 +54,8 @@ struct CurrentNativeSettingsAcceptance {
         _ = try script("document.querySelector('#login-account').value='admin';document.querySelector('#login-password').value='66666666';document.querySelector('#login-submit').click();true", owner.webView)
         try wait { owner.workspaceControlsReady }
         try check("current packaged service authenticates a ready workspace", owner.webView.url?.path == "/")
+        try check("restored scale reaches the first workspace layout", abs(owner.webView.pageZoom - 0.9) < 0.001 &&
+            truth("document.documentElement.dataset.uiScale==='0.9'&&document.documentElement.style.zoom===''&&Math.abs(parseFloat(document.documentElement.style.getPropertyValue('--native-titlebar-height'))-40)<.001", owner.webView))
         _ = try script("{const input=document.querySelector('#chat-input');input.value='当前候选原生设置的未发送问题';input.dispatchEvent(new Event('input',{bubbles:true}));}true", owner.webView)
         let appMenu = NSApp.mainMenu!.items.first!.submenu!
         let settings = appMenu.items.first { $0.action == #selector(ResearchHelperApp.openSettings) }!
@@ -82,6 +85,9 @@ struct CurrentNativeSettingsAcceptance {
         _ = try script("document.querySelector('[data-account-menu-toggle]').click();document.querySelector('#account-menu [data-action=logout]').click();true", owner.webView)
         try wait { owner.webView.url?.path == "/login/index.html" }
         try wait { !owner.workspaceControlsReady }
+        try wait { truth("document.documentElement.dataset.uiScale==='1.25'&&!!document.querySelector('#login-submit')", owner.webView) }
+        try check("navigation keeps native zoom and both titlebar clearances", owner.webView.pageZoom == 1.25 &&
+            truth("document.documentElement.style.zoom===''&&Math.abs(parseFloat(document.documentElement.style.getPropertyValue('--native-titlebar-height'))-28.8)<.001&&Math.abs(parseFloat(document.documentElement.style.getPropertyValue('--native-titlebar-collapsed-leading-safe-area'))-132.8)<.001", owner.webView))
         try check("sign out disables native research settings", !owner.validateMenuItem(settings))
         appMenu.performActionForItem(at: appMenu.items.firstIndex(of: settings)!)
         try check("signed out settings action stays inert", !truth("!!document.querySelector('.workspace-settings-dialog[open]')", owner.webView))
