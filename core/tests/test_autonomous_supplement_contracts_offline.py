@@ -124,7 +124,7 @@ class SupplementContractsTests(unittest.TestCase):
         proposal = copy.deepcopy(self.proposal)
         proposal.update(question_ids=["q3"], reason="独立q3待核验", expected_change="核实q3独立字段")
         proposal["data_requests"][0].update(id="q3_independent", question_ids=["q3"], source="tinyshare", operation="daily",
-            selection_reason="原问题独立q3使用已授权Tinyshare", parameters={"ts_code": "600000.SH", "fields": "open", "start_date": "20260929", "end_date": "20260930"})
+            selection_reason="原问题独立q3使用已授权Tinyshare", parameters={"ts_code": "600000.SH", "fields": "ts_code,trade_date,open", "start_date": "20260929", "end_date": "20260930"})
         validate_supplement(task, proposal)
         same_question = copy.deepcopy(proposal)
         same_question["question_ids"] = ["q2"]
