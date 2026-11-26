@@ -1,0 +1,229 @@
+{
+  "base": {
+    "id": "rh_4cf36fd2eac941f6900937532fc8eecd",
+    "version": 1,
+    "status": "部分完成",
+    "delivery": {
+      "digest": "557b6bb52fb69cd7375a99fecce75bec76c7d07d4f37c6bdabb79476f57226a7",
+      "html_sha256": "5c93b69da502f57904e0a34cee4bfcd9853fc261afc4551c4eeae630c4c12db1",
+      "kind": "research_draft",
+      "saved_at": "2026-11-10T20:39:05.993076+00:00",
+      "version": 1
+    }
+  },
+  "cases": [
+    {
+      "name": "current_saved_draft",
+      "changes": {},
+      "label": "草稿已保存",
+      "process": "草稿已保存",
+      "tone": "neutral"
+    },
+    {
+      "name": "completed_draft",
+      "changes": {
+        "status": "已完成"
+      },
+      "label": "草稿已保存",
+      "process": "草稿已保存",
+      "tone": "neutral"
+    },
+    {
+      "name": "saved_draft_with_latest_session_gap",
+      "changes": {
+        "draft_report": {
+          "readout_gaps": ["600519.SH缺少2026-10-23的收盘读数"]
+        }
+      },
+      "label": "草稿已保存",
+      "process": "草稿已保存，600519.SH缺少2026-10-23的收盘读数",
+      "tone": "attention"
+    },
+    {
+      "name": "saved_draft_with_unrelated_version_gap",
+      "changes": {
+        "draft_report": {
+          "research_version": 2,
+          "readout_gaps": ["600519.SH缺少2026-10-23的收盘读数"]
+        }
+      },
+      "label": "草稿已保存",
+      "process": "草稿已保存",
+      "tone": "neutral"
+    },
+    {
+      "name": "running_with_saved_draft",
+      "changes": {
+        "status": "运行中"
+      },
+      "label": "运行中",
+      "process": "研究正在运行",
+      "tone": "running"
+    },
+    {
+      "name": "failed_with_saved_draft",
+      "changes": {
+        "status": "失败"
+      },
+      "label": "失败",
+      "process": "研究未完成",
+      "tone": "attention"
+    },
+    {
+      "name": "cancelled_with_saved_draft",
+      "changes": {
+        "status": "已取消"
+      },
+      "label": "已取消",
+      "process": "研究已取消",
+      "tone": "attention"
+    },
+    {
+      "name": "not_started_with_delivery",
+      "changes": {
+        "status": "待开始"
+      },
+      "label": "待开始",
+      "process": "研究待开始",
+      "tone": "neutral"
+    },
+    {
+      "name": "older_saved_version",
+      "changes": {
+        "version": 2
+      },
+      "label": "部分完成",
+      "process": "研究部分完成",
+      "tone": "attention"
+    },
+    {
+      "name": "missing_delivery",
+      "changes": {
+        "delivery": null
+      },
+      "label": "部分完成",
+      "process": "研究部分完成",
+      "tone": "attention"
+    },
+    {
+      "name": "pending_prose",
+      "changes": {
+        "delivery": null,
+        "has_pending_content": true,
+        "draft_report": {
+          "title": "未保存正文"
+        }
+      },
+      "label": "部分完成",
+      "process": "研究部分完成",
+      "tone": "attention"
+    },
+    {
+      "name": "formal_partial",
+      "delivery_changes": {
+        "kind": "research_report"
+      },
+      "label": "部分完成",
+      "process": "研究部分完成",
+      "tone": "attention"
+    },
+    {
+      "name": "legacy_kind_unknown",
+      "delivery_changes": {
+        "kind": null
+      },
+      "label": "部分完成",
+      "process": "研究部分完成",
+      "tone": "attention"
+    },
+    {
+      "name": "missing_content_digest",
+      "delivery_changes": {
+        "digest": ""
+      },
+      "label": "部分完成",
+      "process": "研究部分完成",
+      "tone": "attention"
+    },
+    {
+      "name": "missing_html_digest",
+      "delivery_changes": {
+        "html_sha256": ""
+      },
+      "label": "部分完成",
+      "process": "研究部分完成",
+      "tone": "attention"
+    },
+    {
+      "name": "foreign_delivery_owner",
+      "delivery_changes": {
+        "task_id": "another-task"
+      },
+      "label": "部分完成",
+      "process": "研究部分完成",
+      "tone": "attention"
+    },
+    {
+      "name": "same_delivery_owner",
+      "delivery_changes": {
+        "task_id": "rh_4cf36fd2eac941f6900937532fc8eecd"
+      },
+      "label": "草稿已保存",
+      "process": "草稿已保存",
+      "tone": "neutral"
+    },
+    {
+      "name": "string_delivery_version",
+      "delivery_changes": {
+        "version": "1"
+      },
+      "label": "部分完成",
+      "process": "研究部分完成",
+      "tone": "attention"
+    },
+    {
+      "name": "boolean_version",
+      "changes": {
+        "version": true
+      },
+      "delivery_changes": {
+        "version": true
+      },
+      "label": "部分完成",
+      "process": "研究部分完成",
+      "tone": "attention"
+    },
+    {
+      "name": "missing_task_identity",
+      "changes": {
+        "id": ""
+      },
+      "label": "部分完成",
+      "process": "研究部分完成",
+      "tone": "attention"
+    },
+    {
+      "name": "formal_completed",
+      "changes": {
+        "status": "已完成"
+      },
+      "delivery_changes": {
+        "kind": null
+      },
+      "label": "已完成",
+      "process": "研究已完成",
+      "tone": "verified"
+    },
+    {
+      "name": "unknown_status",
+      "changes": {
+        "status": "__proto__"
+      },
+      "label": "__proto__",
+      "process": "__proto__",
+      "tone": "neutral"
+    }
+  ],
+  "synthetic_only": true,
+  "source": "Retained actual Skill draft delivery metadata, no provider content"
+}
