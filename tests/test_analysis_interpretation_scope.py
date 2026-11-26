@@ -1,30 +1,23 @@
 """New analysis guidance scopes comparisons without approving conclusions."""
 import copy
 import json
-from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
 
+from tests.legacy_replay_fixtures import financial_task
 from researchhelper.model import ModelService, ModelSettings
 from researchhelper.reasoning import analysis_contract, model_object, PHASE_FIELDS
-
-ROOT = Path(__file__).resolve().parents[1]
-RETAINED = ROOT/'result/acceptance/one-sentence-research-no6pdaos/task.json'
 
 
 class AnalysisInterpretationScopeTests(unittest.TestCase):
     def setUp(self):
-        self.original = RETAINED.read_bytes()
-        self.task = json.loads(self.original)
-        self.task['analysis_reporting_version'] = 2
-
-    def tearDown(self):
-        self.assertEqual(RETAINED.read_bytes(), self.original)
+        self.task = financial_task(both_ratios=True)
+        self.task.update(status='部分完成', analysis_reporting_version=2)
 
     def test_reference_remains_specific_to_its_actual_method(self):
         contract = analysis_contract(self.task)
-        methods = {item['method']:item for item in contract['by_question']['q1']['calculations']}
+        methods = {item['method']:item for item in contract['by_question']['financial']['calculations']}
         self.assertEqual(methods['net_profit_margin_v1']['registered_reference_quantities'], {})
         self.assertEqual(methods['operating_cash_profit_ratio_v1']['registered_reference_quantities']['reference:parity']['value'],100)
         self.assertIn('单项计算', contract['client_writing']['reference_scope'])
