@@ -1,15 +1,13 @@
 """Actual phase wiring exposes current filters and complete real choices."""
 import copy
 import json
-from pathlib import Path
 import unittest
 from unittest.mock import patch
 
 from researchhelper.evidence import data_request_contract,validate_ifind_report_request
 from researchhelper.reasoning import model_object,PHASE_FIELDS,FILING_SELECTION_GUIDANCE_VERSION
 
-ROOT=Path(__file__).resolve().parents[1]
-ORIGINAL=ROOT/'result/acceptance/default-app-investment-resume-vtrz1pya/task.json'
+from tests.test_filing_choice_coverage import CATALOGUE_COUNT, retained_filing_task
 
 
 class Recorder:
@@ -22,7 +20,8 @@ class Recorder:
 
 class FilingSelectionPromptContractTests(unittest.TestCase):
     def test_plan_and_supplement_receive_same_unfiltered_option_without_forcing_901(self):
-        task=json.loads(ORIGINAL.read_text());before=copy.deepcopy(task['ledger'])
+        task = retained_filing_task()
+        before = copy.deepcopy(task['ledger'])
         recorder=Recorder()
         contract=data_request_contract(task)
         with patch('socket.socket.connect',side_effect=AssertionError('No real calls')):
@@ -37,7 +36,7 @@ class FilingSelectionPromptContractTests(unittest.TestCase):
             self.assertEqual(directory['parameter_options']['functionpara'],[{}, {'reportType':'901'}])
             self.assertNotIn('functionpara',directory['fixed_parameters'])
             original=next(item for item in tools if item['operation']=='filing_original')
-            self.assertEqual(len(original['available_selections']),46)
+            self.assertEqual(len(original['available_selections']), CATALOGUE_COUNT)
             self.assertTrue(any('2026年中期报告' in item['title'] for item in original['selection_details']))
             self.assertNotIn('类型901、',call['messages'][0]['content'])
             for selected in ({},{'reportType':'901'}):
