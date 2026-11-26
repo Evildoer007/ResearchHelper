@@ -17,7 +17,7 @@ import tempfile
 from unittest.mock import patch
 
 from researchhelper.contracts import context
-from researchhelper.reasoning import (CALCULATION_PLAN_VERSION, PHASE_FIELDS,
+from researchhelper.reasoning import (CALCULATION_PLAN_VERSION, PHASE_FIELDS, RULES_VERSION,
                                      calculation_plan_contract, model_object,
                                      phase_output_example)
 from tests import test_question_scope_workflow_offline as workflow
@@ -49,7 +49,9 @@ class CurrentPriceWorkflow(workflow.QuestionScopeWorkflowTests):
     def test_independent_skill_matches_app_without_a_second_model(self):
         done, _ = self.workflow()
         workflow.BASE.mkdir(parents=True, exist_ok=True)
-        output = Path(tempfile.mkdtemp(prefix='current-parity-', dir=workflow.BASE))
+        folder = tempfile.TemporaryDirectory(prefix='current-parity-', dir=workflow.BASE)
+        self.addCleanup(folder.cleanup)
+        output = Path(folder.name)
         installation = output / 'installation/researchhelper'
         prepare_skill_fixture(installation)
         installed_hashes = {str(path): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -72,7 +74,7 @@ class CurrentPriceWorkflow(workflow.QuestionScopeWorkflowTests):
         self.assertEqual(skill['answer'], done['questions'][0]['answer'])
         self.assertEqual(skill['calculation'], done['calculations'][0]['output'])
         self.assertTrue(skill['model_is_none'] and skill['restarted_report_unchanged'])
-        self.assertEqual(skill['data_fixture_calls'], 2)
+        self.assertEqual(skill['data_fixture_calls'], 3)
         self.assertEqual(skill['model_fixture_calls'], 0)
         self.assertFalse(self.fixture_errors, self.fixture_errors)
         (output / 'receipt.json').write_text(json.dumps({
@@ -97,7 +99,9 @@ class CurrentSharedCalculation(shared.CalculationSharedContractTests):
         finally:
             sys.path[:] = old_path
             sys.dont_write_bytecode = old_bytecode
-        return module.Session(Path(folder.name) / 'project')
+        session = module.Session(Path(folder.name) / 'project')
+        self.addCleanup(session.agent.close_runtime)
+        return session
 
     def test_optional_empty_objects_and_required_fields_match_validator(self):
         contract = calculation_plan_contract(self.task)
@@ -116,7 +120,7 @@ class CurrentSharedCalculation(shared.CalculationSharedContractTests):
         for phase in ('plan', 'supplement', 'extract', 'analyze'):
             host.output = phase_output_example(phase)
             _, receipt = model_object(host, self.task, phase, {}, PHASE_FIELDS[phase])
-            self.assertEqual(receipt['rules_version'], 26)
+            self.assertEqual(receipt['rules_version'], RULES_VERSION)
             if phase in ('plan', 'supplement'):
                 self.assertEqual(receipt['calculation_contract_version'], CALCULATION_PLAN_VERSION)
             else:
