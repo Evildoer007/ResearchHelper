@@ -25,6 +25,7 @@ class CurrentKnowledgeAcceptanceTests(unittest.TestCase):
         network.start()
         self.addCleanup(network.stop)
         agent = ResearchAgent(ResearchArchive(self.folder / 'store'), ROOT, offline=True)
+        self.addCleanup(agent.close_runtime)
         task = agent.create(probe.QUESTION, entry='ETF', questions=[{
             'id': 'q1', 'kind': 'fact', 'question': probe.QUESTION,
             'answer_scope': 'general_definition', 'knowledge_needs': ['rh_k_etf_measures']}])
@@ -42,6 +43,14 @@ class CurrentKnowledgeAcceptanceTests(unittest.TestCase):
         changed['questions'][0]['answer'] = '市场价格不同于净值。'
         with self.assertRaises(AssertionError):
             probe.verify_definition(changed, self.report)
+
+    def test_hidden_main_cannot_be_approved_from_embedded_answer_text(self):
+        from lxml import html as dom
+        document = dom.document_fromstring(self.report)
+        paper = document.xpath('//main')[0]
+        paper.set('hidden', '')
+        with self.assertRaises(AssertionError):
+            probe.verify_definition(self.task, dom.tostring(document, encoding='unicode'))
 
     def test_forged_versioned_knowledge_is_not_accepted(self):
         changed = copy.deepcopy(self.task)
