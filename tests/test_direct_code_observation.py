@@ -1,6 +1,5 @@
 """Actual retained quote replay plus negative boundaries; no external calls."""
 import copy
-import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -15,32 +14,39 @@ sys.path.insert(0, str(ROOT))
 if importlib.util.find_spec('researchhelper') is None:
     from core.bootstrap import configure_imports
     configure_imports()
-from researchhelper.contracts import ContractError, fingerprint
+from researchhelper.contracts import ContractError
 from researchhelper.evidence import (candidate_evidence, direct_code_reference,
     validate_provenance, validate_direct_code_identity, DIRECT_CODE_LIMITATION)
 from researchhelper.analyzer import ResearchAnalyzer
 from researchhelper.archive import ResearchArchive
 from researchhelper.engine import ResearchAgent
-from researchhelper.reasoning import evidence_contract, API_EXTRACTION_GUIDANCE_VERSION, analysis_contract, model_object
+from researchhelper.reasoning import (evidence_contract, extractable_source_views,
+    API_EXTRACTION_GUIDANCE_VERSION, analysis_contract, model_object)
 from researchhelper.planning import input_fingerprint
 from researchhelper.output_schema import (api_extraction_output_schema, decode_api_extraction_output,
                                          _planned_request_schemas, _matches)
 
-ORIGINAL = ROOT / 'result/acceptance/installed-natural-research-941_jdsj/task.json'
+from tests.legacy_replay_fixtures import financial_task
+from tests.market_observation_fixtures import ETF_CLOSES, close_price_proposals, etf_close_replay, read_captures
 
 
 class DirectCodeObservationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.original = ETF_CLOSES.read_bytes()
+        cls.capture = read_captures(cls.original, grouped=False)
+
+    @classmethod
+    def tearDownClass(cls):
+        if ETF_CLOSES.read_bytes() != cls.original:
+            raise AssertionError('Retained ETF capture was changed')
+
     def setUp(self):
-        self.original_hash = hashlib.sha256(ORIGINAL.read_bytes()).hexdigest()
-        self.task = json.loads(ORIGINAL.read_text())
-        self.source = self.task['source_records'][0]
-        self.spec = copy.deepcopy(self.task['host_result']['evidence_specs'][0])
-        self.spec.pop('identity')
+        self.task, self.source = etf_close_replay(self.capture)
+        self.proposals = close_price_proposals(self.task, self.source)
+        self.spec = copy.deepcopy(self.proposals[0])
         self.spec['direct_code_reference'] = direct_code_reference(self.task, self.source)
         self.assertIsNotNone(self.spec['direct_code_reference'])
-
-    def tearDown(self):
-        self.assertEqual(hashlib.sha256(ORIGINAL.read_bytes()).hexdigest(), self.original_hash)
 
     def candidate(self, task=None, source=None, spec=None):
         return candidate_evidence(task or self.task, source or self.source, spec or self.spec)
@@ -55,10 +61,10 @@ class DirectCodeObservationTests(unittest.TestCase):
         self.assertNotIn('valid_to', item['identity'])
         self.assertIsNone(item['published_at'])
 
-    def test_all_61_original_cells_keep_exact_provider_values(self):
-        for original in self.task['host_result']['evidence_specs']:
+    def test_every_retained_cell_keeps_its_exact_provider_value(self):
+        self.assertEqual(len(self.proposals), 17)
+        for original in self.proposals:
             spec = copy.deepcopy(original)
-            spec.pop('identity')
             spec['direct_code_reference'] = self.spec['direct_code_reference']
             item = self.candidate(spec=spec)
             row = spec['record_locator']['row']
@@ -67,7 +73,7 @@ class DirectCodeObservationTests(unittest.TestCase):
             self.assertEqual(item['raw_value'], self.source['snapshot']['tables'][table]['table'][field][row])
 
     def test_missing_reference_is_not_automatically_repaired(self):
-        spec = copy.deepcopy(self.task['host_result']['evidence_specs'][0])
+        spec = copy.deepcopy(self.proposals[0])
         with self.assertRaises(ContractError):
             self.candidate(spec=spec)
 
@@ -203,26 +209,31 @@ class DirectCodeObservationTests(unittest.TestCase):
         self.assertEqual(direct_code_reference(self.task,self.source),before)
         self.assertEqual(self.candidate()['source_check'],'通过')
 
-    def test_actual_analysis_failure_is_repaired_without_mutating_its_record(self):
-        file = ROOT/'result/acceptance/installed-natural-research-2ag6j62w/task.json'
-        before = hashlib.sha256(file.read_bytes()).hexdigest()
-        task = json.loads(file.read_text())
-        self.assertEqual(task['status'],'失败')
-        self.assertEqual(len(task['calculations']),1)
-        self.assertNotEqual(task['input_hash'],input_fingerprint(task))
+    def test_stale_analysis_plan_preserves_verified_evidence_on_readback(self):
+        # Reproduce the stale input hash on an explicitly synthetic financial task.
+        task = financial_task()
+        task['status'] = '失败'
+        task['calculation_specs'].append({'id':'late_plan', 'method':'observed_price_return_v1'})
+        self.assertNotEqual(task['input_hash'], input_fingerprint(task))
+        self.assertTrue(task['calculations'])
+        self.assertTrue(task['evidence'])
+        before = copy.deepcopy(task)
         for item in task['evidence']:
-            validate_provenance(item,task)
-        self.assertEqual(hashlib.sha256(file.read_bytes()).hexdigest(),before)
+            validate_provenance(item, task)
+        self.assertEqual(task, before)
 
     def test_strict_schema_preserves_explicit_direct_reference(self):
         # A synthetic one-position schema projection tests wire syntax only.
-        # It does not assert that the real 61-row response was fully exposed.
-        contract = evidence_contract(self.task)
+        # The retained response is larger than the per-source prompt window.
+        task = dict(self.task)
+        task.pop('api_cell_selection_encoding')
+        task['input_hash'] = input_fingerprint(task)
+        contract = evidence_contract(task)
         contract['sources'][0]['api_cells']['cells'] = [next(cell for cell in contract['sources'][0]['api_cells']['cells']
             if cell['proposal_fields']['record_locator'] == self.spec['record_locator'])]
         contract['sources'][0]['api_cells']['scan_complete'] = True
         with patch('researchhelper.reasoning.evidence_contract', return_value=contract):
-            schema = api_extraction_output_schema(self.task, [{'kind':'api'}])
+            schema = api_extraction_output_schema(task, extractable_source_views(task))
         self.assertIsNotNone(schema)
         row = {key:copy.deepcopy(self.spec[key]) for key in ('id','artifact_id','object','record_locator',
             'nature','question_ids','api_value_reference','availability','direct_code_reference')}
@@ -235,14 +246,19 @@ class DirectCodeObservationTests(unittest.TestCase):
         self.assertIsNone(decoded['evidence_specs'][0]['published_at'])
 
     def test_strict_schema_does_not_invent_a_mapping_if_reference_is_absent(self):
-        contract = evidence_contract(self.task)
+        task = dict(self.task)
+        task.pop('api_cell_selection_encoding')
+        task['input_hash'] = input_fingerprint(task)
+        contract = evidence_contract(task)
         contract['sources'][0]['api_cells']['scan_complete'] = True
         contract['sources'][0].pop('direct_code_reference')
         with patch('researchhelper.reasoning.evidence_contract', return_value=contract):
-            self.assertIsNone(api_extraction_output_schema(self.task, [{'kind':'api'}]))
+            self.assertIsNone(api_extraction_output_schema(task, extractable_source_views(task)))
 
-    def test_strict_planning_uses_actual_filing_filter_choices(self):
-        shape = next(item for item in _planned_request_schemas(self.task)
+    def test_strict_planning_preserves_legacy_filing_filter_choices(self):
+        task = dict(self.task)
+        task.pop('filing_filter_profile_version', None)
+        shape = next(item for item in _planned_request_schemas(task)
             if item['properties']['operation']['enum']==['report_query'])
         parameter = shape['properties']['parameters']['properties']['functionpara']
         self.assertTrue(_matches({}, parameter))
@@ -266,7 +282,7 @@ class DirectCodeObservationTests(unittest.TestCase):
         self.assertEqual(payload['binding_schema'],wire)
 
     def test_numeric_reference_candidates_use_actual_ids_and_decoder_paths(self):
-        task = json.loads((ROOT/'result/acceptance/installed-natural-research-2ag6j62w/task.json').read_text())
+        task = financial_task()
         contract = analysis_contract(task)
         candidates = [item for question in contract['by_question'].values() for item in question['numeric_quantity_references']]
         self.assertTrue(candidates)
