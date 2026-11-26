@@ -10,7 +10,7 @@ from unittest.mock import patch
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError
 from researchhelper.engine import ResearchAgent
-from researchhelper.model import ModelService, ModelSettings
+from researchhelper.model import ModelCompletionError, ModelService, ModelSettings
 from researchhelper.output_schema import (READING_PROTOCOL, READING_FUNCTION_NAME,
     reading_output_schema, structured_completion, structured_json_completion)
 from researchhelper.source_reader import catalog
@@ -104,6 +104,17 @@ class ResponsesSchemaTransportTests(unittest.TestCase):
         for text in ('{"version":1,"version":1,"requests":[]}', '{"version":NaN,"requests":[]}'):
             with self.assertRaises(ContractError):
                 structured_json_completion(text, self.schema, protocol=READING_PROTOCOL)
+
+    def test_duplicate_transport_status_does_not_adopt_structured_output(self):
+        raw = ('{"status":"failed",' + json.dumps(self.payload())[1:]).encode()
+        with patch.object(self.service, '_request_bytes', return_value=raw) as dispatch:
+            with self.assertRaises(ModelCompletionError):
+                self.service.reason_structured_reading(self.task, [], self.description)
+        dispatch.assert_called_once()
+        event = self.task['ledger']['dispatches'][-1]
+        self.assertEqual((event['status'], event['failure_code']), ('失败', 'duplicate_response_field'))
+        self.assertNotIn('provider_completion_status', event)
+        self.assertNotIn('PRIVATE_REASONING', json.dumps(self.task))
 
     def test_incomplete_even_with_valid_body_never_accepted(self):
         value=self.payload(); value['status']='incomplete'
