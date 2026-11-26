@@ -52,7 +52,7 @@ class RawSourceExtractionRoutingTests(unittest.TestCase):
             for source,capability in CAPABILITIES.items() for entry in capability['registered_operations'] if entry['raw_only']]
         self.assertTrue(views)
         with patch.object(reasoning,'source_views',return_value=views):
-            self.assertEqual(reasoning.extractable_source_views({}),[])
+            self.assertEqual(reasoning.extractable_source_views({'source_records':copy.deepcopy(views)}),[])
 
     def test_unknown_api_operation_cannot_become_body_readiness(self):
         with patch.object(reasoning,'source_views',return_value=[dict(kind='api',source='ifind',operation='not_registered')]):
