@@ -1,5 +1,6 @@
 """Stable raw references through provider key order and Store serialization."""
 import copy
+from decimal import Context, Decimal, ROUND_HALF_UP, localcontext
 import hashlib
 import json
 import socket
@@ -12,6 +13,42 @@ from researchhelper.draft_analysis import analyze,current_analysis
 
 ORIGINAL=ROOT/'result/acceptance/one-sentence-research-vgjkyxq9/task.json'
 HK=ROOT/'result/acceptance/one-sentence-research-_kw2k9ap/task.json'
+
+
+def assert_calculation_meaning(self, results, frozen):
+    self.assertEqual(len(results), 11)
+    self.assertEqual(len(results), len(frozen))
+    for current, original in zip(results, frozen, strict=True):
+        with self.subTest(calculation=current['id']):
+            # Inputs, references, periods and financial meaning remain fixed.
+            reading = {'value', 'exact', 'display'}
+            self.assertEqual({key:value for key,value in current.items() if key not in reading},
+                             {key:value for key,value in original.items() if key not in reading})
+            a, b = (Decimal(str(current['inputs'][key])) for key in ('a', 'b'))
+            with localcontext(Context(prec=60, rounding=ROUND_HALF_UP)):
+                method = current['method']
+                if method == 'raw_change_v1':
+                    expected = (b-a)/a*100
+                elif method in ('raw_difference_v1', 'raw_percentage_points_v1'):
+                    expected = b-a
+                elif method == 'raw_percent_v1':
+                    expected = a/b*100
+                elif method == 'raw_multiple_v1':
+                    expected = a/b
+                elif method == 'raw_margin_v1':
+                    expected = (a-b)/a*100
+                else:
+                    self.fail('Unexpected method in this retained calculation sample: '+method)
+                tolerance = Decimal('1e-36')*max(Decimal(1), abs(expected))
+                self.assertLessEqual(abs(Decimal(current['exact'])-expected), tolerance)
+                self.assertLessEqual(abs(Decimal(str(current['value']))-expected),
+                                     Decimal('1e-14')*max(Decimal(1), abs(expected)))
+                if not expected or abs(expected) >= Decimal('0.005'):
+                    self.assertEqual(Decimal(current['display']),
+                                     expected.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+                else:
+                    self.assertNotEqual(Decimal(current['display']), 0)
+                    self.assertEqual(Decimal(current['display']).is_signed(), expected.is_signed())
 
 
 class DraftObservationOrderTests(unittest.TestCase):
@@ -31,8 +68,11 @@ class DraftObservationOrderTests(unittest.TestCase):
     def test_actual_saved_report_reconstructs_the_same_ten_fact_identifiers(self):
         self.assertEqual(observations(self.task),self.task['draft_report']['facts'])
 
-    def test_actual_saved_app_arithmetic_reconstructs_the_same_eleven_results(self):
-        self.assertEqual(analyze(self.task,observations(self.task))['results'],self.task['draft_report']['calculations'])
+    def test_actual_saved_inputs_keep_eleven_calculations_and_the_frozen_report(self):
+        before = canonical(self.task)
+        results = analyze(self.task, observations(self.task))['results']
+        assert_calculation_meaning(self, results, self.task['draft_report']['calculations'])
+        self.assertEqual(canonical(self.task), before)
 
     def test_store_canonical_serialization_preserves_fact_references(self):
         self.assertEqual(observations(self.task),observations(json.loads(canonical(self.task))))
