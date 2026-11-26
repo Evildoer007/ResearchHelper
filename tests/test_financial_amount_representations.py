@@ -1,7 +1,7 @@
 """Financial ratios preserve declared same-unit evidence and locked knowledge.
 
 All figures and statements are explicit synthetic fixtures. These checks use
-no provider/model request, no production store and no modification of old tests.
+no provider/model request or production store.
 """
 import copy
 import inspect
@@ -77,7 +77,7 @@ class FinancialAmountRepresentationTests(unittest.TestCase):
                 validate_calculation_context(method, bindings(method,'万元'), parameters(method,'元'))
 
     def test_missing_unit_or_unregistered_amount_scale_is_not_filled(self):
-        for unit in ('千元','亿元','USD',None,[],1):
+        for unit in ('十元','兆元','USD',None,[],1):
             with self.subTest(unit=unit), self.assertRaises(ContractError):
                 validate_calculation_parameters('gross_margin_v1', parameters('gross_margin_v1',unit))
         params = parameters('gross_margin_v1','元'); params.pop('amount_unit')
@@ -115,26 +115,34 @@ class FinancialAmountRepresentationTests(unittest.TestCase):
         self.assertTrue(calculation_input_units_available('management_custody_fee_summary_v1',['%','%/年','%','%/年']))
 
     def test_legacy_knowledge_version_does_not_acquire_expanded_unit_scope(self):
-        knowledge = ResearchKnowledge()
-        package = knowledge.read('个股', '财务比率', methods=FINANCIAL_PERIOD_METHODS)
+        knowledge=ResearchKnowledge()
         for method in FINANCIAL_PERIOD_METHODS:
-            ident = METHOD_REGISTRY[method]['knowledge_id']
-            old = copy.deepcopy(RETAINED_VERSIONS[(ident,1)])
-            package['entries'] = [old if item['id']==ident else item for item in package['entries']]
-            package['index'][ident] = 1
-            binding = knowledge.method_binding(package, method)
-            validate_financial_method_scope(method, parameters(method,'百万元'), binding)
-            with self.assertRaises(ContractError): validate_financial_method_scope(method,parameters(method,'元'),binding)
+            ident=METHOD_REGISTRY[method]['knowledge_id']
+            entries={}
+            def retain(key):
+                item=copy.deepcopy(RETAINED_VERSIONS[key])
+                for dependency in item.get('dependencies',[]):
+                    retain((dependency['id'],dependency['version']))
+                entries[key[0]]=item
+            retain((ident,1))
+            package=dict(entries=list(entries.values()),index={key:item['version'] for key,item in entries.items()})
+            before=copy.deepcopy(package)
+            binding=knowledge.method_binding(package,method)
+            self.assertEqual(binding['knowledge_version'],1)
+            validate_financial_method_scope(method,parameters(method,'百万元'),binding)
+            with self.assertRaises(ContractError):validate_financial_method_scope(method,parameters(method,'元'),binding)
+            self.assertEqual(package,before)
 
     def test_current_method_knowledge_is_versioned_without_erasing_v1(self):
-        knowledge = ResearchKnowledge(); package = knowledge.read('个股','财务比率',methods=FINANCIAL_PERIOD_METHODS)
+        knowledge=ResearchKnowledge();package=knowledge.read('个股','财务比率',methods=FINANCIAL_PERIOD_METHODS)
+        versions={'gross_margin_v1':3,'net_profit_margin_v1':4,'operating_cash_profit_ratio_v1':4}
         for method in FINANCIAL_PERIOD_METHODS:
-            binding = knowledge.method_binding(package,method)
-            self.assertEqual(binding['knowledge_version'],2)
+            binding=knowledge.method_binding(package,method);version=versions[method]
+            self.assertEqual(binding['knowledge_version'],version)
             self.assertEqual(binding['implementation_version'],2)
             self.assertEqual(binding['amount_units'],list(FINANCIAL_AMOUNT_UNITS))
-            self.assertEqual(sorted(version for ident,version in RETAINED_VERSIONS if ident==binding['knowledge_id']),[1,2])
-            self.assertEqual([e['version'] for e in ENTRIES if e['id']==binding['knowledge_id']],[2])
+            self.assertEqual(sorted(value for ident,value in RETAINED_VERSIONS if ident==binding['knowledge_id']),list(range(1,version+1)))
+            self.assertEqual([item['version'] for item in ENTRIES if item['id']==binding['knowledge_id']],[version])
 
     def test_tools_separate_fixed_currency_from_registered_amount_choices(self):
         task = dict(id='unit_test',version=1,batch=1,input_hash='offline',cutoff='2026-10-02',questions=[{'id':'q1'}])
