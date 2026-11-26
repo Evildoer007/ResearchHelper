@@ -12,7 +12,7 @@ from researchhelper.contracts import ContractError, canonical
 from researchhelper.engine import ResearchAgent
 from researchhelper.model import ModelService, ModelSettings
 from researchhelper.output_schema import (StructuredOutputError, original_span_output_schema,
-    original_span_prompt, decode_original_spans)
+    original_span_prompt, decode_original_spans, provider_request_schema, ORIGINAL_SPAN_PROTOCOL)
 from researchhelper.planning import input_fingerprint
 from researchhelper.reasoning import MAX_CONTEXT_CHARACTERS, model_object
 
@@ -118,7 +118,8 @@ class OriginalQuestionLinkTests(unittest.TestCase):
     def test_complete_sources_and_capacity_are_unchanged(self):
         self.assertEqual(self.prompt['untrusted_sources'], self.base.prompt['untrusted_sources'])
         self.assertEqual(self.prompt['questions'], self.base.prompt['questions'])
-        self.assertLessEqual(len(canonical(self.prompt)) + len(canonical(self.schema)), MAX_CONTEXT_CHARACTERS)
+        wire_schema = provider_request_schema(self.task, self.schema, ORIGINAL_SPAN_PROTOCOL)
+        self.assertLessEqual(len(canonical(self.prompt)) + len(canonical(wire_schema)), MAX_CONTEXT_CHARACTERS)
 
     def test_actual_transport_uses_new_declaration_once_without_new_inference(self):
         response = dict(object='response', status='completed', error=None, incomplete_details=None,
