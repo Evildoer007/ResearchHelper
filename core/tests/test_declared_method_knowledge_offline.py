@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from researchhelper.archive import ResearchArchive
-from researchhelper.contracts import ContractError, METHOD_REGISTRY
+from researchhelper.contracts import ContractError, METHOD_REGISTRY, methods_for_task
 from researchhelper.engine import ResearchAgent
 from researchhelper.knowledge import ENTRIES
 from researchhelper import knowledge
@@ -85,13 +85,14 @@ class DeclaredMethodKnowledgeTests(unittest.TestCase):
 
     def test_required_methods_are_not_displaced_by_topic_capacity(self):
         task = self.agent.create("利率 指数 ETF 跟踪 成本 毛利 现金流", entry="混合",
-            cutoff="2026-10-02T18:00:00+08:00", questions=[{"id": "core",
-                "question": "计算登记结果", "kind": "comparison",
-                "method_needs": list(METHOD_REGISTRY)}])
+            cutoff="2026-10-02T18:00:00+08:00")
+        methods = methods_for_task(task)
+        task = self.agent.revise_plan(task["id"], [dict(id="q1", question=task["question"],
+            kind="comparison", method_needs=list(methods))], "按当前任务采用的目录登记必要方法", task["input_hash"])
         self.agent._adopt_method_knowledge(task)
-        required_ids = {definition["knowledge_id"] for definition in METHOD_REGISTRY.values()}
+        required_ids = {definition["knowledge_id"] for definition in methods.values()}
         self.assertTrue(required_ids <= set(task["knowledge"]["index"]))
-        for method in METHOD_REGISTRY:
+        for method in methods:
             self.assertTrue(self.agent.knowledge.method_binding(task["knowledge"], method))
         self.assertEqual(task["calculation_specs"], [])
         self.assertEqual(task["calculations"], [])
