@@ -11,7 +11,7 @@ from unittest.mock import patch
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, budget
 from researchhelper.engine import ResearchAgent
-from researchhelper.model import IsolatedModelService, ModelService, ModelSettings
+from researchhelper.model import IsolatedModelService, ModelCompletionError, ModelService, ModelSettings
 from researchhelper.planning import question_specs
 from tests import test_autonomous_reasoning_offline as fixtures
 
@@ -114,6 +114,73 @@ class ModelContentIntegrityTests(unittest.TestCase):
         self.assertFalse(done['data_need_specs'] or done['evidence'] or done['theses'])
         self.assertNotIn(self.secret, json.dumps(done))
         self.assertNotIn('已移除敏感值', json.dumps(done))
+
+    def test_private_fields_and_escaped_credentials_are_blocked_before_draft_archiving(self):
+        encoded = ''.join(r'\u%04x' % ord(char) for char in self.secret)
+        for body in ('{"conclusion":"' + encoded + '"}',
+                     '~~~\n{"conclusion":"https://example.invalid/r\\u003ftoken=CONTROLLED_PRIVATE"}\n~~~',
+                     '{"conclusion":"public","email":"CONTROLLED_PRIVATE@example.invalid"}'):
+            task = {'id': 'escaped-private', 'batch': 1, 'ledger': budget(), 'draft_first_version': 1}
+            service = ModelService(self.settings, offline=False)
+            with self.subTest(size=len(body)), patch.object(service, '_request_bytes', return_value=self.response(body)) as dispatch:
+                with self.assertRaises(ModelCompletionError):
+                    service.reason(task, [], delivery=True, phase='draft_report')
+            dispatch.assert_called_once()
+            event = task['ledger']['dispatches'][0]
+            self.assertEqual((event['status'], event['failure_code']), ('失败', 'private_content'))
+            self.assertNotIn(self.secret, json.dumps(task))
+            self.assertNotIn('CONTROLLED_PRIVATE', json.dumps(task))
+
+    def test_duplicate_draft_fields_reject_before_archiving(self):
+        service = ModelService(self.settings, offline=False)
+        task = {'id': 'duplicate-draft', 'batch': 1, 'ledger': budget(), 'draft_first_version': 1}
+        body = '```json\n{"conclusion":"PRIVATE_FIRST","conclusion":"PRIVATE_LAST"}\n```'
+        with patch.object(service, '_request_bytes', return_value=self.response(body)) as dispatch:
+            with self.assertRaises(ModelCompletionError):
+                service.reason(task, [], delivery=True, phase='draft_report')
+        dispatch.assert_called_once()
+        event = task['ledger']['dispatches'][-1]
+        self.assertEqual((event['status'], event['failure_code']), ('失败', 'duplicate_response_field'))
+        self.assertNotIn('PRIVATE_', json.dumps(task))
+
+    def test_rejected_analysis_keeps_the_verified_excerpt_without_reusing_the_reply(self):
+        quote = '政策自2026年7月21日起生效。'
+        expected_field = {
+            'raw_private': 'analysis.private_content',
+            'nested_private': 'analysis.private_content',
+            'ambiguous_output': 'analysis.completion',
+            'invalid_top_level': 'analysis.completion',
+        }
+        replies = {
+            'raw_private': '{"answers":{},"theses":[],"discard":"https://example.invalid/r?token=PRIVATE_RAW_REPLY"}',
+            'nested_private': '{"answers":{"q1":{"email":"PRIVATE_NESTED_REPLY@example.invalid"}},"theses":[]}',
+            'ambiguous_output': '{"answers":{"q1":{"answer":"PRIVATE_FIRST_VALUE"}},"answers":{},"theses":[]}',
+            'invalid_top_level': '["PRIVATE_LIST_VALUE"]',
+        }
+        for name, response in replies.items():
+            with self.subTest(case=name):
+                task = self.agent.create('这份政策什么时候生效？', objects=['材料示例政策'],
+                    cutoff=fixtures.CUTOFF, limits={'model_calls': 3})
+                task = self.agent.add_material(task['id'], 'policy.txt',
+                    ('材料示例政策\n\n发布日期：2026年7月19日。\n\n' + quote).encode())
+                model = fixtures.FabricatedModel([fixtures.AutonomousReasoningTests.plan(task),
+                    {'evidence_specs': [fixtures.AutonomousReasoningTests.policy_spec(task)]}, response])
+                with patch('researchhelper.model.urllib.request.urlopen', side_effect=model.respond) as dispatch:
+                    result = self.agent.start(task['id'])
+                saved = self.agent.archive.get(task['id'])
+                self.assertEqual(saved['status'], '部分完成', result.get('error'))
+                self.assertEqual(saved['ledger']['used']['model_calls'], dispatch.call_count)
+                self.assertEqual(dispatch.call_count, 3)
+                self.assertEqual(saved['ledger']['used']['data_requests'], 0)
+                self.assertEqual(saved['reasoning_state']['final_delivery']['status'], '未采用')
+                self.assertEqual(saved['reasoning_state']['analysis']['numeric_review']['invalid_fields'], [expected_field[name]])
+                self.assertEqual(saved['questions'][0]['status'], '未回答')
+                self.assertEqual(len(saved['evidence']), 1)
+                self.assertFalse(saved['theses'] or saved['tracking'])
+                report = self.agent.export(task['id'])
+                self.assertIn(quote, report['html'])
+                self.assertEqual(report['content']['evidence'], saved['evidence'])
+                self.assertNotIn('PRIVATE_', json.dumps(saved) + report['html'])
 
     def test_json_syntax_categories_use_only_fixed_names_and_positions(self):
         cases = {
