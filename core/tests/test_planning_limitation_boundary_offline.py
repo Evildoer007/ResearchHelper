@@ -9,7 +9,7 @@ from unittest.mock import patch
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, METHOD_REGISTRY, fingerprint
 from researchhelper.engine import ResearchAgent
-from researchhelper.planning import question_contract, question_specs
+from researchhelper.planning import question_contract, question_specs, PLANNING_LIMITATION_GUIDANCE_VERSION
 from researchhelper.reasoning import PHASE_FIELDS, model_object, validate_plan
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,12 +30,13 @@ class PlanningLimitationBoundaryTests(unittest.TestCase):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.agent = ResearchAgent(ResearchArchive(Path(folder.name)), ROOT, offline=True)
+        self.addCleanup(self.agent.close_runtime)
         self.task = self.agent.create('核对两日未复权价格变化并说明公司行为未知与总收益的限制。',
                                       entry='ETF', objects=['合成测试ETF'])
 
     def test_contract_distinguishes_recorded_unknown_from_necessary_original(self):
         policy = question_contract()['obligation_policy']
-        self.assertEqual(policy['limitation_guidance_version'], 2)
+        self.assertEqual(policy['limitation_guidance_version'], PLANNING_LIMITATION_GUIDANCE_VERSION)
         rule = policy['limitation_boundary']
         self.assertIn('不登记为必须取证的事实', rule['explain_only'])
         self.assertIn('不能以unknown替代', rule['verify_requested'])
@@ -54,7 +55,7 @@ class PlanningLimitationBoundaryTests(unittest.TestCase):
         model = CapturingPlanner(question_specs(self.task))
         output, receipt = model_object(model, self.task, 'plan', payload, PHASE_FIELDS['plan'])
         self.assertIn('说明未知限制不等于核验未知事实', model.messages[0]['content'])
-        self.assertEqual(receipt['planning_limitation_guidance_version'], 2)
+        self.assertEqual(receipt['planning_limitation_guidance_version'], PLANNING_LIMITATION_GUIDANCE_VERSION)
         self.assertEqual(receipt['context_hash'], fingerprint(payload))
         self.assertEqual(output, model.output)
         self.assertEqual(self.task, original)
