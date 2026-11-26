@@ -28,7 +28,7 @@ class ProjectSkillDiscoveryBoundary(unittest.TestCase):
 
     def test_discovery_still_resolves_to_the_protected_installation(self):
         discovery = ROOT / ".agents/skills/researchhelper"
-        self.assertTrue(discovery.is_symlink())
+        self.assertTrue(discovery.is_symlink() or discovery.is_junction())
         self.assertEqual(discovery.resolve(), (ROOT / ".skills/researchhelper").resolve())
 
 
