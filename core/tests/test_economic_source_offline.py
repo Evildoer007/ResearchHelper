@@ -13,7 +13,11 @@ from researchhelper.economic_sources import ECONOMIC_REQUEST_REGISTRY, declared_
 from researchhelper.engine import ResearchAgent
 from researchhelper.evidence import (CAPABILITIES, FIELD_REGISTRY, FILING_REQUEST_REGISTRY, IDENTITY_REQUEST_REGISTRY,
     EvidenceCollector, data_request_contract, snapshot_record, _source_extract)
-from researchhelper.financial_sources import FINANCIAL_REQUEST_REGISTRY
+from researchhelper.financial_sources import FINANCIAL_REQUEST_REGISTRY, FINANCIAL_QUERY_REGISTRY, IFIND_METADATA_REGISTRY
+from researchhelper.market_series import SERIES_REQUEST_REGISTRY
+from researchhelper.market_calendar import REGISTRY as CALENDAR_REQUEST_REGISTRY
+from researchhelper.index_sources import INDEX_REQUEST_REGISTRY
+from researchhelper.official_sources import REGISTRY as OFFICIAL_REQUEST_REGISTRY
 from researchhelper.reasoning import evidence_contract, extractable_source_views, validate_plan
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -23,10 +27,10 @@ PAYLOAD = {'errorcode': 0, 'tables': [{'thscode': 'M001620253', 'time': ['2025-1
 
 class EconomicSourceTests(unittest.TestCase):
     def setUp(self):
-        directory = ROOT / 'result/acceptance/economic-source';directory.mkdir(parents=True, exist_ok=True)
-        folder = tempfile.TemporaryDirectory(prefix='isolated-', dir=directory);self.addCleanup(folder.cleanup)
+        folder = tempfile.TemporaryDirectory(prefix='economic-source-');self.addCleanup(folder.cleanup)
         self.agent = ResearchAgent(ResearchArchive(folder.name), ROOT, offline=False,
             source_credentials={'ifind': {'access_token': 'SYNTHETIC_ACCESS'}})
+        self.addCleanup(self.agent.close_runtime)
         self.task = self.agent.create('读取本研究指标M001620253的原始序列', entry='宏观', objects=['M001620253'],
             cutoff='2026-10-03T00:30:00+14:00', questions=[{'id': 'q1', 'question': '核对指标的定义和原始序列', 'kind': 'fact'}])
         self.collector = EvidenceCollector(False)
@@ -38,7 +42,10 @@ class EconomicSourceTests(unittest.TestCase):
                 'parameters': copy.deepcopy(params or PARAMS), 'question_ids': ['q1']}
 
     def test_public_operations_match_all_executable_registries(self):
-        expected = set(FIELD_REGISTRY) | set(IDENTITY_REQUEST_REGISTRY) | set(FILING_REQUEST_REGISTRY) | set(FINANCIAL_REQUEST_REGISTRY) | set(ECONOMIC_REQUEST_REGISTRY)
+        expected = set().union(FIELD_REGISTRY, IDENTITY_REQUEST_REGISTRY, FILING_REQUEST_REGISTRY,
+            FINANCIAL_REQUEST_REGISTRY, ECONOMIC_REQUEST_REGISTRY, SERIES_REQUEST_REGISTRY,
+            INDEX_REQUEST_REGISTRY, FINANCIAL_QUERY_REGISTRY, IFIND_METADATA_REGISTRY,
+            CALENDAR_REQUEST_REGISTRY, OFFICIAL_REQUEST_REGISTRY)
         actual = [source + '.' + item['operation'] for source, cap in CAPABILITIES.items() for item in cap['registered_operations']]
         self.assertEqual(set(actual), expected);self.assertEqual(len(actual), len(set(actual)))
         tool = next(item for item in CAPABILITIES['ifind']['registered_operations'] if item['operation'] == 'edb_service')
@@ -55,7 +62,19 @@ class EconomicSourceTests(unittest.TestCase):
         contract = data_request_contract(self.task)
         expected = set(FIELD_REGISTRY) | set(FILING_REQUEST_REGISTRY) | set(IDENTITY_REQUEST_REGISTRY) | set(FINANCIAL_REQUEST_REGISTRY) | set(ECONOMIC_REQUEST_REGISTRY)
         actual = [tool['qualified_id_for_lookup_only'] for tool in contract['tools']]
-        self.assertEqual(set(actual), expected);self.assertEqual(len(actual), len(set(actual)))
+        # Request shapes depend on task scope. A macro task cannot use ETF
+        # PCF or index-file selectors with no declared fund/index.
+        expected -= {'official.index_file', 'official.etf_pcf'}
+        self.assertTrue(expected.issubset(actual))
+        self.assertEqual(len(actual), len(set(actual)))
+        registered = {source + '.' + tool['operation'] for source, capability in CAPABILITIES.items()
+                      for tool in capability['registered_operations']}
+        self.assertTrue(set(actual).issubset(registered))
+        for name in ('ifind.edb_service', 'ifind.smart_stock_picking', 'ifind.date_sequence',
+                     'official.release_catalog', 'official.release_original'):
+            self.assertIn(name, actual)
+        self.assertNotIn('official.index_file', actual)
+        self.assertNotIn('official.etf_pcf', actual)
         self.assertNotIn('basic_data_service', [tool['operation'] for tool in contract['tools']])
         self.assertTrue(next(tool for tool in contract['tools'] if tool['operation'] == 'edb_service')['raw_only'])
 
@@ -156,9 +175,13 @@ class EconomicSourceTests(unittest.TestCase):
     def test_skill_reads_the_same_tools_and_retained_raw_snapshot(self):
         spec = importlib.util.spec_from_file_location('economic_skill_fixture', ROOT / 'core/session.py')
         module = importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-        project = tempfile.TemporaryDirectory(prefix='economic-skill-', dir=ROOT / 'result/acceptance/economic-source');self.addCleanup(project.cleanup)
+        project = tempfile.TemporaryDirectory(prefix='economic-skill-');self.addCleanup(project.cleanup)
         session = module.Session(project.name)
-        task = session.create('核对M001620253的指标含义与原始序列', entry='宏观', objects=['M001620253'], cutoff='2026-10-02T18:30:00+08:00')
+        self.addCleanup(session.agent.close_runtime)
+        self.assertFalse(Path(project.name).resolve().is_relative_to(ROOT))
+        with patch('researchhelper.engine.now',return_value='2026-10-02T18:30:00+08:00'):
+            task = session.create('核对M001620253的指标含义与原始序列', entry='宏观',
+                                  objects=['M001620253'], research_mode='current')
         tool = next(item for item in session.tools(task['id'])['data_requests']['tools'] if item['operation'] == 'edb_service')
         self.assertTrue(tool['raw_only'])
         record = session.snapshot(task['id'], 'ifind', 'edb_service', PARAMS, PAYLOAD)
