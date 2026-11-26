@@ -25,7 +25,7 @@ from .planning import thesis_obligations
 from .layout import resource_directory
 
 TEMPLATE_VERSION = "rh-paper-3"
-READER_VERSION = "rh-reader-33"
+READER_VERSION = "rh-reader-34"
 VERSION_CHANGES_CONTRACT = 2
 DRAFT_VERSION_CHANGES_CONTRACT = 3
 CALCULATION_COMPARISON_FIELDS = (
