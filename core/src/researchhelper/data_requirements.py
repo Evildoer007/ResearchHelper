@@ -14,6 +14,13 @@ POLICY='typed_evidence_needs_version'
 FIELD='evidence_need_constraints'
 DIMENSIONS=('amount','percentage','count','physical','price','index','other','not_applicable')
 PERIODS=('any','point','interval','month')
+_COUNT_BASE_UNITS = ('个', '家', '只', '人', '人次', '名', '户', '股', '份', '次', '台', '辆', '笔', '件', '套', '张', '宗')
+SCALED_COUNT_UNITS = frozenset(
+    scale + unit
+    for scale in ('十', '百', '千', '万', '十万', '百万', '千万', '亿', '十亿', '百亿', '千亿', '万亿')
+    for unit in _COUNT_BASE_UNITS
+)
+_COUNT_UNITS = SCALED_COUNT_UNITS.union(_COUNT_BASE_UNITS)
 GUIDANCE=(
     '首次规划只将决定主问题能否回答、关键判断能否成立的依据列为必需；不把知识包的完整指标清单当作任务清单。'
     '辅助指标和拓展背景放入独立的required=false子问题，不能成为独立核心答案的前置依赖。'
@@ -87,7 +94,7 @@ def unit_matches(unit,dimension):
     if not isinstance(unit,str) or not unit:return False
     if dimension=='amount':return unit in FINANCIAL_AMOUNT_UNITS
     if dimension=='percentage':return unit in ('%','%/年','百分点','个百分点','基点','bp','bps')
-    if dimension=='count':return unit in ('个','家','只','人','户','股','万股','亿股','份','万份','亿份','次','台','辆')
+    if dimension=='count':return unit in _COUNT_UNITS
     if dimension=='price':return unit in ('元','港元','美元','元/股','港元/股','美元/股','元/份','元/吨','美元/桶')
     if dimension=='index':return unit=='点'
     # Open-ended literal physical and other units remain subject to ordinary
@@ -188,6 +195,53 @@ def validate_links(task,item,mapping):
                 raise ContractError('所选依据不满足关联需求的数值类型、单位维度或期间形状，不能作为已取得的数据')
 
 
+def _observation_identity(item):
+    """Count one addressed API cell once, independently of its prose or alias.
+
+    Registered point prices also keep their identity across query windows.
+    This is not financial equivalence across sources, periods or units. The
+    ordinary source gates establish the cell's identity; records without an
+    exact API address keep the established excerpt counting behavior.
+    """
+    artifact = item.get('artifact')
+    locator = item.get('record_locator')
+    if (type(item.get('value')) in (int, float) and isinstance(artifact, dict)
+            and artifact.get('kind') == 'api' and isinstance(locator, dict)
+            and type(locator.get('table')) is int and locator['table'] >= 0
+            and type(locator.get('row')) is int and locator['row'] >= 0
+            and isinstance(locator.get('field'), str) and locator['field']
+            and isinstance(artifact.get('source'), str) and artifact['source']
+            and artifact.get('source') == item.get('source')
+            and isinstance(artifact.get('operation'), str) and artifact['operation']
+            and isinstance(artifact.get('request_hash'), str)
+            and re.fullmatch(r'[0-9a-f]{64}', artifact['request_hash'])
+            and isinstance(item.get('snapshot_hash'), str)
+            and re.fullmatch(r'[0-9a-f]{64}', item['snapshot_hash'])
+            and item['snapshot_hash'] == artifact.get('snapshot_hash', artifact.get('hash'))):
+        context = item.get('calculation_context')
+        definition = item.get('field_definition')
+        price_keys = ('security_id', 'currency', 'price_basis', 'price_kind', 'observation_date')
+        if (artifact['source'] == 'ifind' and artifact['operation'] == 'cmd_history_quotation'
+                and isinstance(definition, dict) and isinstance(context, dict)
+                and definition.get('registry') == 'ifind.cmd_history_quotation'
+                and definition.get('field') == locator['field'] == context.get('price_kind')
+                and locator['field'] in ('open', 'high', 'low', 'close')
+                and all(isinstance(context.get(key), str) and context[key] for key in price_keys)
+                and context['security_id'] == item.get('object')
+                and context['observation_date'] == item.get('period')):
+            # Query windows and download IDs do not create a second price at
+            # the same instant. Keep currency, adjustment and field meaning.
+            return fingerprint(dict(kind='registered_price_observation', source=artifact['source'],
+                definition=definition, unit=item.get('unit'),
+                context={key: context[key] for key in price_keys}))
+        return fingerprint(dict(kind='api_cell', source=artifact['source'], operation=artifact['operation'],
+            request_hash=artifact['request_hash'], snapshot_hash=item['snapshot_hash'],
+            address={key: locator[key] for key in ('table', 'row', 'field')}))
+    keys = (('artifact_id', 'object', 'date_role', 'period') if item.get('date_role') else
+            ('object', 'text', 'value', 'unit', 'period', 'record_locator', 'calculation_context'))
+    return fingerprint({key: item.get(key) for key in keys})
+
+
 def count_satisfied(question,text,items):
     constraints=normalized(question)
     if constraints is None:return True
@@ -197,9 +251,7 @@ def count_satisfied(question,text,items):
         links=item.get('applicability_review',{}).get('evidence_need_ids',{}).get(question['id'],[])
         if question['id'] not in item.get('question_ids',[]) or not {ident,question['id']+':'+ident}.intersection(links):continue
         if not satisfies(item,spec):continue
-        keys = (('artifact_id','object','date_role','period') if item.get('date_role') else
-                ('object','text','value','unit','period','record_locator','calculation_context'))
-        observations.add(fingerprint({key:item.get(key) for key in keys}))
+        observations.add(_observation_identity(item))
     return len(observations)>=spec['minimum_count']
 
 
