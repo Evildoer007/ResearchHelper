@@ -12,7 +12,7 @@ from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import (ContractError,evidence_requirements,missing_evidence_requirements,fingerprint,
     validate_question_coverage)
 from researchhelper.data_requirements import (POLICY,FIELD,normalized,validate_links,validate_plan,
-    count_satisfied,unit_matches,pending)
+    api_cell_need_groups,count_satisfied,unit_matches,pending)
 from researchhelper.engine import ResearchAgent
 from researchhelper.output_schema import (planning_output_schema,decode_planning_output,original_span_output_schema,
     _original_span_choices,decode_original_spans)
@@ -51,6 +51,31 @@ class TypedDataRequirementsTests(unittest.TestCase):
             self.assertFalse(unit_matches(unit,'amount'))
         self.assertTrue(unit_matches('GWh','physical'))
         self.assertFalse(unit_matches('个百分点','physical'))
+
+    def test_scaled_count_units_keep_literal_values_and_cannot_fill_other_dimensions(self):
+        name='报告期末客户数量'
+        q=dict(id='q1',evidence_needs=[name],**{FIELD:{name:constraint(dimension='count',period='point')}})
+        task=dict(self.task(),questions=[q],api_need_compatibility_version=2)
+        mapping={'q1':[fingerprint(name)]}
+        base=dict(question_ids=['q1'],value=123.4,period='2026-06-30',
+                  applicability_review=dict(evidence_need_ids=mapping))
+        units=('户','万户','万家','万人','万人次','亿人','百万份','千万股','万笔')
+        for unit in units:
+            item=dict(base,text='合成原值123.4'+unit,unit=unit)
+            with self.subTest(unit=unit):
+                validate_links(task,item,mapping)
+                self.assertTrue(count_satisfied(q,name,[item]))
+                self.assertEqual((item['value'],item['unit']),(123.4,unit))
+        non_counts=('万元','万亿元','%','百分点','万户/年','万人次／日','每万户','万户左右')
+        for unit in non_counts:
+            item=dict(base,unit=unit)
+            with self.subTest(unit=unit),self.assertRaises(ContractError):
+                validate_links(task,item,mapping)
+        cells=[dict(base,unit='万户',candidate_id='counts'),dict(base,unit='万元',candidate_id='amounts')]
+        self.assertEqual(api_cell_need_groups(task,cells),[
+            dict(need_choices={'q1':[name]},candidate_ids=['counts']),
+            dict(need_choices={},candidate_ids=['amounts']),
+        ])
 
     def test_five_requested_observations_cannot_be_filled_by_duplicate_excerpts(self):
         task=self.task();q=task['questions'][0];q[FIELD]['公司营业收入']['minimum_count']=5
