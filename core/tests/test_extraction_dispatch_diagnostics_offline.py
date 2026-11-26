@@ -61,7 +61,12 @@ class ExtractionDispatchDiagnosticsTests(unittest.TestCase):
         validation = self.diagnostic()["output_contract"]["extraction_validation"]
         self.assertFalse(validation["accepted"])
         self.assertEqual(validation["failure_code"], "proposal_constraints_rejected")
-        self.assertNotIn("rejected_extraction", self.task.get("reasoning_state", {}))
+        rejection = self.task["reasoning_state"]["rejected_extraction"]
+        self.assertFalse(rejection["specification_accepted"])
+        self.assertFalse(rejection["automatic_repair"])
+        self.assertFalse(rejection["issue"]["evidence_approved"])
+        self.assertEqual(rejection["proposed_specs"], [spec])
+        self.assertNotIn("extraction", self.task["reasoning_state"])
         self.assertFalse(self.task["evidence"])
 
     def test_successful_proposal_is_not_approved_evidence(self):
