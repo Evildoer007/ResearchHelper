@@ -33,7 +33,7 @@ class MixedAtomicReadingTests(unittest.TestCase):
         self.request = [dict(artifact_id='doc', snapshot_hash=self.records[0]['hash'],
                              queries=[], parts=[dict(part='page1', start=0, end=100)],
                              reason='核对', question_ids=['q'])]
-        self.patches = [patch.object(reader, 'source_views', side_effect=lambda task: copy.deepcopy(self.views)),
+        self.patches = [patch.object(reader, 'source_views', side_effect=lambda task, *, prefer_current_pdf=True: copy.deepcopy(self.views)),
                         patch('researchhelper.reasoning.extractable_source_views',
                               side_effect=lambda task: copy.deepcopy(self.views[:2])),
                         patch.object(reader, '_verify_original_text')]
