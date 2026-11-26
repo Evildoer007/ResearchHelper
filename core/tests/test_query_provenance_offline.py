@@ -6,11 +6,14 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from lxml import html
+
 from researchhelper.analyzer import ResearchAnalyzer
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, METHOD_REGISTRY, charge, fingerprint, missing_evidence_requirements
 from researchhelper.engine import ResearchAgent
-from researchhelper.evidence import candidate_evidence, current_snapshot_reference, snapshot_record, _record_current_acquisition
+from researchhelper.evidence import (candidate_evidence, current_snapshot_reference, direct_code_reference,
+                                     snapshot_record, _record_current_acquisition)
 from researchhelper.planning import normalize_questions, question_specs, validate_question_revision
 from researchhelper.provenance import (QUERY_ANSWER, bind_query_references, query_candidates,
     query_projection, query_reference)
@@ -29,6 +32,10 @@ class QueryProvenanceTests(unittest.TestCase):
         self.agent = ResearchAgent(ResearchArchive(folder.name), ROOT, offline=True)
         guard = patch('socket.socket.connect', side_effect=AssertionError('No network'))
         guard.start(); self.addCleanup(guard.stop)
+        for clock in ('researchhelper.engine.now', 'researchhelper.evidence.now'):
+            fixed = patch(clock, return_value='2026-10-01T18:00:00+08:00')
+            fixed.start()
+            self.addCleanup(fixed.stop)
 
     def acquired(self, pure=False):
         question = {'id': 'q1', 'question': '核对实际价格和本次查询留痕', 'kind': 'fact',
@@ -55,14 +62,15 @@ class QueryProvenanceTests(unittest.TestCase):
         return dict(query_reference(task, record), evidence_need_ids=[fingerprint(TRACE_NEED)])
 
     def price(self, task, record):
+        identity = direct_code_reference(task, record)
+        self.assertIsNotNone(identity)
         return {'id': 'price', 'artifact_id': record['id'], 'object': '510300.SH',
             'record_locator': {'table': 0, 'row': 0, 'field': 'close'}, 'period': '2026-09-30',
             'nature': '已实现事实', 'unit': '元', 'raw_unit': '元', 'raw_value': 4.5, 'value': 4.5, 'conversion_factor': 1,
             'published_at': None, 'publication': {'at': None, 'basis_ref': None, 'certainty': '未知',
                 'precision': '未知', 'timezone': '未知', 'basis': '首次公开未知，当前取数另有记录'},
             'availability': current_snapshot_reference(task, record), 'question_ids': ['q1'],
-            'identity': {'provider_code': '510300.SH', 'object': '510300.SH', 'basis': '用户明确证券代码',
-                'valid_from': '2026-09-01', 'valid_to': '2026-10-31'},
+            'direct_code_reference': identity,
             'review': {'question_ids': ['q1'], 'allowed_natures': ['已实现事实'],
                 'conditions': ['当前响应的收盘原值，不是净值或历史当时版本'], 'reason': '同对象原字段原值与日期一致',
                 'evidence_need_ids': {'q1': [fingerprint(FACT_NEED)]}}}
@@ -81,9 +89,12 @@ class QueryProvenanceTests(unittest.TestCase):
         self.assertEqual(done['ledger']['used']['data_requests'], 1)
         self.assertEqual(done['ledger']['used']['model_calls'], 0)
         report = self.agent.export(done['id'])
-        self.assertIn('查看查询留痕', report['html'])
-        self.assertIn('functionpara.CPS', report['html'])
-        self.assertIn(record['request_hash'], report['html'])
+        page = html.document_fromstring(report['html'])
+        link, = page.xpath("//main//a[@href='#query-q1']")
+        self.assertEqual(link.text_content(), '查询口径')
+        detail = page.get_element_by_id('query-q1').text_content()
+        self.assertIn('functionpara.CPS', detail)
+        self.assertIn(record['request_hash'], detail)
         self.assertNotIn('provenance_records', report['html'])
         reopened = ResearchAgent(self.agent.archive, ROOT, offline=True)
         self.assertEqual(reopened.export(done['id'])['digest'], report['digest'])
