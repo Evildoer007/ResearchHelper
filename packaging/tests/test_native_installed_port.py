@@ -3,9 +3,12 @@ import hashlib
 import json
 from pathlib import Path
 import time
+import sys
 
 from pypdf import PdfReader
-import native_ui_tools as native
+ROOT=Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:sys.path.insert(0,str(ROOT))
+from core.tests import native_ui_tools as native
 
 
 def identified(identifier, timeout=8):
@@ -39,6 +42,7 @@ def save_panel(destination):
 
 
 def run():
+    native.require_foreground_consent()
     record = {"version": "0.10.0", "checks": [], "screens": [], "errors": []}
     installation = json.loads((native.ROOT / "result/acceptance/installation.json").read_text())
     record["image_sha256"] = installation["image_sha256"]
