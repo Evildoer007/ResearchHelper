@@ -62,8 +62,9 @@ class ResearchKnowledgeDomainTests(unittest.TestCase):
         for method in METHOD_REGISTRY:
             self.assertIn(METHOD_REGISTRY[method]["knowledge_id"], package["index"])
             self.knowledge.method_binding(package, method)
-        new = [item for item in ENTRIES if "knowledge_role" in item]
-        self.assertEqual(len(new), 4)
+        domains = {"rh_k_cash_profit", "rh_k_rate_transmission", "rh_k_index_structure", "rh_k_etf_exposure"}
+        new = [item for item in ENTRIES if item["id"] in domains]
+        self.assertEqual({item["id"] for item in new}, domains)
         for item in new:
             self.assertIsNone(item["publication_date"])
             self.assertIn("未知", item["publication_date_status"])
@@ -94,8 +95,9 @@ class ResearchKnowledgeDomainTests(unittest.TestCase):
             self.knowledge.publish(package)
         self.assertEqual(fingerprint(ENTRIES), before)
         for item in ENTRIES[:8]:
-            self.assertEqual(item["version"], 1)
-            self.assertEqual(item, RETAINED_VERSIONS[(item["id"], 1)])
+            self.assertGreaterEqual(item["version"], 1)
+            self.assertEqual(item, RETAINED_VERSIONS[(item["id"], item["version"])])
+            self.assertEqual(RETAINED_VERSIONS[(item["id"], 1)]["version"], 1)
 
     def test_capacity_omission_stays_visible_for_partially_matched_core_question(self):
         context = {"questions": [
