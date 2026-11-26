@@ -13,13 +13,14 @@ import math
 import re
 
 from .market_series import SERIES_REQUEST_REGISTRY, validate_series_request, series_record_contract
+from .model import ModelCompletionError
 from .judgment_review import (enabled as judgment_review_enabled, contract as judgment_review_contract,
                               validate_shape as validate_judgment_review_shape)
 
 from .contracts import (ContractError, DOCUMENT_CONTENT_INTENT, DOCUMENT_CONTENT_SCOPE, DOCUMENT_CONTENT_LIMITATION,
                         INTENTS, METHOD_REGISTRY, canonical, fingerprint, timepoint, validate_calculation_parameters, validate_evidence_usage,
                         evidence_requirements, document_content_requirements, tracking_contract, context, calculation_quantity_paths,
-                        method_reference_quantities)
+                        method_reference_quantities, unique_json_object)
 from .evidence import (CAPABILITIES, FIELD_REGISTRY, FILING_OPERATIONS, business_payload, safe_parameters,
                        PUBLICATION_DATE_PATTERN, PUBLICATION_CUE_RE,
                        validate_filing_original_request, validate_ifind_report_request,
@@ -42,7 +43,7 @@ from .planning import (IDENTIFIER, REGISTERED_METHODS, RESEARCH_BRIEF_VERSION,
                        PLANNING_LIMITATION_GUIDANCE_VERSION, PLANNING_LIMITATION_RULE,
                        CALCULATION_OBLIGATION_VERSION, CALCULATION_OBLIGATION_RULE,
                        research_brief, validate_question_revision, validate_definition_actions,
-                       conversation_context, normalize_questions, question_specs)
+                       CONVERSATION_CONTEXT_VERSION, model_conversation_context, normalize_questions, question_specs)
 
 RULES_VERSION = 186
 ACQUISITION_RULES_VERSION = 3
@@ -52,7 +53,7 @@ MATERIAL_CONTEXT_REFERENCE_VERSION = 1
 MATERIAL_CONTEXT_REFERENCE_FIELD = 'material_context_reference'
 CALCULATION_PLAN_VERSION = 1
 SUPPLEMENT_RULES_VERSION = 2
-CONVERSATION_RULES_VERSION = 1
+CONVERSATION_RULES_VERSION = CONVERSATION_CONTEXT_VERSION
 PROMPT_FORMAT_VERSION = 1
 ANALYSIS_OUTPUT_VERSION = 3
 ANALYSIS_TEXT_RULES_VERSION = 3
@@ -348,7 +349,7 @@ PHASE_RULES = {
         "宽泛的供应商能力不等于本内核已登记工具，禁止规划未登记basic_data_service、news、announcement等接口或自造别名。"
         "现有原件足以完成必要核查时data_requests可为空；不足但没有适用工具时保留缺口，不制造无关查询。"
         "固定渠道以data_request_contract.acquisition_channels为准，不自造网页抓取渠道。"
-        "official.release_catalog使用本任务登记的统计局或FOMC固定目录，不需要证券代码或凭据；"
+        "official.release_catalog按本任务渠道契约查询，宏观政策栏目不需要证券代码；巨潮与披露易公告需本任务实际代码、起止日期、页码及标题关键词，不需要供应商凭据；"
         "official.release_original只选择已留存的catalog_id和release_id，不提交URL，不从路径日期补首发时刻。"
         "若该工具登记selection_ref，则只复制available_selections中的一个selection_ref，内核解析实际目录条目；不另填两组编号或URL。"
         "官方HTML与PDF一样必须完成原文、日期和用途核验；只有目录或缺少必要口径时保留缺口，不把下载当作批准。"
@@ -526,7 +527,7 @@ PHASE_RULES["supplement"] += (
     "同一行情接口不提供币种、复权或会计口径时，重复其请求不能填补这些缺口；"
     "另有适用原件或登记操作才补证，没有可执行办法则记录执行缺口，不改写完成条件。")
 FILING_SELECTION_RULE = (
-    "选取公告原件时，先对应未解决问题及其evidence_needs，再核对selection_details中的标题、报告日期和公开时间限制。"
+    "选取公告原件时，先对应未解决问题及其evidence_needs，再核对selection_details中的发行人代码、渠道、标题和目录日期。同名标题不能替代发行人核对。"
     "仅选择预计能覆盖这些具体需求的必要原件；在selection_reason说明该原件预计提供什么、对应哪项需求和哪个观测期。"
     "不按目录返回顺序下载，不用一段通用理由将全部候选绑定到全部缺口。"
     "周期持仓或资产配置通常需相应期间的定期报告，合同条款通常需对应版本的法律文件；"
@@ -547,9 +548,9 @@ PHASE_RULES['acquire'] = (
     '如登记candidate_profile，先按其rule用原名称取得多市场候选。已登记业务查询权限时按原问题选择实际完整代码取得原始资料，'
     '不要再删后缀、补前导零做重复代码转换。候选只限定查询范围，不批准证券身份或金融事实；A/H股保持歧义与用途说明。'
     '原件需求按实际依赖先查report_query目录，再用本任务available_selections中的catalog_id和source_id下载必要原件；'
-    '宏观指标和政策概念不作证券身份解析。登记的统计局与FOMC渠道先选official.release_catalog，'
-    '再从实际目录选择official.release_original的catalog_id和release_id，不要求证券代码。'
-    '若该工具登记selection_ref，只复制available_selections中的一个selection_ref；'
+    '宏观指标和政策概念不作证券身份解析。登记的官方政策或公告渠道先选official.release_catalog，'
+    '政策目录无需证券代码。公司公告按实际证券代码查目录，再用official.release_original选择同一发行人的原件。'
+    '若该工具登记selection_ref，只复制与selection_details对应的一个selection_ref；'
     '目录与条目已成对绑定，不另填catalog_id、release_id或URL，不混用不同格式。'
     '不能在同一批猜下游代码、目录编号、URL或未来响应。'
     '公告所属期间不等于披露日期，查询窗口应覆盖该报告实际可能披露区间，不把半年末当成公告日。'
@@ -880,20 +881,11 @@ def record_extraction_validation(model, task, before, receipt, accepted, failure
     _record_output_contract(model, task, before, diagnostic)
 
 
-def _unique_object(pairs):
-    value = {}
-    for key, item in pairs:
-        if key in value:
-            raise ContractError("模型JSON包含重复字段，不能隐式覆盖")
-        value[key] = item
-    return value
-
-
 def _reject_constant(_):
     raise ContractError("模型JSON包含非有限数字")
 
 
-def research_scope_contract(task):
+def research_scope_contract(task, *, include_prior_findings=True):
     """Intent is a task property, not something inferred from source wording.
 
     Legacy host calls without an intent retain ordinary research. Full engine
@@ -914,7 +906,7 @@ def research_scope_contract(task):
                 "同一原件有明确发布依据时按严格公开时间核验；当前研究可显式采用工具提供的本次实际取得版本，"
                 "原件另核验观测日期及current_version用途，不批准历史或事件因果，不自动降为文件阅读"),
             "automatic_mode_switch_allowed": False, "contract_is_approval": False,
-            "conversation_context": conversation_context(task)}
+            "conversation_context": model_conversation_context(task, include_prior_findings=include_prior_findings)}
 
 
 def analysis_contract(task, selected=None):
@@ -1508,7 +1500,7 @@ def model_object(model, task, phase, payload, fields, *, final_delivery=False):
     if type(final_delivery) is not bool or final_delivery and phase!='analyze':
         raise ContractError('交付预留只能用于最终分析提交')
     expected = sorted(expected_fields)
-    scope = research_scope_contract(task)
+    scope = research_scope_contract(task, include_prior_findings=phase == 'analyze')
     if isinstance(payload, dict) and "intent" in payload and payload["intent"] != scope["intent"]:
         raise ContractError("模型输入的研究目标与当前任务不一致，未派发请求")
     payload = copy.deepcopy(payload)
@@ -2544,6 +2536,9 @@ def model_object(model, task, phase, payload, fields, *, final_delivery=False):
             phase_rule+=('id逐字选择Schema中本批列出的完整编号，每项不同；不能自行拼接指标名或沿用另一批编号。'
                 '这些只是隔离标识，不提供或批准任何原值、日期、单位及需求关联。')
     common_rule = COMMON_RULE
+    if conversation is not None and phase != 'analyze':
+        common_rule += ('有observed_metrics时只将其作为当前问题相关字段的候选，按本轮日期和工具契约重新核对。'
+                        '多条论点按各自logic_index区分，同对象、同期间的重复字段合并取数。')
     if phase == 'plan' and task.get('planning_definition_scope_version') == 1:
         previous = '只能选择本次知识包中knowledge_role=general_definition的条目id；该范围不取数、不计算、不推断主体事实或生成论点。'
         assert common_rule.count(previous) == 1
@@ -2641,11 +2636,16 @@ def model_object(model, task, phase, payload, fields, *, final_delivery=False):
         diagnostic["analysis_output_version"] = ANALYSIS_OUTPUT_VERSION
         diagnostic["analysis_text_rules_version"] = ANALYSIS_TEXT_RULES_VERSION
     if conversation is not None:
-        diagnostic["conversation_rules_version"] = CONVERSATION_RULES_VERSION
+        diagnostic["conversation_rules_version"] = conversation['version']
 
     def reject(code, message, *, rejected_specs=None, **details):
         _record_output_contract(model, task, before, dict(diagnostic, failure_code=code, **details))
-        error_type = ModelJSONFormatError if code == "invalid_json" else ContractError
+        if code == "invalid_json":
+            error_type = ModelJSONFormatError
+        elif phase == "analyze" and code in ("private_content", "ambiguous_json", "non_object_output", "output_size_or_type"):
+            error_type = ModelCompletionError
+        else:
+            error_type = ContractError
         error = error_type(message)
         if rejected_specs is not None:
             # Diagnostic quarantine only: these have passed private-content
@@ -2657,7 +2657,7 @@ def model_object(model, task, phase, payload, fields, *, final_delivery=False):
     if not isinstance(output, str) or len(output) > MAX_RESPONSE_CHARACTERS:
         reject("output_size_or_type", "模型研究产物体积或正文格式不适用")
     try:
-        value = json.loads(output, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
+        value = json.loads(output, object_pairs_hook=unique_json_object, parse_constant=_reject_constant)
     except json.JSONDecodeError as error:
         # Fixed parser categories and numeric positions only; never persist
         # the failed text, arbitrary field names or exception arguments.
@@ -2672,7 +2672,7 @@ def model_object(model, task, phase, payload, fields, *, final_delivery=False):
         reject("invalid_json", "模型研究产物不是严格JSON，保留检查点和已派发用量",
             json_error=categories.get(error.msg, "syntax_error"),
             json_error_line=error.lineno, json_error_column=error.colno)
-    except (ValueError, TypeError) as error:
+    except (ValueError, TypeError, RecursionError) as error:
         if isinstance(error, ContractError):
             reject("ambiguous_json", str(error))
         reject("invalid_json", "模型研究产物不是严格JSON，保留检查点和已派发用量")
@@ -2722,7 +2722,11 @@ def model_object(model, task, phase, payload, fields, *, final_delivery=False):
                missing_fields=sorted(set(expected) - set(value)),
                extra_registered_fields=sorted(extra & KNOWN_PHASE_FIELDS),
                unknown_field_count=len(extra - KNOWN_PHASE_FIELDS))
-    if business_payload(value) != value:
+    try:
+        protected = business_payload(value)
+    except (ContractError, RecursionError):
+        reject("invalid_json", "模型研究产物包含无法归档的值，未采用正文")
+    if protected != value:
         reject("private_content", "模型输出包含私密数据，不能改变任务和工具权限")
     context_wire_hash = None
     if phase == 'extract' and isinstance(value.get('evidence_specs'), list) and any(
@@ -2880,7 +2884,7 @@ def model_object(model, task, phase, payload, fields, *, final_delivery=False):
         if task.get('verbatim_evidence_segments_version') == 1:
             receipt['verbatim_evidence_segments_version'] = 1
     if conversation is not None:
-        receipt["conversation_rules_version"] = CONVERSATION_RULES_VERSION
+        receipt["conversation_rules_version"] = conversation['version']
     if final_delivery:receipt['delivery_reserve_use']='final_analysis_v1'
     return value, receipt
 
@@ -3231,7 +3235,7 @@ def evidence_contract(task, views=None):
                 fingerprint(record.get("snapshot")) != view["snapshot_hash"]:
             raise ContractError("提取格式拒绝跨任务、跨版本或篡改的原件")
         seen.add(view["id"])
-        if len(sources) >= 24:
+        if view.get('superseded_by') or len(sources) >= 24:
             continue
         item = {"artifact_id": view["id"], "snapshot_hash": view["snapshot_hash"], "kind": record["kind"],
                 "publication_reference": None, "publication_limitation": None, "publication_candidates": []}
@@ -3259,7 +3263,7 @@ def evidence_contract(task, views=None):
                 item["compact_context_reference"] = {"version": 1, "artifact_id": record["id"],
                     "snapshot_hash": item["snapshot_hash"]}
             if candidate_slots:
-                item["api_cells"] = api_cell_candidates(record, min(16, candidate_slots))
+                item["api_cells"] = api_cell_candidates(record, min(16, candidate_slots), task=task)
                 candidate_slots -= len(item["api_cells"]["cells"])
             else:
                 item["api_cells"] = {"version": 1, "cells": [], "scan_complete": False,
@@ -3420,12 +3424,18 @@ def evidence_contract(task, views=None):
     from .knowledge import extraction_guidance
     guidance = extraction_guidance(task)
     from .index_sources import weight_table_choices
+    from .numeric_integrity import quantity_qualifiers_enabled, quantity_ranges_enabled
     index_tables=weight_table_choices(task,selected)
+    quantity_rule = '原文含超过、至少、不足、约或左右等数量限定时，引用含限定词的原句；不要选为精确数字或用于精确计算。'
+    if quantity_ranges_enabled(task):
+        quantity_rule += '区间作为一个完整文字摘录，不能把任一端点登记为单点观测。'
     return {"version": 2, **({'knowledge_guidance': guidance} if guidance else {}),
             **({'index_weight_tables':index_tables} if index_tables else {}),
+            **({'original_quantity_rule': quantity_rule}
+               if quantity_qualifiers_enabled(task) else {}),
             "binding": {"task_id": task["id"], "research_version": task["version"],
             "input_hash": task["input_hash"], "cutoff": task["cutoff"]},
-            "research_scope": research_scope_contract(task),
+            "research_scope": research_scope_contract(task, include_prior_findings=False),
             **({'statistical_period_contract': {
                 'version': 1, 'field': 'observation_period', 'frequency': 'month',
                 'value_format': 'YYYY-MM', 'source': '同任务实际取得的统计局当前原件',
@@ -3636,8 +3646,11 @@ def evidence_contract(task, views=None):
             "template_is_approval": False, "external_publication_relationships_supported": False}
 
 
-def source_views(task):
+def source_views(task, *, prefer_current_pdf=True):
     """No binary bytes, credential configuration or already-approved labels."""
+    from .pdf_material import pdf_reparse_replacements
+
+    retired = pdf_reparse_replacements(task) if prefer_current_pdf else {}
     result = []
     for record in original_sources(task):
         common = {key: copy.deepcopy(record[key]) for key in ("id", "kind", "source", "content_version")}
@@ -3659,6 +3672,8 @@ def source_views(task):
                 common.update(catalog_entries=copy.deepcopy(record.get("catalog_entries", [])),
                               catalog_status=record.get("catalog_status"),
                               catalog_limitations=copy.deepcopy(record.get("catalog_limitations", [])))
+                if record.get("catalog_coverage", {}).get("invalid_location_count"):
+                    common["catalog_coverage"] = copy.deepcopy(record["catalog_coverage"])
         else:
             material = record["snapshot"].get("material") if record["kind"] == "filing" else record["snapshot"]
             if record["kind"] == "filing":
@@ -3676,9 +3691,13 @@ def source_views(task):
                 common['official_origin']=copy.deepcopy(material['official_origin'])
             if material and str(material.get('extract_version', '')).startswith('pdf-tables-'):
                 common['extract_version'] = material['extract_version']
+                if any(part.get('pdf_text_limited') for part in material['parts']):
+                    common['extraction_limitation'] = material['limitation']
             if material and str(material.get("extract_version", "")).startswith("html-"):
                 common.update(extract_version=material["extract_version"],
                               extraction_limitation=material.get("limitation", ""))
+            if record['id'] in retired:
+                common.update(parts=[], superseded_by=retired[record['id']])
         result.append(common)
     return result
 
@@ -3772,10 +3791,12 @@ def validate_plan(task, proposed):
     seen = set()
     selected_originals = set()
     for need in requests:
-        if not isinstance(need, dict) or set(need) - {"id", "source", "operation", "parameters", "question_ids", "selection_reason", "reading_queries", "catalogue_alternative_ref"}:
+        if not isinstance(need, dict) or set(need) - {"id", "source", "operation", "parameters", "question_ids", "selection_reason", "reading_queries", "catalogue_alternative_ref", "observation_scope"}:
             raise ContractError("模型数据需求含未登记参数，不能传入认证或地址")
         from .source_reader import validate_acquisition_reading_queries
         validate_acquisition_reading_queries(task,need)
+        from .market_series import validate_observation_scope
+        validate_observation_scope(task,need)
         ident, selected = need.get("id"), need.get("question_ids")
         if not isinstance(ident, str) or not IDENTIFIER.fullmatch(ident) or ident in seen or not isinstance(selected, list) or not selected or not all(isinstance(q, str) and q in ids for q in selected):
             raise ContractError("模型数据需求标识或对应问题无效")
