@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -73,6 +74,30 @@ class ProjectSkillUpdateTests(unittest.TestCase):
         self.assertEqual((self.project / '.agents/skills/researchhelper').resolve(), target)
         self.assertFalse(record['global_installation_changed'])
         self.assertEqual(record['files'], 3)
+
+    def test_windows_discovery_junction_publishes_the_single_managed_copy(self):
+        target = self.previous()
+        discovery = self.project / '.agents/skills/researchhelper'
+        discovery.parent.mkdir(parents=True)
+        if sys.platform == 'win32':
+            self.installer._windows_discovery_junction(discovery, target)
+            self.assertTrue(discovery.is_junction())
+        else:
+            calls = []
+
+            def create_junction(source, destination):
+                calls.append((Path(source), Path(destination)))
+                Path(destination).symlink_to(source, target_is_directory=True)
+
+            with patch.dict(sys.modules, {'_winapi': SimpleNamespace(CreateJunction=create_junction)}), \
+                    patch.object(Path, 'is_junction', lambda path: path.is_symlink()):
+                self.installer._windows_discovery_junction(discovery, target)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(calls[0][0], target)
+            self.assertFalse(calls[0][1].parent.exists())
+        self.installer.check_discovery(discovery, target)
+        self.assertEqual(discovery.resolve(), target)
+        self.assertEqual((discovery / 'SKILL.md').read_text(), 'old instructions')
 
     def test_identical_package_is_a_true_noop(self):
         self.install()
