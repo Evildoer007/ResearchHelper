@@ -1,47 +1,41 @@
-"""Lossless positions on a copy of the failed study, never repaired evidence."""
+"""Lossless positions over a fixed, synthetic ETF original."""
 import copy
 import json
-from pathlib import Path
 import socket
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from tests import ROOT
+from tests.legacy_replay_fixtures import ETF_ORIGINAL, etf_task
 from researchhelper.contracts import ContractError, fingerprint, budget
 from researchhelper.financial_sources import original_line_index
 from researchhelper.output_schema import (original_span_output_schema, original_span_prompt,
     decode_original_spans, structured_json_completion, ORIGINAL_SPAN_PROTOCOL)
-from researchhelper.reasoning import evidence_contract, model_object, PHASE_FIELDS
+from researchhelper.reasoning import evidence_contract, extractable_source_views, model_object, PHASE_FIELDS
 from researchhelper.model import ModelSettings, ModelService
-
-
-RETAINED = ROOT / 'result/acceptance/one-sentence-research-ykr4oaf1/task.json'
 
 
 class OriginalSpanSelectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.original_bytes = RETAINED.read_bytes()
-        cls.saved = json.loads(cls.original_bytes)
+        cls.original_bytes = ETF_ORIGINAL.read_bytes()
 
     @classmethod
     def tearDownClass(cls):
-        if RETAINED.read_bytes() != cls.original_bytes:
-            raise AssertionError('Closed study was modified')
+        if ETF_ORIGINAL.read_bytes() != cls.original_bytes:
+            raise AssertionError('Fixed original was modified')
 
     def setUp(self):
-        self.task = copy.deepcopy(self.saved)
-        self.task['original_span_selection_version'] = 1
-        self.views = copy.deepcopy([view for view in self.task['reasoning_state']['reading']['bundle']['views']
-                                    if view['kind'] in ('material', 'filing')])
+        self.task = etf_task()
+        self.views = [view for view in extractable_source_views(self.task) if view['kind'] == 'filing']
         self.lines = original_line_index(self.views[0])
         self.schema = original_span_output_schema(self.task, self.views)
         self.payload = dict(untrusted_sources=self.views, evidence_contract=evidence_contract(self.task, self.views))
         self.prompt = original_span_prompt(self.payload, self.task)
-        self.nav_line = next(line for line in self.lines if line['part'] == '第6页'
+        self.nav_line = next(line for line in self.lines if line['part'] == '第2页'
                              and '期末基金份额净值' in line['text'] and '9.1808' in line['text'])
-        self.unit_line = next(line for line in self.lines if line['part'] == '第6页' and '金额单位' in line['text'])
+        self.unit_line = next(line for line in self.lines if line['part'] == '第2页' and '金额单位' in line['text'])
         self.date_index = next(anchor['index'] for anchor in self.prompt['untrusted_sources'][0]['observation_anchors']
                                if anchor['date'] == '2026-06-30')
         requirements = self.payload['evidence_contract']['question_requirements']['q1']
@@ -202,7 +196,20 @@ class OriginalSpanSelectionTests(unittest.TestCase):
 
     def test_original_without_its_acquisition_ledger_has_no_selector(self):
         task = dict(self.task, ledger=budget())
+        source = evidence_contract(task, self.views)['sources'][0]
+        self.assertNotIn('current_availability_reference', source)
+        self.assertFalse(source['financial_amount_tables']['scan_complete'])
         self.assertIsNone(original_span_output_schema(task, self.views))
+
+    def test_missing_receipt_on_another_disclosure_does_not_affect_the_valid_original(self):
+        record = next(row for row in self.task['source_records'] if row['kind'] == 'filing')
+        unverified = dict(record, id='missing_peer_receipt')
+        unverified.pop('acquisition')
+        self.task['source_records'].append(unverified)
+        source = evidence_contract(self.task, self.views)['sources'][0]
+        self.assertEqual(source['current_availability_reference']['artifact_id'], record['id'])
+        self.assertTrue(source['financial_amount_tables']['scan_complete'])
+        self.assertEqual(self.decode()['evidence_specs'][0]['raw_token'], '9.1808')
 
     def test_new_task_flags_and_frozen_report_preserve_both_source_policies(self):
         from researchhelper.archive import ResearchArchive
