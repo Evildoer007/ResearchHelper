@@ -6,8 +6,9 @@ import unittest
 from unittest.mock import patch
 
 from tests import ROOT, test_listed_etf_unit_context as fixtures
+from tests.legacy_replay_fixtures import ETF_CLOSE, ETF_NAV, ETF_VALUATION_DATE
 from researchhelper.archive import ResearchArchive
-from researchhelper.contracts import ContractError, fingerprint, validate_calculation_context
+from researchhelper.contracts import ContractError, fingerprint, calculation_context_contract, validate_calculation_context
 from researchhelper.engine import ResearchAgent
 from researchhelper.evidence import candidate_evidence, validate_official_nav_number
 from researchhelper.model import ModelService, ModelSettings
@@ -35,7 +36,7 @@ class OriginalNumberReferenceTests(unittest.TestCase):
         self.tokens = [row for part in original['parts'] for row in part.get('number_tokens', [])]
         self.number = self.wire['selections'][1]
         self.number.pop('number_occurrence')
-        self.nav = next((row for row in self.tokens if row[2] == '2.3272'
+        self.nav = next((row for row in self.tokens if row[2] == ETF_NAV
                          and row[1] == self.number['text_span']['start']), None)
         self.number['number_ref'] = self.nav[0] if self.nav else 'missing_new_reference'
 
@@ -57,8 +58,8 @@ class OriginalNumberReferenceTests(unittest.TestCase):
     def test_exact_nav_survives_dates_and_other_numbers_on_same_line(self):
         before = fingerprint((self.task, self.views, self.wire))
         result = self.decode()['evidence_specs'][1]
-        self.assertEqual(result['raw_token'], '2.3272')
-        self.assertEqual(result['value'], 2.3272)
+        self.assertEqual(result['raw_token'], ETF_NAV)
+        self.assertEqual(result['value'], float(ETF_NAV))
         self.assertEqual(before, fingerprint((self.task, self.views, self.wire)))
         self.assertNotIn('source_check', result)
 
@@ -67,9 +68,11 @@ class OriginalNumberReferenceTests(unittest.TestCase):
         adopted = [candidate_evidence(self.task, next(s for s in self.task['source_records']
             if s['id'] == spec['artifact_id']), spec) for spec in result]
         from researchhelper.contracts import METHOD_REGISTRY
-        validate_calculation_context('etf_daily_nav_premium_v1', dict(price=adopted[0], nav=adopted[1]),
-            dict(METHOD_REGISTRY['etf_daily_nav_premium_v1']['parameters'], valuation_date='2026-06-30'))
-        self.assertEqual([item['value'] for item in adopted], [2.344, 2.3272])
+        method = 'etf_daily_nav_premium_v1'
+        validate_calculation_context(method, dict(price=adopted[0], nav=adopted[1]),
+            dict(METHOD_REGISTRY[method]['parameters'], valuation_date=ETF_VALUATION_DATE),
+            context_contract=calculation_context_contract(self.task, method))
+        self.assertEqual([item['value'] for item in adopted], [ETF_CLOSE, float(ETF_NAV)])
         self.assertFalse(self.task['calculations'])
 
     def test_wrong_source_unknown_token_and_unread_span_are_not_repaired(self):
@@ -140,7 +143,7 @@ class OriginalNumberReferenceTests(unittest.TestCase):
                 result = json.loads(service.reason_structured_original_spans(self.task, [], self.views))
             request = json.loads(transport.call_args.args[1].data)
             self.assertEqual(request['text']['format']['schema']['properties']['version']['enum'], [4])
-            self.assertEqual(result['evidence_specs'][1]['raw_token'], '2.3272')
+            self.assertEqual(result['evidence_specs'][1]['raw_token'], ETF_NAV)
         self.assertEqual(self.task['ledger']['used']['model_calls'], before['used']['model_calls'] + 1)
         self.assertEqual(self.task['ledger']['used']['data_requests'], before['used']['data_requests'])
         self.assertEqual(self.task['ledger']['limits'], before['limits'])
