@@ -29,10 +29,30 @@ def digest(path):
     return value.hexdigest()
 
 
-def source_references(root):
-    return '\n'.join(path.read_text(errors='replace') for area in
-        ('tests', 'core', 'modules', 'products', 'maintenance', 'packaging')
-        for path in (root/area).rglob('*.py') if not path.is_symlink())
+def referenced_cases(root, names):
+    """Find exact QA directory names in the maintained test and product sources."""
+    names = set(names)
+    if not names:
+        return set()
+    alternatives = b'|'.join(re.escape(name.encode('utf-8')) for name in sorted(names))
+    pattern = re.compile(rb'(?<![A-Za-z0-9_.-])(?:' + alternatives + rb')(?![A-Za-z0-9_.-])')
+    suffixes = {'.py', '.js', '.cjs', '.mjs', '.ts', '.tsx', '.swift', '.cs', '.json'}
+    excluded = {'node_modules', '__pycache__', '.pytest_cache', '.git'}
+    found = set()
+    for name in ('tests', 'core', 'modules', 'products', 'maintenance', 'packaging'):
+        area = root / name
+        if area.is_symlink():
+            continue
+        for directory, folders, files in os.walk(area):
+            folders[:] = [name for name in folders if name not in excluded]
+            for name in files:
+                path = Path(directory) / name
+                if path.suffix not in suffixes or path.is_symlink() or not path.is_file():
+                    continue
+                found.update(match.group().decode('utf-8') for match in pattern.finditer(path.read_bytes()))
+                if found == names:
+                    return found
+    return found
 
 
 def tree(path):
@@ -57,13 +77,14 @@ def unused(path):
 
 def inventory(names, *, root=ROOT):
     root = Path(root).resolve()
-    if not isinstance(names, list) or not names or len(names) != len(set(names)):
+    if (not isinstance(names, list) or not names
+            or any(not isinstance(name, str) or not NAME.fullmatch(name) for name in names)
+            or len(names) != len(set(names))):
         raise ValueError('须指定不重复的明确验收目录')
-    code = source_references(root)
+    if referenced_cases(root, names):
+        raise ValueError('验收目录仍被代码引用，保留测试库')
     items = []
     for name in names:
-        if not isinstance(name, str) or not NAME.fullmatch(name) or name in code:
-            raise ValueError('目录未登记或仍被代码引用，保留测试库')
         case = root/'result/acceptance'/name
         store = case/'store'
         if case.is_symlink() or store.is_symlink() or not store.is_dir() or store.resolve() != store:
