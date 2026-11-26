@@ -7,10 +7,12 @@ import unittest
 from unittest.mock import patch
 
 from tests import ROOT, test_finite_quantity_catalogue as fixtures
-from researchhelper.contracts import canonical
+from researchhelper.contracts import canonical, fingerprint
 from researchhelper.model import ModelService, ModelSettings
 from researchhelper.output_schema import (StructuredOutputError, original_span_output_schema,
-    original_span_prompt, decode_original_spans, _original_span_choices, _named_quantity_index)
+    original_span_prompt, decode_original_spans, _original_span_choices, _named_quantity_index,
+    provider_output_schema, provider_request_schema, ORIGINAL_SPAN_PROTOCOL)
+from tests.test_shared_schema_transport import expanded
 from researchhelper.reasoning import model_object, MAX_CONTEXT_CHARACTERS
 
 
@@ -83,8 +85,11 @@ class NamedQuantityCatalogueTests(unittest.TestCase):
         self.assertEqual(self.decode(wire), self.decode())
 
     def test_complete_three_originals_fit_unchanged_context_limit(self):
-        size = len(canonical(self.prompt)) + len(canonical(self.schema))
+        wire_schema = provider_request_schema(self.task, self.schema, ORIGINAL_SPAN_PROTOCOL)
+        self.assertGreater(len(canonical(self.prompt)) + len(canonical(self.schema)), MAX_CONTEXT_CHARACTERS)
+        size = len(canonical(self.prompt)) + len(canonical(wire_schema))
         self.assertLessEqual(size, MAX_CONTEXT_CHARACTERS, size)
+        self.assertEqual(expanded(wire_schema), provider_output_schema(self.schema))
         self.assertEqual(self.schema['properties']['version']['enum'], [10])
 
     def test_actual_model_transport_uses_named_enum_with_one_mock_call(self):
@@ -104,3 +109,11 @@ class NamedQuantityCatalogueTests(unittest.TestCase):
         self.assertEqual(transport.call_count, 1)
         self.assertEqual(task['ledger']['used']['model_calls'], before + 1)
         self.assertEqual(receipt['literal_quantity_reference_version'], 5)
+        request = json.loads(transport.call_args.args[1].data)
+        wire_schema = request['text']['format']['schema']
+        self.assertIn('$defs', wire_schema)
+        self.assertEqual(expanded(wire_schema), provider_output_schema(self.schema))
+        event = task['ledger']['dispatches'][-1]
+        self.assertEqual(event['output_schema_hash'], fingerprint(self.schema))
+        self.assertEqual(event['provider_output_schema_hash'], fingerprint(wire_schema))
+        self.assertTrue(event['schema_definitions_shared'])
