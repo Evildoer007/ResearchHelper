@@ -1,12 +1,11 @@
 """Source-local entity/standard selectors keep the full original binding."""
 import copy
 import importlib
-import json
-from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from researchhelper.contracts import ContractError
+from researchhelper.contracts import ContractError, fingerprint
+from tests.test_financial_value_reference import archived_financial_original
 from researchhelper.financial_sources import financial_shared_context_choices
 from researchhelper.output_schema import (
     decode_financial_references, financial_reference_prompt,
@@ -16,9 +15,6 @@ from researchhelper.reasoning import evidence_contract
 
 fixtures = importlib.import_module((__package__+'.' if __package__ else '')+
                                    'test_financial_reference_protocol')
-ROOT = Path(__file__).resolve().parents[1]
-
-
 class SharedFinancialSelectorTests(unittest.TestCase):
     def setUp(self):
         self.fixture = fixtures.FinancialReferenceProtocolTests()
@@ -96,11 +92,10 @@ class SharedFinancialSelectorTests(unittest.TestCase):
                 for choice in choices])
         self.assertEqual(payload, before)
 
-    def test_actual_failed_view_has_identical_prompt_and_schema_addresses(self):
-        path = ROOT/'result/acceptance/one-sentence-research-2bsp956w/task.json'
-        original = path.read_bytes()
-        task = json.loads(original)
-        views = task['reasoning_state']['reading']['bundle']['views']
+    def test_retained_view_has_identical_prompt_and_schema_addresses(self):
+        fixture, _ = archived_financial_original()
+        task, views = copy.deepcopy((fixture['task'], fixture['reading']['views']))
+        before = fingerprint((task, views))
         schema = financial_reference_output_schema(task, views)
         payload = financial_reference_prompt(dict(untrusted_sources=views,
             evidence_contract=evidence_contract(task, views)), task)
@@ -111,7 +106,7 @@ class SharedFinancialSelectorTests(unittest.TestCase):
                              [choice['candidate_id'] for choice in choices[field]])
         self.assertEqual(shared['properties']['accounting_standard']['enum'],
                          ['standard_1', 'standard_2', 'standard_3', 'standard_4'])
-        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(fingerprint((task, views)), before)
 
     def test_repeated_derivation_is_stable_without_mutating_originals(self):
         record = self.fixture.fixture.record
