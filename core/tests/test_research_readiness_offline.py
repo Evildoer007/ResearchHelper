@@ -8,7 +8,7 @@ from tests import test_runtime_policy_offline as runtime_fixture
 class ResearchReadinessTests(runtime_fixture.RuntimePolicyTests):
     # Run only these new cases explicitly; do not repeat the inherited matrix.
     def test_empty_and_partial_configuration_are_not_ready(self):
-        self.assertEqual(self.bootstrap()['research_readiness'], {'model_configured': False})
+        self.assertEqual(self.bootstrap()['research_readiness'], {'model_configured': False, 'data_credentials_available': True})
         endpoint = runtime_fixture.MODEL['endpoint']
         for fields in ({'endpoint': endpoint}, {'endpoint': endpoint, 'model': 'fixture'},
                        {'endpoint': endpoint, 'model': '', 'api_key': 'fabricated-credential'}):
@@ -29,7 +29,7 @@ class ResearchReadinessTests(runtime_fixture.RuntimePolicyTests):
         self.save_model()
         self.assertEqual(self.call('/api/settings/data', runtime_fixture.SOURCES, self.admin)[0], 200)
         boot = self.bootstrap(self.sales)
-        self.assertEqual(boot['research_readiness'], {'model_configured': True})
+        self.assertEqual(boot['research_readiness'], {'model_configured': True, 'data_credentials_available': True})
         self.assertEqual(boot['model_settings'], {})
         self.assertEqual(boot['source_settings'], {})
         for value in runtime_fixture.MODEL.values():
