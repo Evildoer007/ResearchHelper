@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import io
+import json
 import multiprocessing
 from pathlib import Path
 import tempfile
@@ -21,7 +22,7 @@ from researchhelper.source_transport import IsolatedEvidenceCollector
 from tests.test_filing_acquisition_offline import synthetic_pdf
 
 ROOT = Path(__file__).resolve().parents[2]
-ORIGINAL = ROOT / "result/acceptance/live-filings/original-project-izwh1w33/result/original.pdf"
+ORIGINAL = ROOT / "result/acceptance/one-sentence-research-2l129r9v/task.json"
 
 
 def stalled_parser(connection, deadline):
@@ -85,13 +86,15 @@ class MaterialParserTests(unittest.TestCase):
         return task, host
 
     def test_retained_public_pdf_matches_all_original_pages_without_new_calls(self):
-        payload = ORIGINAL.read_bytes()
-        self.assertEqual(hashlib.sha256(payload).hexdigest(), "c216268375a149640c34e9c511730e29e5b50c9c7b89116b699f91fc1fcc5ba8")
-        expected = extract_material("original.pdf", payload)
-        result = MaterialParser().parse("original.pdf", payload)
+        task = json.loads(ORIGINAL.read_bytes())
+        expected = next(record['snapshot']['material'] for record in task['source_records'] if record['kind'] == 'filing')
+        payload = base64.b64decode(expected['original_base64'], validate=True)
+        self.assertEqual(hashlib.sha256(payload).hexdigest(), "d96b5d49ae75bec5913d032de781873565f5405bf99fd8b011eab152549862b9")
+        result = MaterialParser().parse(expected['name'], payload, extract_version=expected['extract_version'])
         self.assertEqual(result["parts"], expected["parts"])
         self.assertEqual(result["hash"], expected["hash"])
-        self.assertTrue(result["parts"])
+        self.assertEqual(sum('pdf_table' not in part for part in result['parts']), 182)
+        self.assertEqual(result['parse_runtime']['timeout_seconds'], 90)
         self.assert_reaped(result)
 
     def test_docx_preserves_paragraph_and_table_locators(self):
@@ -100,6 +103,7 @@ class MaterialParserTests(unittest.TestCase):
         self.assertEqual(result["parts"], extract_material("terms.docx", payload)["parts"])
         self.assertIn("100万元", str(result["parts"]))
         self.assertIn("12个月", str(result["parts"]))
+        self.assertEqual(result['parse_runtime']['timeout_seconds'], 30)
         self.assert_reaped(result)
 
     def test_invalid_pdf_does_not_expose_exception_or_invent_excerpt(self):
@@ -192,6 +196,7 @@ class MaterialParserTests(unittest.TestCase):
         self.assertEqual(final["evidence"], [])
         self.assertEqual(final["ledger"]["used"]["data_requests"], 1)
         self.assertEqual(final["ledger"]["used"]["model_calls"], 0)
+        self.assertEqual(records[0]['parse_runtime']['timeout_seconds'], 90)
         self.assert_reaped(records[0])
 
     def test_actual_agent_cancellation_keeps_bytes_but_no_body_or_evidence(self):
