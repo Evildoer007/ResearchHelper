@@ -1,5 +1,6 @@
 """New report-design checks. Historical tests and original reports stay intact."""
 from html.parser import HTMLParser
+from lxml import html as dom
 import json
 from pathlib import Path
 import unittest
@@ -37,20 +38,28 @@ class EditorialFigureTests(unittest.TestCase):
 
     def test_disclosed_lower_bound_and_units_survive_accessible_table(self):
         report = render_example('semi', ROOT)
-        self.assertIn('>87+</td>', report)
-        self.assertIn('全年实际/最新预期（%）', report)
-        self.assertIn('scope="row"', report)
-        self.assertIn('图4 单位GDP的AI算力', report)
-        self.assertEqual(Tables(report).tables[:4], [figure['title'] for figure in
-            example_figures('semi', self.catalog['semi'])])
+        tree = dom.document_fromstring(report)
+        figures = example_figures('semi', self.catalog['semi'])
+        tables = Tables(report).tables
+        self.assertEqual(tables[:len(figures)], [figure['title'] for figure in figures])
+        named = tree.xpath('//table[@aria-label=$title]', title=figures[0]['title'])
+        self.assertTrue(named)
+        self.assertIn('87+', named[0].xpath('.//td/text()'))
+        self.assertIn('全年实际/最新预期（%）', named[0].text_content())
+        self.assertTrue(named[0].xpath('.//th[@scope="row"]'))
+        self.assertIn('图4 单位GDP的AI算力', tree.text_content())
 
     def test_missing_values_do_not_become_zero_or_a_revenue_path(self):
         medicine = example_figures('medicine', self.catalog['medicine'])[0]
         self.assertIsNone(medicine['series'][0]['data'][-1])
-        script = (ROOT/'products/app/frontend/report-examples.js').read_text()
-        self.assertIn("value===null?'-':value", script)
-        self.assertNotIn('max:120', script)
-        self.assertNotIn("type:'line'", script.split('function exampleOption', 1)[1])
+        tree = dom.document_fromstring(render_example('medicine', ROOT))
+        scripts = [node.text for node in tree.xpath('//script') if node.text and node.text.startswith('window.RH_EXAMPLE_FIGURES=')]
+        self.assertEqual(len(scripts), 1)
+        actual = json.loads(scripts[0].split('=', 1)[1].rstrip(';'))
+        self.assertIsNone(actual[0]['series'][0]['data'][-1])
+        table = tree.xpath('//table[@aria-label=$title]', title=medicine['title'])[0]
+        last = table.xpath('.//tbody/tr')[-1]
+        self.assertEqual(last.xpath('./td/text()'), ['未披露'])
 
 
 if __name__ == '__main__':
