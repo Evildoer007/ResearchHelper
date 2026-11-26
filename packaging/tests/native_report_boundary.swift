@@ -199,12 +199,12 @@ struct NativeReportBoundary {
     let next = owner.prepareReport(versionURL, printing: false, persistent: false)!
     try check(
       "idle preview reused for another report",
-      next === first && owner.reportTargets[view] == versionURL)
+      next === first && owner.reportTargets[view]?.url == versionURL)
     try check("preview reuse preserves the user's window position", next.frame == positioned)
     owner.printReport(view)
     try check("loading another version cannot print the old page", owner.pendingPrints.isEmpty)
     owner.printFrom(view)
-    try check("print command queues the target being loaded", owner.printViews.contains(view))
+    try check("print command queues the target being loaded", owner.printViews[view] != nil)
     owner.printViews.removeAll()
     try wait { !view.isLoading && view.url == versionURL }
     owner.webView(
