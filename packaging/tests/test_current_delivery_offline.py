@@ -105,13 +105,66 @@ class CurrentDeliveryTests(unittest.TestCase):
 
     def test_backup_cleanup_failure_keeps_verified_new_delivery(self):
         staged = self.root / 'new'; staged.mkdir(); (staged / self.old.name).write_bytes(b'new')
-        remove = delivery.shutil.rmtree
+        remove = Path.unlink
         def failing(path, *args, **kwargs):
             if '-backup-' in str(path): raise OSError('busy backup')
             return remove(path, *args, **kwargs)
-        with patch.object(delivery.shutil, 'rmtree', failing): delivery.replace_delivery(staged, self.dist)
+        with patch.object(Path, 'unlink', failing): delivery.replace_delivery(staged, self.dist)
         self.assertEqual(self.old.read_bytes(), b'new')
         self.assertEqual(len(list(self.root.glob('.dist-backup-*'))), 1)
+
+    def test_late_unknown_file_in_previous_directory_survives_the_swap(self):
+        staged = self.root / 'new'
+        staged.mkdir()
+        (staged / self.old.name).write_bytes(b'new')
+        rename = Path.rename
+
+        def external_write(path, target):
+            moved = rename(path, target)
+            if path == self.dist:
+                (moved / 'user-note.txt').write_bytes(b'unique notes')
+            return moved
+
+        with patch.object(Path, 'rename', external_write), self.assertRaisesRegex(RuntimeError, '未知项目'):
+            delivery.replace_delivery(staged, self.dist)
+        self.assertEqual(self.old.read_bytes(), b'previous image')
+        self.assertEqual((self.dist / 'user-note.txt').read_bytes(), b'unique notes')
+        self.assertFalse(list(self.root.glob('.dist-backup-*')))
+
+    def test_late_unknown_file_in_retired_directory_stays_recoverable(self):
+        staged = self.root / 'new'
+        staged.mkdir()
+        (staged / self.old.name).write_bytes(b'new')
+        rename = Path.rename
+
+        def external_write(path, target):
+            moved = rename(path, target)
+            if path.name == 'delivery':
+                (next(self.root.glob('.dist-backup-*')) / 'user-note.txt').write_bytes(b'unique notes')
+            return moved
+
+        with patch.object(Path, 'rename', external_write):
+            delivery.replace_delivery(staged, self.dist)
+        self.assertEqual(self.old.read_bytes(), b'new')
+        backup, = self.root.glob('.dist-backup-*')
+        self.assertEqual((backup / 'user-note.txt').read_bytes(), b'unique notes')
+        self.assertEqual((backup / self.old.name).read_bytes(), b'previous image')
+
+    def test_read_only_gate_accepts_a_recorded_late_copy_without_counting_it_as_current(self):
+        from reconcile_delivery import download_inventory
+
+        with patch.object(delivery,'verify_release_binding'):
+            result = delivery.build_current(self.root,builder=self.builder,install_skill=False)
+            record = Path(result['payload'])/'candidate.json'
+            alias = self.dist/'ResearchHelper-0.10.0-arm64 2.dmg'
+            alias.write_bytes(self.old.read_bytes())
+            self.assertEqual(delivery.verify_current_build(record,self.root),result)
+            self.assertEqual(download_inventory(self.root,self.dist)['copies'][0]['authority'],str(record))
+            self.assertTrue(alias.is_file())
+            self.old.unlink()
+            with self.assertRaisesRegex(RuntimeError,'下载目录不属于本候选'):
+                delivery.verify_current_build(record,self.root)
+            self.assertTrue(alias.is_file())
 
     def test_real_kernel_lock_refuses_another_process_and_releases(self):
         program = "import sys;sys.path.insert(0,"+repr(str(ROOT/'packaging'))+");from build_current import build_lock;from pathlib import Path\nwith build_lock(Path("+repr(str(self.root))+")): pass"
