@@ -105,10 +105,10 @@ class CatalogueParserCompletionTests(unittest.TestCase):
             def __enter__(self):return self
             def __exit__(self,*args):return False
         pages.extend([Page(0),Page(1)]);document=Document();document.pages=pages
-        def second():
+        def second(**_):
             self.assertTrue(pages[0].closed)
             return '可读的第二页'
-        plain=[SimpleNamespace(extract_text=lambda:'可读的第一页'),SimpleNamespace(extract_text=second)]
+        plain=[SimpleNamespace(extract_text=lambda **_:'可读的第一页'),SimpleNamespace(extract_text=second)]
         with patch('pypdf.PdfReader',return_value=SimpleNamespace(pages=plain)),patch('pdfplumber.open',return_value=document):
             parts=extract_parts(b'controlled page lifetime fixture')
         self.assertTrue(all(page.closed for page in pages))
