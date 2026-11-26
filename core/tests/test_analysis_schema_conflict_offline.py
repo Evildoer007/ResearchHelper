@@ -1,9 +1,4 @@
-"""Reproduce the current analysis-template conflict without external calls.
-
-These are diagnostic tests of the shipped baseline, not acceptance of a fix.
-The received real response was not archived, so its exact field types remain
-unknown. The prompt conflict is independently reproducible from current code.
-"""
+"""The shipped analysis example must be valid and grant no factual approval."""
 
 import json
 import unittest
@@ -36,14 +31,15 @@ class AnalysisSchemaConflictTests(unittest.TestCase):
 
         return Model()
 
-    def test_following_shipped_sample_is_rejected_by_analysis_consumer(self):
+    def test_following_shipped_sample_is_valid_but_does_not_invent_answers(self):
         self.fixture.agent.model = self.model()
-        with self.assertRaisesRegex(ContractError, "模型回答或论点结构无效"):
-            self.fixture.agent._reason_on_verified_material(self.task)
+        result = self.fixture.agent._reason_on_verified_material(self.task)
+        self.assertEqual(result, {"answers": {}, "theses": []})
         self.assertEqual(len(self.calls), 1)
         self.assertEqual(self.calls[0][0], "analyze")
         self.assertEqual(self.task["evidence"], [])
-        self.assertNotIn("analysis", self.task.get("reasoning_state", {}))
+        self.assertTrue(all(q["status"] != "已回答" for q in self.task["questions"]))
+        self.assertIn("receipt", self.task["reasoning_state"]["analysis"])
 
     def test_consumer_accepts_mapping_instead_without_fabricating_answers(self):
         self.fixture.agent.model = self.model({"answers": {}, "theses": []})
