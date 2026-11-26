@@ -1,5 +1,8 @@
-"""Replay the failed two-original reading, without a model or supplier call."""
+"""Replay a retained financial original and a synthetic policy disclosure."""
 import copy
+from functools import lru_cache
+from hashlib import sha256
+from io import BytesIO
 import json
 from pathlib import Path
 import socket
@@ -8,25 +11,91 @@ import unittest
 from unittest.mock import patch
 
 from researchhelper.contracts import ContractError, fingerprint, evidence_requirements
-from researchhelper.evidence import candidate_evidence
+from researchhelper.evidence import EvidenceCollector, IFIND_REPORT_FIELDS, candidate_evidence
 from researchhelper.analyzer import ResearchAnalyzer
 from researchhelper.financial_sources import expand_financial_value_references
 from researchhelper.model import ModelService, ModelSettings
 from researchhelper.output_schema import (original_batch_output_schema, original_batch_prompt,
     decode_original_batch, financial_reference_output_schema, ORIGINAL_BATCH_PROTOCOL,
-    ORIGINAL_BATCH_FUNCTION_NAME)
+    ORIGINAL_BATCH_FUNCTION_NAME, ORIGINAL_SELECTION_REJECTIONS)
 from researchhelper.reasoning import evidence_contract, model_object, validate_model_specs
-from researchhelper.source_reader import validate_read_specs
+from researchhelper.planning import input_fingerprint, normalize_questions, question_specs
+from researchhelper.source_reader import binding, read, validate_read_specs
+from tests.test_financial_context_choices import legacy_financial_context
+from tests.test_financial_value_reference import FIXTURE, archived_financial_original
 
 ROOT = Path(__file__).resolve().parents[1]
-RETAINED = ROOT/'result/acceptance/one-sentence-research-xjnv_5gx/task.json'
+
+
+def policy_pdf():
+    """A reproducible, clearly marked textual original for the real PDF reader."""
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+    from reportlab.pdfgen import canvas
+
+    stream = BytesIO()
+    pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
+    page = canvas.Canvas(stream, pagesize=(595, 842), invariant=1)
+    page.setFont('STSong-Light', 14)
+    page.drawString(42, 782, '合成验收材料 会计政策变更')
+    page.drawString(42, 750, '2026年1月1日，会计政策变更限于列示说明。')
+    page.drawString(42, 724, '本页只有会计政策文字，不提供财务表格或金额。')
+    page.showPage()
+    page.save()
+    return stream.getvalue()
+
+
+@lru_cache(maxsize=1)
+def mixed_original_fixture():
+    task, _, _, digest = legacy_financial_context()
+    archive, _ = archived_financial_original()
+    primary = next(row for row in task['source_records'] if row['kind'] == 'filing')
+    code = primary['directory']['issuer']
+    task['synthetic'] = True
+    questions = normalize_questions(question_specs(task) + [dict(id='q3', kind='fact',
+        question='补充披露说明了哪些会计政策变更？', evidence_needs=['补充披露的会计政策变更原文'])],
+        task['question'], task['intent'])
+    task['questions'] = [dict(question, status='待回答') for question in questions]
+    task['input_hash'] = input_fingerprint(task)
+    parameters = dict(codes=code, functionpara={}, beginrDate='2026-07-01', endrDate='2026-07-31',
+                      outputpara=','.join(field + ':Y' for field in IFIND_REPORT_FIELDS))
+    directory = dict(reportDate='2026-07-21', thscode=code, secName='合成测试主体', ctime=None,
+        reportTitle='合成验收用会计政策变更说明', pdfURL='https://static.cninfo.com.cn/finalpage/synthetic-financial-policy.pdf',
+        seq='synthetic_policy')
+    collector, payload = EvidenceCollector(offline=False), policy_pdf()
+
+    def catalogue(current, request, timeout, event):
+        event.update(transport_isolated=True, network_request_started=True, network_worker_reaped=True)
+        return dict(errorcode=0, tables=[copy.deepcopy(directory)])
+
+    def download(current, url, timeout, event, source_id=None):
+        if url != directory['pdfURL']:
+            raise AssertionError('Unexpected fixture original')
+        event.update(transport_isolated=True, network_request_started=True, network_worker_reaped=True)
+        return payload
+
+    with (patch('socket.socket.connect', side_effect=AssertionError('No network')),
+          patch.object(collector, '_http_json', side_effect=catalogue),
+          patch.object(collector, '_download_original', side_effect=download)):
+        catalog = collector.external(task, 'ifind', 'report_query', parameters, {'access_token': 'FAKE_LOCAL_ONLY'})
+        task['source_records'].append(dict(catalog, question_ids=['q3']))
+        policy = collector.external(task, 'ifind', 'filing_original',
+            {'catalog_id': catalog['id'], 'source_id': 'synthetic_policy'}, {})
+        task['source_records'].append(dict(policy, question_ids=['q3']))
+
+    previous = archive['reading']
+    requests = copy.deepcopy(previous['selection']) + [dict(artifact_id=policy['id'], snapshot_hash=policy['hash'],
+        queries=[], parts=[dict(part=row['locator'], start=0, end=len(row['text']))
+                          for row in policy['snapshot']['material']['parts']],
+        reason='核对补充材料中的会计政策变更原文', question_ids=['q3'])]
+    bundle = read(task, requests, binding(task), [primary['id'], policy['id']], reader_version=previous['reader_version'])
+    return task, bundle, digest
 
 
 class OriginalBatchProtocolTests(unittest.TestCase):
     def setUp(self):
-        self.original = RETAINED.read_bytes()
-        self.task = json.loads(self.original)
-        self.bundle = self.task['reasoning_state']['reading']['bundle']
+        task, bundle, self.original_digest = mixed_original_fixture()
+        self.task, self.bundle = copy.deepcopy((task, bundle))
         self.views = self.bundle['views']
         self.payload = dict(untrusted_sources=self.views, evidence_contract=evidence_contract(self.task, self.views))
         self.schema = original_batch_output_schema(self.task, self.views)
@@ -56,15 +125,17 @@ class OriginalBatchProtocolTests(unittest.TestCase):
             current_version_only=True, financial_cells=cells, text_quotes=[])
         quote_view = self.presented['untrusted_sources'][self.quote_index]
         quote_source = self.presented['evidence_contract']['sources'][self.quote_index]
+        quote_choice = choices[self.quote_index]
         target = next(q for q in self.task['questions'] if q['id']=='q3')
         quote = next((ref,text) for part in quote_view['parts'] for ref,text in part['quote_choices']
-                     if '会计政策变更' in text)
+                     if '会计政策变更限于列示说明' in text)
         qualitative = dict(binding_ref=choices[self.quote_index]['binding']['binding_ref'], text_quotes=[dict(
             id='probe_accounting_policy', object=quote_source['object_binding']['value'], nature='已实现事实',
             question_ids=[target['id']], observation_anchor=next(a['index'] for a in
                 quote_view['observation_anchors'] if a['date']=='2026-01-01'),
             quote_reference=quote[0], review=dict(scope='current_original_descriptive_only',
-                need_links=[dict(question_id=target['id'],need_ids=[n['id'] for n in evidence_requirements(target)])]))])
+                need_links=[dict(question_id=target['id'],
+                    need_ids=[need['id'] for need in quote_choice['quote_need_choices'][target['id']]])]))])
         self.wire = dict(version=1, binding_ref=self.presented['batch_binding_ref'], sources=[
             dict(source_ref=choices[self.financial_index]['source_ref'], selection=financial),
             dict(source_ref=choices[self.quote_index]['source_ref'], selection=qualitative)])
@@ -72,7 +143,7 @@ class OriginalBatchProtocolTests(unittest.TestCase):
         guard.start(); self.addCleanup(guard.stop)
 
     def tearDown(self):
-        self.assertEqual(RETAINED.read_bytes(), self.original)
+        self.assertEqual(sha256(FIXTURE.read_bytes()).hexdigest(), self.original_digest)
 
     def decode(self, wire=None):
         return decode_original_batch(self.wire if wire is None else wire, self.schema, (self.task,self.views))
@@ -149,6 +220,52 @@ class OriginalBatchProtocolTests(unittest.TestCase):
     def test_qualitative_original_cannot_submit_financial_values(self):
         wire=copy.deepcopy(self.wire);wire['sources'][1]['selection']['financial_cells']=[]
         with self.assertRaises(ContractError):self.decode(wire)
+
+    def independent_batch(self):
+        task = dict(self.task, independent_financial_selections_version=1, financial_address_isolation_version=1)
+        schema = original_batch_output_schema(task, self.views)
+        wire = copy.deepcopy(self.wire)
+        wire['binding_ref'] = schema['properties']['binding_ref']['enum'][0]
+        return task, schema, wire
+
+    def test_bad_qualitative_reference_keeps_other_valid_original_selections(self):
+        task, schema, wire = self.independent_batch()
+        selected = wire['sources'][self.quote_index]['selection']['text_quotes']
+        invalid = copy.deepcopy(selected[0])
+        invalid['id'] = 'invalid_policy_quote'
+        invalid['review']['need_links'][0]['need_ids'] = ['unregistered_local_need']
+        selected.append(invalid)
+        result = decode_original_batch(wire, schema, (task, self.views))
+        self.assertEqual({item['id'] for item in result['evidence_specs']},
+                         {item['id'] for item in self.decode()['evidence_specs']})
+        rejection = result[ORIGINAL_SELECTION_REJECTIONS]
+        self.assertEqual((rejection['submitted_items'], rejection['accepted_items']), (5, 4))
+        self.assertFalse(rejection['evidence_approved'] or rejection['automatic_repair'])
+        self.assertEqual(rejection['rejected_items'], [dict(
+            location=f'$.sources[{self.quote_index}].selection.text_quotes[1]', category='selector_schema_mismatch',
+            diagnostic=dict(version=1, schema_issues=[dict(path='$.review.need_links[*].need_ids[*]', code='enum_mismatch')],
+                            submitted_values_retained=False, automatic_repair=False))])
+        self.assertNotIn('unregistered_local_need', json.dumps(result))
+
+    def test_wrong_qualitative_ownership_or_scope_rejects_the_batch(self):
+        task, schema, initial = self.independent_batch()
+        for field in ('question', 'scope', 'source_binding', 'object', 'approval'):
+            with self.subTest(field=field):
+                wire = copy.deepcopy(initial)
+                selection = wire['sources'][self.quote_index]['selection']
+                item = selection['text_quotes'][0]
+                if field == 'question':
+                    item['review']['need_links'][0]['question_id'] = 'unregistered_question'
+                elif field == 'scope':
+                    item['review']['scope'] = 'historical_point_in_time'
+                elif field == 'source_binding':
+                    selection['binding_ref'] = 'foreign_binding'
+                elif field == 'object':
+                    item['object'] = 'foreign_subject'
+                else:
+                    item['source_check'] = '通过'
+                with self.assertRaises(ContractError):
+                    decode_original_batch(wire, schema, (task, self.views))
 
     def test_actual_unknown_first_publication_remains_unknown(self):
         specs=self.decode()['evidence_specs']
