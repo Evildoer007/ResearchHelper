@@ -1,5 +1,5 @@
 {
-  "schema": "researchhelper.release-retention.v1",
+  "schema": "researchhelper.release-retention.v2",
   "macos": "current_candidate_only",
-  "recovery": "trash"
+  "recovery": "permanent"
 }
