@@ -62,7 +62,7 @@ function createConversationOutline({ stream, container, navigate }) {
     target.addEventListener(type, handler, options);
     listeners.push(() => target.removeEventListener(type, handler, options));
   };
-  const forbidden = '.assistant-reasoning, .message--process, .message__actions, .chat-progress, .chat-links, .refs, .artifact-card, .past-report, button, details:not([open]) > :not(summary), [hidden], [aria-hidden="true"], [inert], script, style';
+  const forbidden = '.assistant-reasoning, .message--process, .message__actions, .chat-progress, .chat-links, .refs, .artifact-card, button, details:not([open]) > :not(summary), [hidden], [aria-hidden="true"], [inert], script, style';
   const visible = element => {
     if (element.closest(forbidden)) return false;
     for (let parent = element; parent && parent !== stream; parent = parent.parentElement) {
