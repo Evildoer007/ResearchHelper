@@ -14,7 +14,7 @@ from unittest.mock import patch
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, fingerprint
 from researchhelper.engine import ResearchAgent
-from researchhelper.evidence import (FIELD_REGISTRY, FILING_REQUEST_REGISTRY,
+from researchhelper.evidence import (CAPABILITIES, FIELD_REGISTRY, FILING_REQUEST_REGISTRY,
     IDENTITY_REQUEST_REGISTRY, available_security_codes, data_request_contract,
     identity_resolutions, snapshot_record, validate_ifind_report_request)
 from researchhelper.planning import input_fingerprint, question_specs
@@ -66,8 +66,13 @@ class IdentityResolutionTests(unittest.TestCase):
 
     def test_additive_tools_match_all_implemented_registries(self):
         contract = data_request_contract(self.task)
-        self.assertEqual({tool['qualified_id_for_lookup_only'] for tool in contract['tools']},
-                         set(FIELD_REGISTRY) | set(FILING_REQUEST_REGISTRY) | set(IDENTITY_REQUEST_REGISTRY))
+        planned = {tool['qualified_id_for_lookup_only'] for tool in contract['tools']}
+        required = set().union(FIELD_REGISTRY, FILING_REQUEST_REGISTRY, IDENTITY_REQUEST_REGISTRY) - {'official.index_file', 'official.etf_pcf'}
+        registered = {source + '.' + item['operation'] for source, capability in CAPABILITIES.items()
+                      for item in capability['registered_operations']}
+        self.assertTrue(required.issubset(planned))
+        self.assertTrue(planned.issubset(registered))
+        self.assertEqual(len(planned), len(contract['tools']))
         self.assertNotIn('basic_data_service', [tool['operation'] for tool in contract['tools']])
 
     def test_code_and_name_exact_shapes_resolve_without_rewriting_user_input(self):
