@@ -4,13 +4,13 @@ import unittest
 
 from researchhelper.contracts import ContractError
 from researchhelper.evidence import (candidate_evidence, evidence_binding, extract_material,
-    material_record, snapshot_record, validate_calculation_context_basis, validate_provenance)
+    material_record, snapshot_record, validate_calculation_context_basis, validate_provenance, direct_code_reference)
 
 
 class CalculationContextSourcesTests(unittest.TestCase):
     def setUp(self):
         self.task = {"id": "context-test", "version": 1, "input_hash": "synthetic-test", "source_records": [], "materials": []}
-        text = "示例公司 A类份额 2026-09-30 人民币 未复权 收盘价 官方单位净值 合并利润表 企业会计准则 营业收入 营业成本。\n\n无公司行为。\n\nIOPV参考净值。\n\n营业总成本。"
+        text = "发布日期：2026-09-30。示例公司 A类份额 2026-09-30 人民币 未复权 收盘价 官方单位净值 合并利润表 企业会计准则 营业收入 营业成本。\n\n无公司行为。\n\nIOPV参考净值。\n\n营业总成本。"
         self.material = material_record(self.task, extract_material("context.txt", text.encode()), text.encode())
         self.task["materials"].append(self.material)
         self.context = {"entity_id": "示例公司", "share_class": "A类份额", "period": "2026-09-30",
@@ -70,20 +70,20 @@ class CalculationContextSourcesTests(unittest.TestCase):
             self.check(item)
 
     def test_api_derivation_uses_exact_cell_identity_and_request(self):
-        params = {"codes": "600000.SH", "indicators": "close", "startdate": "2026-09-29", "enddate": "2026-09-30",
-                  "functionpara": {"Currency": "RMB", "CPS": "1", "Fill": "Omit"}}
-        record = snapshot_record(self.task, "ifind", "cmd_history_quotation", params,
-            {"errorcode": 0, "tables": [{"thscode": "600000.SH", "time": ["2026-09-30"], "table": {"close": [10]}}]})
-        self.task["source_records"].append(record)
-        context = {"security_id": "示例公司", "currency": "CNY", "price_basis": "unadjusted", "price_kind": "close",
-                   "observation_date": "2026-09-30", "window_start": "2026-09-29", "window_end": "2026-09-30"}
-        spec = {"id": "price", "object": "示例公司", "record_locator": {"table": 0, "row": 0, "field": "close"},
-                "identity": {"provider_code": "600000.SH", "object": "示例公司", "basis": "合成测试身份记录",
-                             "valid_from": "2026-01-01", "valid_to": "2026-12-31"},
-                "published_at": "2026-09-30", "period": "2026-09-30", "nature": "已实现事实",
-                "raw_value": 10, "value": 10, "raw_unit": "元", "unit": "元", "conversion_factor": 1,
-                "calculation_context": context,
-                "calculation_context_basis": {key: {"kind": "api", "artifact_id": record["id"], "snapshot_hash": record["hash"], "field": key} for key in context}}
+        from tests.test_identity_period_provenance import IdentityPeriodFixture, CODE, SESSION
+        fixture = IdentityPeriodFixture()
+        self.addCleanup(fixture.doCleanups)
+        fixture.setUp()
+        self.task = fixture.task
+        record = fixture.artifact
+        spec = copy.deepcopy(fixture.spec)
+        del spec["identity"]
+        spec["direct_code_reference"] = direct_code_reference(self.task, record)
+        context = dict(security_id=CODE, currency="CNY", price_basis="unadjusted", price_kind="close",
+            observation_date=SESSION, window_start=SESSION, window_end=SESSION)
+        spec.update(calculation_context=context,
+            calculation_context_basis={key: dict(kind="api", artifact_id=record["id"],
+                snapshot_hash=record["hash"], field=key) for key in context})
         item = candidate_evidence(self.task, record, spec)
         self.check(item)
         before = evidence_binding(item)
@@ -105,6 +105,8 @@ class CalculationContextSourcesTests(unittest.TestCase):
     def test_material_candidate_entry_requires_retained_anchors(self):
         spec = {"id": "material_context", "object": "示例公司", "record_locator": {"part": "段落1"},
                 "text": self.material["parts"][0]["text"], "published_at": "2026-09-30", "period": "2026-09-30",
+                "publication": dict(at="2026-09-30", precision="日", timezone="Asia/Shanghai", certainty="已确认",
+                    basis="合成原件明确公布日", basis_ref=self.anchor("发布日期：2026-09-30。")),
                 "nature": "已实现事实", "unit": "不适用", "calculation_context": self.context,
                 "calculation_context_basis": self.item()["calculation_context_basis"]}
         result = candidate_evidence(self.task, self.material, spec)
