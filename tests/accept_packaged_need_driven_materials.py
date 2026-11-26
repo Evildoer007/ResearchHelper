@@ -18,10 +18,12 @@ def frozen_material_runner():
     source = inspect.getsource(run_packaged_tests)
     anchor = ' sys.meta_path.insert(0, FrozenResearch())'
     assert source.count(anchor) == 1
-    source = source.replace(anchor, anchor + '\n import multiprocessing, multiprocessing.util\n'
+    source = source.replace(anchor, anchor + '\n import multiprocessing.resource_tracker\n'
+        # The tracker belongs to the host interpreter. Only document parser
+        # workers should enter the packaged executable's frozen spawn path.
+        ' multiprocessing.resource_tracker.ensure_running()\n'
         ' sys.path.insert(0, str(location.parent / "_internal"))\n'
         ' multiprocessing.set_executable(str(location))\n'
-        ' multiprocessing.util._args_from_interpreter_flags = lambda: []\n'
         ' sys.frozen = True')
     namespace = dict(run_packaged_tests.__globals__)
     exec(compile(source, __file__, 'exec'), namespace)
