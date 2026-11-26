@@ -143,7 +143,7 @@ class AcquiredCompactAPITests(unittest.TestCase):
         self.assertEqual(compact, before)
 
     def test_compact_reference_does_not_grant_identity_or_availability(self):
-        for field in ("identity", "availability"):
+        for field in ("direct_code_reference", "availability"):
             proposal = self.spec()
             proposal.pop(field)
             with self.assertRaises(ContractError):
