@@ -118,10 +118,10 @@ class GroupedAPIProposalTests(unittest.TestCase):
         with self.assertRaises(ContractError): expand_api_evidence_groups(self.task, [group])
 
     def test_decoder_does_not_grant_missing_review_identity_or_value(self):
-        for key in ('review', 'identity'):
+        for key in ('review', 'direct_code_reference'):
             group = self.group(); group['shared'].pop(key)
             spec = expand_api_evidence_groups(self.task, [group])[0]
-            if key == 'identity':
+            if key == 'direct_code_reference':
                 with self.assertRaises(ContractError): candidate_evidence(self.task, self.record, spec)
             else:
                 item = candidate_evidence(self.task, self.record, spec)
