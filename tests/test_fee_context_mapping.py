@@ -3,6 +3,7 @@ import copy
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tests import ROOT
 from tests import test_original_interval_context as interval_fixture
@@ -122,21 +123,51 @@ class FeeContextMappingTests(unittest.TestCase):
                        if row['properties']['kind']['enum']==['number']]
         self.assertTrue(all(shape['type']=='array' for shape in legacy_shapes))
 
-    def test_real_closed_partial_fee_record_is_not_repaired_or_reopened(self):
-        folder=ROOT/'result/acceptance/one-sentence-research-gsfvrmqu'
-        raw=(folder/'task.json').read_bytes();task=json.loads(raw)
-        self.assertEqual(task['status'],'部分完成')
-        self.assertNotIn(POLICY,task)
-        self.assertTrue(all('fund_id' not in entry['calculation_context'] for entry in task['evidence'] if entry.get('value') is not None))
-        self.assertEqual((folder/'task.json').read_bytes(),raw)
+    def test_loading_a_legacy_partial_archive_does_not_add_a_missing_fee_identity(self):
+        from researchhelper.archive import ResearchArchive
 
-    def test_retained_actual_extraction_schema_hash_is_identical(self):
-        path=ROOT/'result/acceptance/one-sentence-research-gsfvrmqu/task.json'
-        raw=path.read_bytes();task=json.loads(raw)
-        schema=original_span_output_schema(task,task['reasoning_state']['reading']['bundle']['views'])
-        event=next(item for item in task['ledger']['dispatches'] if item.get('research_phase')=='extract')
-        self.assertEqual(fingerprint(schema),event['output_schema_hash'])
-        self.assertEqual(path.read_bytes(),raw)
+        task=copy.deepcopy(self.task)
+        task.pop(POLICY)
+        proposed=self.decode()
+        original=next(row for row in task['source_records'] if row['id']==proposed['artifact_id'])
+        evidence=candidate_evidence(task,original,proposed)
+        for key in ('calculation_context','calculation_context_basis'):
+            evidence[key].pop('fund_id')
+        task.update(status='部分完成',revision=0,evidence=[evidence])
+        task['input_hash']=input_fingerprint(task)
+        with tempfile.TemporaryDirectory(prefix='fee-legacy-partial-') as folder:
+            archive=ResearchArchive(folder)
+            saved=archive.save(task)
+            restored=archive.get(task['id'])
+            self.assertEqual(restored,saved)
+            self.assertEqual(restored['status'],'部分完成')
+            self.assertNotIn('fund_id',restored['evidence'][0]['calculation_context'])
+            self.assertNotIn(POLICY,restored)
+
+    def test_legacy_extraction_records_the_exact_dispatched_schema_hash(self):
+        from researchhelper.model import ModelService, ModelSettings
+
+        task=copy.deepcopy(self.task)
+        task.pop(POLICY)
+        task['input_hash']=input_fingerprint(task)
+        schema=original_span_output_schema(task,self.views)
+        wire=self.base.wire()
+        wire['binding_ref']=schema['properties']['binding_ref']['enum'][0]
+        body=dict(object='response',status='completed',error=None,incomplete_details=None,
+            output=[dict(type='message',role='assistant',status='completed',
+                         content=[dict(type='output_text',text=json.dumps(wire))])],usage={})
+        before=fingerprint(task['source_records'])
+        with tempfile.TemporaryDirectory(prefix='fee-legacy-schema-') as folder:
+            settings=ModelSettings(folder)
+            settings.save(dict(endpoint='https://api.deepseek.com/responses',model='deepseek-flash',
+                               api_key='LOCAL_ONLY_FIXTURE',extraction_mode='direct'))
+            service=ModelService(settings,offline=False)
+            with patch.object(service,'_request_bytes',return_value=json.dumps(body).encode()) as transport:
+                value=service.reason_structured_original_spans(task,[],self.views)
+            transport.assert_called_once()
+        self.assertTrue(json.loads(value)['evidence_specs'])
+        self.assertEqual(task['ledger']['dispatches'][-1]['output_schema_hash'],fingerprint(schema))
+        self.assertEqual(fingerprint(task['source_records']),before)
 
     def test_formal_task_and_frozen_definition_keep_the_policy(self):
         from researchhelper.archive import ResearchArchive
