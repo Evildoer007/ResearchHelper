@@ -874,12 +874,11 @@ def assessment_wire(result):
         raise ContractError('归档复核缺少完整分项，不能作为批准') from None
 
 
-def validate_record(task, record):
+def _validate_review_record(request, record):
     if (not isinstance(record, dict) or record.get('status') != '已复核' or record.get('version') != VERSION
             or not {'review_key','batch','actor','proposal','result'}.issubset(record)
             or type(record['batch']) is not int or record['batch'] < 0 or record['actor'] not in ('host','model')):
         raise ContractError('论证复核没有完成，不是交付批准')
-    request = review_request(task, record['proposal'])
     if review_key(request) != record.get('review_key'):
         raise ContractError('论证复核依据或提案已变化')
     # The original batch must have accepted the result. A new batch can reuse
@@ -892,6 +891,12 @@ def validate_record(task, record):
     if result != record['result']:
         raise ContractError('归档复核的汇总状态与逐段结果不一致')
     return request, result
+
+
+def validate_record(task, record):
+    if not isinstance(record, dict) or 'proposal' not in record:
+        raise ContractError('论证复核没有完成，不是交付批准')
+    return _validate_review_record(review_request(task, record['proposal']), record)
 
 
 def make_record(task, proposal, result, *, actor):
@@ -920,6 +925,10 @@ def filter_proposal(task, proposal, record):
     request, result = validate_record(task, record)
     if review_key(review_request(task, proposal)) != review_key(request):
         raise ContractError('论证复核不能批准另一个提案')
+    return _filter_reviewed_proposal(task, proposal, request, result)
+
+
+def _filter_reviewed_proposal(task, proposal, request, result):
     supported = {item['target_id'] for item in result['assessments'] if item['supported']}
     targets = {item['id'] for item in request['targets']}
     filtered = copy.deepcopy(proposal)
@@ -1029,18 +1038,97 @@ def _thesis_content(thesis, question_ids):
     return value
 
 
+def branch_basis(task, node):
+    """Semantic dependencies of the independent result retained by supplementation."""
+    from .evidence import evidence_binding
+
+    selected = set(node['questions'])
+    return fingerprint(dict(
+        questions=[q for q in task['questions'] if q['id'] in selected],
+        evidence=[dict(binding=evidence_binding(e), version=e['content_version'])
+                  for e in task['evidence'] if selected.intersection(e.get('question_ids', []))],
+        calculations=[c for c in task['calculations'] if selected.intersection(c.get('question_ids', []))],
+        theses=[t for t in task['theses'] if selected.intersection(t.get('question_ids', []))],
+    ))
+
+
+def _preserved_branch_inputs(task):
+    """Recognize only the continuous chain of completed, unchanged branch results."""
+    history = task.get('supplement_history', [])
+    if not history:
+        return {}
+    inputs = {}
+    for node in task.get('nodes', []):
+        reuse = node.get('reuse')
+        if (node.get('kind') not in ('answer', 'thesis') or node.get('status') not in ('成功', '部分成功')
+                or node.get('input_hash') != task['input_hash']
+                or not isinstance(reuse, dict) or reuse.get('supplement_round') != history[-1].get('round')):
+            continue
+        basis, output = branch_basis(task, node), node.get('output_hash')
+        if (not output or reuse.get('prior_basis') != basis or reuse.get('current_basis') != basis
+                or reuse.get('prior_output_hash') != output):
+            continue
+        selected = set(node['questions'])
+        for entry in reversed(history):
+            preserved = entry.get('preserved_nodes', {}).get(node['id'], {})
+            prior_input = preserved.get('input_hash')
+            if (entry.get('status') != '已完成' or not isinstance(prior_input, str) or not prior_input
+                    or selected.intersection(entry.get('affected_questions', []))
+                    or preserved.get('basis') != basis or preserved.get('output_hash') != output):
+                break
+            if entry is history[-1] and prior_input != reuse.get('prior_input_hash'):
+                break
+            inputs.setdefault(prior_input, []).append((node['kind'], selected))
+    return inputs
+
+
+def _preserved_review(task, record, inputs, current_keys):
+    """Check the complete original review projection and keep only preserved branches."""
+    if not inputs:
+        return None
+    proposal = record['proposal']
+    request = review_request(task, proposal)
+    if review_key(request) in current_keys:
+        return None  # A review of the current inputs supersedes the historical one.
+    for prior_input, branches in inputs.items():
+        request['scope']['input_hash'] = prior_input
+        request.pop('review_hash', None)
+        request['review_hash'] = fingerprint(request)
+        if review_key(request) != record.get('review_key'):
+            continue
+        _, result = _validate_review_record(request, record)
+        filtered = _filter_reviewed_proposal(task, proposal, request, result)
+        answer_ids = set().union(*(selected for kind, selected in branches if kind == 'answer'))
+        thesis_scopes = [selected for kind, selected in branches if kind == 'thesis']
+        question_ids = [question['id'] for question in task['questions']]
+        filtered['answers'] = {key: value for key, value in filtered['answers'].items() if key in answer_ids}
+        filtered['theses'] = [item for item in filtered['theses']
+                              if any(set(item.get('question_ids', question_ids)) <= selected for selected in thesis_scopes)]
+        return filtered
+    return None
+
+
 def validate_adopted(task):
     """Last defense at report composition, including resumed checkpoints."""
     if not enabled(task):
         return
     answers, theses, question_reviews = {}, set(), {}
     latest = {item.get('review_key'): item for item in task.get('argument_support_reviews', [])}
+    preserved_inputs = _preserved_branch_inputs(task)
     for record in latest.values():
         try:
             accepted = filter_proposal(task, record['proposal'], record)
+            reviewed_ids = None
         except ContractError:
-            continue
-        question_reviews.update({item['question_id']: item for item in record['result']['question_assessments']})
+            try:
+                accepted = _preserved_review(task, record, preserved_inputs, latest)
+            except ContractError:
+                continue
+            if accepted is None:
+                continue
+            reviewed_ids = accepted['answers']
+        question_reviews.update({item['question_id']: item for item in record['result']['question_assessments']
+                                 if reviewed_ids is None or item['question_id'] in reviewed_ids})
         for ident, item in accepted['answers'].items():
             bound = bind_numeric_statement(task, dict(item, question_ids=[ident]), ['answer'],
                                            item.get('refs', []), item.get('calculation_refs', []))
