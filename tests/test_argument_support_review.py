@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from tests.argument_review_fixture import financial_review_fixture
 from researchhelper.argument_support import (PROTOCOL, VERSION, review_request, review_schema,
     review_messages, validate_request, decode_review)
 from researchhelper.contracts import ContractError
@@ -14,13 +15,11 @@ from researchhelper.model import ModelService, ModelSettings, ModelCompletionErr
 from researchhelper.output_schema import structured_json_completion
 
 ROOT = Path(__file__).resolve().parents[1]
-RETAINED = ROOT / 'result/acceptance/one-sentence-research-v799vtkq/task.json'
 
 
 class ArgumentSupportReviewTests(unittest.TestCase):
     def setUp(self):
-        self.original = RETAINED.read_bytes()
-        self.task = json.loads(self.original)
+        self.task, _ = financial_review_fixture()
         self.proposal = copy.deepcopy(self.task['host_result'])
         self.request = review_request(self.task, self.proposal)
         self.schema = review_schema(self.request)
@@ -33,9 +32,6 @@ class ArgumentSupportReviewTests(unittest.TestCase):
             for item in self.request['targets']])
         guard = patch.object(socket.socket, 'connect', side_effect=AssertionError('No networking'))
         guard.start(); self.addCleanup(guard.stop)
-
-    def tearDown(self):
-        self.assertEqual(RETAINED.read_bytes(), self.original)
 
     def decode(self, wire=None):
         return decode_review(self.wire if wire is None else wire, self.schema, self.request)
