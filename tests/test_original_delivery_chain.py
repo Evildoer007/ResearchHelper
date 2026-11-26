@@ -170,7 +170,10 @@ class OriginalDeliveryChainTests(unittest.TestCase):
         self.assertEqual(done['status'], '已完成', dict(gaps=done['gaps'], changed_review_inputs=changed))
         report = self.agent.export(done['id'])
         self.assertTrue('rh-pmi-comparison-1' in report['html'], 'Saved paired PMI chart missing')
-        self.assertEqual(report['html'].count("class='chart chart-grouped'"), 1)
+        from lxml import html as dom
+        charts=dom.document_fromstring(report['html']).xpath('//main//*[contains(concat(" ", normalize-space(@class), " "), " chart-grouped ")]')
+        self.assertEqual(len(charts),1)
+        self.assertTrue({'chart','chart-grouped'}.issubset(charts[0].get('class','').split()))
         self.assertFalse('<details' in report['html'], 'Client report must not contain accordions')
         self.assertEqual(len(report['content']['evidence']), 6)
         self.assertEqual(done['ledger']['used']['model_calls'], 0)
