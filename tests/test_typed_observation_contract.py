@@ -1,8 +1,5 @@
 """Text counts/dates and per-observation periods, without source approval."""
 import copy
-import gzip
-import hashlib
-import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -38,15 +35,26 @@ class TypedObservationContractTests(unittest.TestCase):
         q=dict(evidence_needs=['日期'],**{FIELD:{'日期':dict(spec,value_kind='text')}})
         with self.assertRaises(ContractError):normalized(q)
 
-    def test_retained_rejected_index_and_event_plan_needs_validate_without_reopening(self):
-        for suffix in ('vib_l091','z5xuzyhh'):
-            path=ROOT/'result/acceptance'/('autonomous-data-phase-'+suffix)/'task.json.gz'
-            before=hashlib.sha256(path.read_bytes()).hexdigest()
-            with gzip.open(path,'rt',encoding='utf-8') as stream:task=json.load(stream)
-            questions=task['reasoning_state']['rejected_plan']['proposed']['questions']
-            validate_plan(task,questions)
-            self.assertEqual(task['status'],'失败')
-            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),before)
+    def test_index_and_event_needs_validate_without_changing_a_closed_task(self):
+        examples = [
+            ('核对指数的五个交易日点位', '各交易日收盘点位', 'number', 'index', 5),
+            ('核对两次FOMC声明的日期', '两次声明发布日期', 'text', 'not_applicable', 2),
+        ]
+        with tempfile.TemporaryDirectory() as folder:
+            archive = ResearchArchive(Path(folder))
+            agent = ResearchAgent(archive, ROOT, offline=True, require_argument_support=True)
+            self.addCleanup(agent.close_runtime)
+            for prompt, need, value_kind, dimension, count in examples:
+                with self.subTest(prompt=prompt):
+                    task = agent.create(prompt)
+                    task.update(status='失败', synthetic=True)
+                    archive.save(task)
+                    before = archive.get(task['id'])
+                    specification = dict(value_kind=value_kind, unit_dimension=dimension,
+                                         minimum_count=count, period_kind='point')
+                    proposed = [dict(task['questions'][0], evidence_needs=[need], **{FIELD:{need:specification}})]
+                    validate_plan(before, proposed)
+                    self.assertEqual(archive.get(task['id']), before)
 
     def test_schema_excludes_incompatible_text_and_numeric_unit_pairs(self):
         with tempfile.TemporaryDirectory() as folder:
