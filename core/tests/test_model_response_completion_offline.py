@@ -18,6 +18,7 @@ from unittest.mock import patch
 
 from researchhelper.contracts import ContractError, budget
 from researchhelper.model import ModelService, ModelSettings
+from researchhelper.transport import TransportFailure
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -94,6 +95,17 @@ class ModelResponseCompletionTests(unittest.TestCase):
         event = self.run_response(FramedResponse(body, declared=len(body) + 5), "response_incomplete")
         self.assertEqual(event["received_response_bytes"], len(body))
         self.assertNotIn("usage", event)
+
+    def test_incomplete_framing_is_a_dispatched_transport_failure(self):
+        task = {"id": "short-frame", "batch": 1, "ledger": budget()}
+        body = self.body()
+        response = FramedResponse(body, declared=len(body) + 1)
+        with patch("researchhelper.model.urllib.request.urlopen", return_value=response):
+            with self.assertRaises(TransportFailure) as caught:
+                self.service.reason(task, [])
+        self.assertEqual(caught.exception.code, "response_incomplete")
+        self.assertEqual(task["ledger"]["used"]["model_calls"], 1)
+        self.assertEqual(task["ledger"]["dispatches"][0]["status"], "失败")
 
     def test_invalid_json_prefix_is_not_decoded_before_framing_check(self):
         self.run_response(FramedResponse(b'{"choices":', declared=200), "response_incomplete")
