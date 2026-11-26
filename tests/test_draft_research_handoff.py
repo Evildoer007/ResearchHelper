@@ -46,8 +46,9 @@ class DraftResearchHandoffTests(unittest.TestCase):
     def test_initial_chat_receives_conditional_research_requirements_instead_of_the_generic_fallback(self):
         brief = client_report_brief(self.task)
         self.assertIn('report_scope为research', brief)
-        self.assertIn(RESEARCH_LOGIC_BRIEF, brief)
-        self.assertEqual(brief.count(RESEARCH_LOGIC_BRIEF), 1)
+        self.assertIn('从什么变化中获利', brief)
+        self.assertIn('证据不足时只写待验证的假设', brief)
+        self.assertEqual(brief.count('投资研究开头交代时点和核心判断'), 1)
         self.assertEqual(brief.count(REPORT_CONDITION_BRIEF), 1)
         self.assertNotEqual(brief, CLIENT_REPORT_BRIEF)
 
@@ -143,6 +144,74 @@ class DraftResearchHandoffTests(unittest.TestCase):
         expected['source_purposes'].clear()
         self.assertTrue(draft_research_context(self.task)['source_purposes'])
 
+    def test_one_returned_number_does_not_complete_a_multi_field_multi_object_request(self):
+        from researchhelper.draft_sources import acquisition_coverage
+        source=self.source();self.task['source_records']=[source]
+        request=dict(id='price',source='ifind',operation='cmd_history_quotation',parameters=dict(source['parameters'],
+            codes='600519.SH,000001.SZ',indicators='close,open'))
+        before=canonical(self.task);coverage=acquisition_coverage(self.task,[request])
+        self.assertTrue(coverage['needs_followup']);self.assertFalse(coverage['blocks_report'])
+        missing={(r['code'],r['field']) for r in coverage['unresolved'][0]['missing']}
+        self.assertEqual(missing,{('600519.SH','open'),('000001.SZ','close'),('000001.SZ','open')})
+        self.assertEqual(canonical(self.task),before)
+
+    def test_unknown_units_do_not_turn_successful_raw_acquisition_into_a_gap(self):
+        from researchhelper.draft_sources import acquisition_coverage
+        source=self.source();self.task['source_records']=[source]
+        request=dict(id='price',source='ifind',operation=source['operation'],parameters=source['parameters'])
+        coverage=acquisition_coverage(self.task,[request])
+        self.assertEqual(coverage['complete_request_ids'],['price']);self.assertEqual(coverage['unresolved'],[])
+        self.assertFalse(coverage['unit_approval']);self.assertFalse(coverage['financial_approval'])
+
+    def test_later_compatible_cells_fill_a_gap_but_another_statement_cannot(self):
+        from researchhelper.draft_sources import acquisition_coverage
+        def record(ident,field,statement='1'):
+            from tests.test_draft_financial_period import add_record,rehash
+            fixture=dict(self.task,source_records=[])
+            row=add_record(fixture,'20241231',[100],fields=[field])
+            row['parameters']['indipara'][0]['indiparams'][1]=statement;rehash(row)
+            row.update(id=ident,data_need_ids=[ident]);return row
+        first=record('revenue','ths_revenue_stock');self.task['source_records']=[first]
+        request=dict(id='revenue',source='ifind',operation='basic_data_service',parameters=dict(codes='600519.SH',
+            report_period='20241231',statement_type='1',indicators=['ths_revenue_stock','ths_np_stock']))
+        coverage=acquisition_coverage(self.task,[request]);self.assertTrue(coverage['needs_followup'])
+        self.assertEqual(coverage['unresolved'][0]['missing'],[dict(code='600519.SH',field='ths_np_stock',period='20241231',statement='1')])
+        self.task['source_records'].append(record('wrong_statement','ths_np_stock','2'))
+        self.assertTrue(acquisition_coverage(self.task,[request])['needs_followup'])
+        self.task['source_records'].append(record('profit','ths_np_stock'))
+        self.assertEqual(acquisition_coverage(self.task,[request])['complete_request_ids'],['revenue'])
+
+    def test_foreign_or_changed_response_does_not_satisfy_the_data_plan(self):
+        from researchhelper.draft_sources import acquisition_coverage
+        source=self.source();request=dict(id='price',source='ifind',operation=source['operation'],parameters=source['parameters'])
+        source['task_id']='foreign';self.task['source_records']=[source]
+        coverage=acquisition_coverage(self.task,[request])
+        self.assertEqual(coverage['complete_request_ids'],[]);self.assertEqual(coverage['unresolved'][0]['reason'],'no_usable_response')
+
+    def test_coverage_does_not_import_an_old_versions_unfulfilled_request(self):
+        from researchhelper.draft_sources import acquisition_coverage
+        source=self.source();self.task['source_records']=[source]
+        request=dict(id='unfulfilled',source='ifind',operation=source['operation'],parameters=source['parameters'])
+        binding=dict(task_id=self.task['id'],research_version=self.task['version'],input_hash=self.task['input_hash'])
+        self.task['draft_source_attempts']=[dict(proposed=request,binding=dict(binding,research_version=99))]
+        self.assertEqual(acquisition_coverage(self.task)['evaluated_requests'],0)
+        self.task['draft_source_attempts']=[dict(proposed=request,binding=binding)]
+        coverage=acquisition_coverage(self.task)
+        self.assertEqual(coverage['evaluated_requests'],1)
+        self.assertFalse(coverage['research_sufficiency_approved'])
+        self.assertEqual(coverage['scope'],'recorded_requests_only')
+
+    def test_host_can_prepare_planning_knowledge_without_model_or_provider_dispatch(self):
+        prepared=self.session.draft(self.task['id'],defer_delivery=True,data_requests=[])
+        self.assertEqual(prepared['ledger']['used']['model_calls'],0)
+        self.assertEqual(prepared['ledger']['used']['data_requests'],0)
+        contract=self.session.tools(self.task['id'])['first_report']
+        self.assertIn('prepare',contract)
+        from researchhelper.knowledge import ResearchKnowledge
+        self.assertEqual(contract['knowledge_context'],ResearchKnowledge().draft_context(prepared))
+        self.assertEqual(contract['acquisition_coverage']['evaluated_requests'],0)
+        self.assertFalse(contract['acquisition_coverage']['research_sufficiency_approved'])
+
     def test_purpose_metadata_is_not_copied_into_public_research_prose(self):
         self.task['source_records']=[self.source()];self.session.archive.save(self.task)
         done=self.session.draft(self.task['id'],report=dict(title='研究样例',conclusion='保留判断。',
@@ -178,6 +247,13 @@ class ActualAcquisitionHandoffTests(unittest.TestCase):
             self.assertEqual(len(source['request_purposes']),1)
             self.assertEqual(source['request_purposes'][0]['data_need_id'],source['data_need_ids'][0])
             self.assertEqual(source['request_purposes'][0]['selection_reason'],'比较本期与上年同期。')
+        planned=dict(captured)['draft_plan']['knowledge_context']
+        self.assertTrue(planned['entries'])
+        self.assertEqual(planned['binding']['task_id'],done['id'])
+        locked={entry['id']:entry for entry in done['knowledge']['entries']}
+        for entry in planned['entries']:
+            self.assertEqual(entry['version'],locked[entry['id']]['version'])
+            self.assertEqual(entry['conditions'],locked[entry['id']]['conditions'])
         context=dict(captured)['draft_report']['research_context']
         self.assertEqual({row['source_id'] for row in context['source_purposes']},{source['id'] for source in records})
         from researchhelper.archive import ResearchArchive
@@ -185,6 +261,67 @@ class ActualAcquisitionHandoffTests(unittest.TestCase):
         self.assertEqual(context,draft_research_context(saved))
         self.assertEqual(self.control.model.calls,['draft_plan','draft_report'])
         self.assertEqual(done['ledger']['used']['data_requests'],3)
+
+    def partial_transport(self):
+        base=self.agent.collector.external
+        def transport(task,source,operation,params,credentials):
+            if operation!='basic_data_service':return base(task,source,operation,params,credentials)
+            # Shape the fake supplier response before actual source admission,
+            # so no test changes a failed status or bypasses validation.
+            key=operation+':'+financial.period(params)
+            responses=self.control.responses
+            response=deepcopy(responses[key])
+            requested={item['indicator'] for item in params['indipara']}
+            for table in response.get('tables',[]):
+                columns=table.get('table',{})
+                for field in list(columns):
+                    if field not in requested or (financial.period(params)=='20260630' and len(requested)>1 and field=='ths_operating_cost_stock'):
+                        del columns[field]
+            if isinstance(response.get('datatype'),list):
+                response['datatype']=[item for item in response['datatype'] if item.get('itemid') in requested]
+            if isinstance(response.get('inputParams'),dict) and isinstance(response['inputParams'].get('params'),list):
+                response['inputParams']['params']=[item for item in response['inputParams']['params'] if item.get('function') in requested]
+            response['dataVol']=len(requested)
+            self.control.responses=dict(responses,**{key:response})
+            try:return base(task,source,operation,params,credentials)
+            finally:self.control.responses=responses
+        self.agent.collector.external=transport
+
+    def test_partial_success_replans_only_the_missing_field_before_writing(self):
+        self.partial_transport();base=self.control.model.reason;planned=[];writing=[]
+        def respond(task,messages,**options):
+            result=base(task,messages,**options);payload=json.loads(messages[1]['content'])
+            if options['phase']=='draft_plan':
+                planned.append(payload)
+                if len(planned)==2:
+                    missing=payload['acquisition_coverage']['unresolved'][0]['missing']
+                    self.assertEqual([row['field'] for row in missing],['ths_operating_cost_stock'])
+                    request=dict(id='missing_operating_cost',source='ifind',operation='basic_data_service',
+                        parameters=dict(codes='002594.SZ',report_period='20260630',statement_type='1',indicators=['ths_operating_cost_stock']),
+                        question_ids=[task['questions'][0]['id']],selection_reason='补齐已规划的营业成本，用于区分收入和成本的盈利传导。')
+                    return json.dumps(dict(data_requests=[request]),ensure_ascii=False)
+            else:writing.append(payload)
+            return result
+        self.control.model.reason=respond
+        task=self.agent.create(financial.QUESTION,research_mode='current',limits=dict(model_calls=3,data_requests=12,seconds=180))
+        done=self.agent.start(task['id']);self.assertTrue(done.get('delivery'),done.get('error'))
+        self.assertEqual(self.control.model.calls,['draft_plan','draft_plan','draft_report'])
+        self.assertEqual(done['ledger']['used']['data_requests'],4)
+        self.assertEqual(len(done['draft_report']['facts']),8)
+        self.assertTrue(any(row['method']=='raw_change_v1' and set(row['data_refs'])=={'D5','D8'}
+            for row in done['draft_report']['calculations']))
+        self.assertEqual(writing[0]['data']['acquisition_coverage']['unresolved'],[])
+        self.assertFalse(writing[0]['data']['acquisition_coverage']['blocks_report'])
+
+    def test_limited_model_budget_still_saves_a_partial_report(self):
+        self.partial_transport()
+        task=self.agent.create(financial.QUESTION,research_mode='current',limits=dict(model_calls=2,data_requests=12,seconds=180))
+        done=self.agent.start(task['id']);self.assertTrue(done.get('delivery'),done.get('error'))
+        self.assertEqual(self.control.model.calls,['draft_plan','draft_report'])
+        self.assertEqual(done['ledger']['used']['model_calls'],2)
+        self.assertEqual(done['ledger']['used']['data_requests'],3)
+        self.assertTrue(done['draft_acquisition_coverage']['unresolved'])
+        self.assertEqual(len(done['draft_report']['facts']),7)
 
     def test_actual_cached_request_retains_both_reasons_without_another_dispatch(self):
         base=self.control.model.reason
@@ -211,3 +348,33 @@ class ActualAcquisitionHandoffTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+def test_strategy_valuation_request_with_anniversary_uses_two_valid_provider_windows():
+    from researchhelper.draft_workflow import _acquire
+    from researchhelper.engine import ResearchAgent
+    from researchhelper.archive import ResearchArchive
+    from researchhelper.market_series import series_settings, validate_series_request
+
+    with TemporaryDirectory(prefix='rh-valuation-anniversary-') as temp:
+        agent = ResearchAgent(archive=ResearchArchive(temp), draft_first=True)
+        task = agent._prepare_task('研究华荣股份603855.SH过去一年估值，写两条策略逻辑。')
+        request = dict(id='annual_pe', source='ifind', operation='date_sequence',
+            question_ids=[task['questions'][0]['id']], selection_reason='核对一年PE区间。',
+            parameters=dict(codes='603855.SH', startdate='2025-11-24', enddate='2026-11-24',
+                functionpara=series_settings(task, '603855.SH'),
+                indipara=[dict(indicator='ths_pe_ttm_stock', indiparams=['', '100'])]))
+        if task['cutoff'] < '2026-11-25':
+            task['cutoff'] = '2026-11-25T00:00:00+00:00'
+        with patch.object(agent, '_check_run_control'), patch.object(agent, '_acquire_sources') as dispatch,                 patch('researchhelper.draft_workflow._checkpoint'):
+            _acquire(agent, task, [request])
+        sent = [call.args[1][0] for call in dispatch.call_args_list]
+        assert len(sent) == 2 and sent[0]['id'] != sent[1]['id']
+        assert [(item['parameters']['startdate'], item['parameters']['enddate']) for item in sent] == [
+            ('2026-05-26', '2026-11-24'), ('2025-11-24', '2026-05-25')]
+        for item in sent:
+            assert item['question_ids'] == request['question_ids']
+            assert item['parameters']['indipara'] == request['parameters']['indipara']
+            validate_series_request(task, 'date_sequence', item['parameters'])
+        attempts = task['draft_source_attempts']
+        assert all(trace['proposed'] == request for trace in attempts)
+        agent.close_runtime()
