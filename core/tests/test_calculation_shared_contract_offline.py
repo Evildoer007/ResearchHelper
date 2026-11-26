@@ -7,20 +7,20 @@ real model is contacted; this is not a financial quality or permission gate.
 import copy
 import importlib.util
 import json
-import shutil
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from researchhelper.contracts import ContractError, METHOD_REGISTRY, context
+from researchhelper.contracts import ContractError, METHOD_REGISTRY, context, methods_for_task
 from researchhelper.model import ModelService, ModelSettings
 from researchhelper.planning import question_specs
-from researchhelper.reasoning import (CALCULATION_PLAN_VERSION, PHASE_FIELDS, calculation_plan_contract,
+from researchhelper.reasoning import (CALCULATION_PLAN_VERSION, PHASE_FIELDS, RULES_VERSION, calculation_plan_contract,
                                      model_object, phase_output_example, validate_plan)
 from tests import test_autonomous_reasoning_offline as models
 from tests import test_method_dependency_workflow_offline as methods
+from tests.skill_fixture_support import build_skill_fixture
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -65,14 +65,8 @@ class CalculationSharedContractTests(unittest.TestCase):
     def skill_session(self):
         folder = tempfile.TemporaryDirectory(prefix="rh-shared-contract-", dir=ROOT / "result/acceptance")
         self.addCleanup(folder.cleanup)
-        installation = Path(folder.name) / "skill"
-        for original, relative in (("skill/researchhelper/scripts/session.py", "scripts/session.py"),
-                                   ("app/web/report.css", "app/web/report.css"),
-                                   ("assets/vendor/echarts.min.js", "assets/vendor/echarts.min.js")):
-            target = installation / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(ROOT / original, target)
-        spec = importlib.util.spec_from_file_location("synthetic_calculation_skill", installation / "scripts/session.py")
+        installation = build_skill_fixture(Path(folder.name) / "skill")
+        spec = importlib.util.spec_from_file_location("synthetic_calculation_skill", installation / "core/session.py")
         module = importlib.util.module_from_spec(spec)
         original_path, original_bytecode = list(sys.path), sys.dont_write_bytecode
         try:
@@ -81,11 +75,12 @@ class CalculationSharedContractTests(unittest.TestCase):
             sys.path[:] = original_path
             sys.dont_write_bytecode = original_bytecode
         session = module.Session(Path(folder.name) / "project")
+        self.addCleanup(session.agent.close_runtime)
         return session
 
     def test_methods_are_exact_executable_registry_copies(self):
         contract = calculation_plan_contract(self.task)
-        self.assertEqual(contract["methods"], METHOD_REGISTRY)
+        self.assertEqual(contract["methods"], methods_for_task(self.task))
         contract["methods"]["observed_price_return_v1"]["parameters"]["currency"] = "USD"
         self.assertEqual(METHOD_REGISTRY["observed_price_return_v1"]["parameters"]["currency"], "CNY")
 
@@ -114,7 +109,7 @@ class CalculationSharedContractTests(unittest.TestCase):
         for phase in ("plan", "supplement", "extract", "analyze"):
             host.output = phase_output_example(phase)
             _, receipt = model_object(host, self.task, phase, {}, PHASE_FIELDS[phase])
-            self.assertEqual(receipt["rules_version"], 25)
+            self.assertEqual(receipt["rules_version"], RULES_VERSION)
             if phase in ("plan", "supplement"):
                 self.assertEqual(receipt["calculation_contract_version"], CALCULATION_PLAN_VERSION)
             else:
@@ -123,7 +118,7 @@ class CalculationSharedContractTests(unittest.TestCase):
     def test_app_receives_contract_and_completes_calculation_report(self):
         final, model, saved = self.model_run()
         payload = json.loads(model.requests[0]["messages"][-1]["content"])
-        self.assertEqual(payload["calculation_contract"]["methods"], METHOD_REGISTRY)
+        self.assertEqual(payload["calculation_contract"]["methods"], methods_for_task(self.task))
         self.assertEqual(payload["calculation_contract"]["binding"]["id"], self.task["id"])
         self.assertNotIn("calculation_methods", payload)  # No duplicated method catalog in prompts.
         self.assertIn("不代表基金净值变化", saved["html"])
@@ -155,8 +150,14 @@ class CalculationSharedContractTests(unittest.TestCase):
             spec["publication"]["basis_ref"] = copy.deepcopy(anchor)
             spec["calculation_context_basis"] = {key: {"kind": "unverified"} if key == "corporate_action_status"
                                                   else copy.deepcopy(anchor) for key in spec["calculation_context"]}
-        host = session.run(task["id"], evidence_specs=specs, calculations=copy.deepcopy(self.host["calculations"]),
-                           answers=copy.deepcopy(self.host["answers"]))
+        from tests.test_argument_support_workflow import assessed
+        from researchhelper.argument_support import make_record
+        def review(current, proposal, selected):
+            _, result = assessed(current, proposal)
+            current.setdefault('argument_support_reviews', []).append(make_record(current, proposal, result, actor='host'))
+        with patch.object(session.agent, '_prepare_argument_review', side_effect=review):
+            host = session.run(task["id"], evidence_specs=specs, calculations=copy.deepcopy(self.host["calculations"]),
+                               answers=copy.deepcopy(self.host["answers"]))
         self.assertEqual(host["status"], "已完成", host.get("error") or host["gaps"])
         host_saved = session.archive.report(host["id"], host["version"])
         self.assertEqual(host["calculations"][0]["output"], app["calculations"][0]["output"])
