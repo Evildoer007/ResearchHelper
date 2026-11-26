@@ -141,7 +141,7 @@ class ExtractionBindingGuidanceTests(unittest.TestCase):
 
 
 class ExtractionGuidanceVersionTests(unittest.TestCase):
-    """Explicit v25 replacements for two v24-pinned cases; originals stay intact."""
+    """Current protocol receipts and immutable retained knowledge."""
 
     def test_conversation_protocol_version_is_separate_and_recorded_v25(self):
         fixture = followup_tests.FollowUpContextTests()
@@ -149,12 +149,11 @@ class ExtractionGuidanceVersionTests(unittest.TestCase):
         self.addCleanup(fixture.doCleanups)
         parent = fixture.parent()
         child = fixture.follow(parent)
-        self.assertEqual(RULES_VERSION, 25)
         for task in (parent, child):
             with patch("researchhelper.reasoning._record_output_contract") as record:
                 _, receipt = model_object(fixture.agent.model, task, "extract", {}, PHASE_FIELDS["extract"])
             diagnostic = record.call_args.args[3]
-            self.assertEqual(receipt["rules_version"], 25)
+            self.assertEqual(receipt["rules_version"], RULES_VERSION)
             if task is child:
                 self.assertEqual(receipt["conversation_rules_version"], CONVERSATION_RULES_VERSION)
                 self.assertEqual(diagnostic["conversation_rules_version"], CONVERSATION_RULES_VERSION)
@@ -175,7 +174,6 @@ class ExtractionGuidanceVersionTests(unittest.TestCase):
         fee_tests.ResearchKnowledge().validate_package(historical)
         self.assertEqual(fingerprint(old), fingerprint(fee_tests.RETAINED_VERSIONS[(identifier, 1)]))
         self.assertEqual(fee_tests.METHOD_REGISTRY[fee_tests.METHOD]["implementation_version"], 1)
-        self.assertEqual(RULES_VERSION, 25)
         self.assertIn("raw_unit与unit仍填%", PHASE_RULES["extract"])
 
 
