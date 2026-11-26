@@ -221,11 +221,58 @@ def parameter_template(indicator):
     return row["parameter_template"] if row is not None else None
 
 
-def evidence_definitions():
+def evidence_definitions(version=1):
     """Return scoped document-backed metadata, never retained business amounts.
 
     The consumer must enforce applicable codes, periods and C before using a
     definition. The generic catalogue remains unverified for units.
     """
     catalogue_digest()
-    return deepcopy(_EVIDENCE_DEFINITIONS)
+    if type(version) is not int or version not in (1, 2):
+        raise ValueError("财务单位定义版本未登记")
+    definitions = _EVIDENCE_DEFINITIONS if version == 1 else _EXTENDED_EVIDENCE_DEFINITIONS
+    if version == 2 and _fingerprint(definitions) != _EXTENDED_EVIDENCE_DIGEST:
+        raise ValueError("财务单位定义完整性校验失败")
+    return deepcopy(definitions)
+
+
+# A later reviewed unit definition never changes a saved reader's original
+# authority. Reader 9 opts into v2; formal/v1 and readers 7/8 keep v1.
+def _annual_unit_definition(indicator, page, line, header_page, statement_name):
+    claims = dict(indicator=indicator, unit="元", currency="CNY", accounting_standard="CAS",
+        metric=_CATALOGUE["definitions"][indicator]["metric"], statement_scope="consolidated",
+        report_type="1", parameter_order=["D", "C"],
+        period_kind=_CATALOGUE["definitions"][indicator].get("period_kind", "cumulative"),
+        applicable_codes=["600519.SH"], applicable_periods=["20241231", "20251231"])
+    payload = dict(claims=deepcopy(claims),
+        original_title="贵州茅台酒股份有限公司2025年年度报告",
+        original_pdf_sha256="474905deeaf0f875fc0a1b097a626c0c7852c427faadc5d7fc7816cbf45ea288",
+        calibration_artifact="result/acceptance/financial-unit-evidence-20261103/calibration.json",
+        calibration_sha256="3427ea4a1f8c7f3caccd4a33d4b3d48dcbc592b5e730fb5ed5d80603f64544c4",
+        field_locator=dict(pdf_page=page, line=line, header_page=header_page,
+                           columns=["2025年度或年末", "2024年度或年末"]),
+        excerpts=[dict(pdf_page=header_page, text=statement_name+"；单位：元；币种：人民币"),
+                  dict(pdf_page=72, text="本公司所编制的财务报表符合企业会计准则的要求")],
+        scope="仅限该主体、两期、C=1及指定字段；不证明其他年度、主体或报表口径，不复用旧金额。")
+    basis = dict(kind="issuer_document",
+        source="https://www.moutaichina.com/mtgf/articleFileDir/2026-04/17/1b9fae59825c41bf9a776892a00565f7.pdf",
+        locator="2025年年度报告；PDF第"+str(page)+"页第"+str(line)+"行；表头第"+str(header_page)+"页；准则第72页",
+        obtained_at="2026-11-03T15:54:48.281899+00:00", payload=payload, hash=_fingerprint(payload))
+    return dict(claims=claims, basis=basis)
+
+
+_EXTENDED_EVIDENCE_DEFINITIONS = deepcopy(_EVIDENCE_DEFINITIONS)
+for _field, _page, _line, _header, _statement in (
+    ("ths_revenue_stock", 61, 15, 61, "合并利润表"),
+    ("ths_np_atoopc_stock", 62, 21, 61, "合并利润表"),
+    ("ths_operating_cost_stock", 61, 20, 61, "合并利润表"),
+    ("ths_np_stock", 62, 14, 61, "合并利润表"),
+    ("ths_ncf_from_oa_stock", 65, 28, 64, "合并现金流量表"),
+    ("ths_account_receivable_stock", 57, 5, 56, "合并资产负债表"),
+    ("ths_inventory_stock", 57, 15, 56, "合并资产负债表"),
+    ("ths_accounts_payable_stock", 58, 5, 56, "合并资产负债表"),
+):
+    _EXTENDED_EVIDENCE_DEFINITIONS[_field+"@annual-2025"] = _annual_unit_definition(
+        _field, _page, _line, _header, _statement)
+
+_EXTENDED_EVIDENCE_DIGEST = "54f079cd29d16fc3c66112626842f425c56e7c67fe7a8905b082045c0df02ec8"
