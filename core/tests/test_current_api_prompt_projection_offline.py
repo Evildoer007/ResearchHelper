@@ -47,7 +47,9 @@ class CurrentAPIPromptProjectionTests(unittest.TestCase):
         self.assertNotIn('document_coverage_contract', contract)
         shape = contract['api_candidate_contract']
         self.assertIn('api_value_reference', shape['required_spec_fields'])
-        self.assertIn('identity', shape['required_spec_fields'])
+        self.assertNotIn('identity', shape['required_spec_fields'])
+        self.assertTrue({'identity', 'identity_basis_reference', 'direct_code_reference'}.issubset(
+            shape['identity_submission']['exactly_one']))
         self.assertIn('review', shape['required_spec_fields'])
         self.assertNotIn('raw_value', shape['required_spec_fields'])
         self.assertNotIn('unit', shape['required_spec_fields'])
