@@ -12,6 +12,7 @@ from researchhelper.contracts import ContractError, budget, fingerprint
 class ProgressiveFinancialBatchExecutionTests(unittest.TestCase):
     def setUp(self):
         self.task = dict(id='batch-yield-fixture', version=1, batch=1,
+            question='核对两家公司已披露的营业收入',
             progressive_financial_acquisition_version=1,
             source_records=[], source_attempts={},
             ledger=budget(dict(data_requests=100, model_calls=8, seconds=600)))
