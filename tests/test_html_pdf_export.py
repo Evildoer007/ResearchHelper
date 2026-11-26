@@ -121,6 +121,48 @@ from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 
 @unittest.skipUnless(os.environ.get('RESEARCHHELPER_NATIVE_PDF')=='1','Requires the explicitly built macOS worker')
 class NativeHTMLPDFTests(unittest.TestCase):
+    def test_detailed_observations_leave_room_for_risk_and_source(self):
+        from lxml import html
+        from pypdf import PdfReader
+        from researchhelper.report_designer import DETAILED_PRINT_STYLE, STYLE, TEMPLATE_SCRIPT
+
+        assets = ROOT / 'modules/visualrenderer/assets'
+        scaffold = html.document_fromstring((assets / 'report.html').read_text())
+        paper_style = scaffold.xpath('//style[@data-paper-scaffold]')[0].text
+        pagination = (assets / 'table-pagination.js').read_text()
+        chart_script = TEMPLATE_SCRIPT.replace('__PAPER_FIGURES__', '[]')
+        rows = ''.join(
+            f'<tr><td>OBSERVATION-{number:02d}</td><td>Original value {number}</td></tr>'
+            for number in range(40)
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            worker = root / 'app/tools/ResearchHelperHTMLPDF'
+            worker.parent.mkdir(parents=True)
+            shutil.copyfile(ROOT / 'result/native-tools/ResearchHelperHTMLPDF', worker)
+            worker.chmod(0o444)
+            source = root / 'report.html'
+            source.write_text(f"""<!doctype html><meta charset="utf-8">
+<style>{paper_style}{STYLE}{DETAILED_PRINT_STYLE}</style>
+<body class="rh-publication" data-report-variant="detailed"><main>
+<div class="paper-supporting"><section id="data"><h2>OBSERVATIONS</h2>
+<div class="report-data-scroll"><table><thead><tr><th>RECORD</th><th>VALUE</th></tr></thead>
+<tbody>{rows}</tbody></table></div></section></div>
+<section id="risk" style="min-height:168px"><h2>RISK NOTE</h2><p>Research limitations</p></section>
+<footer class="report-source-line">SOURCE NOTE</footer>
+</main><script>{pagination}</script><script>{chart_script}</script></body>""")
+            artifact = render_saved_html(source, expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+                                         resources=root)
+            pdf = root / 'report.pdf'
+            pdf.write_bytes(artifact)
+            pages = PdfReader(pdf).pages
+            self.assertEqual(len(pages), 1)
+            text = pages[0].extract_text()
+            for number in range(40):
+                self.assertIn(f'OBSERVATION-{number:02d}', text)
+            self.assertIn('RISK NOTE', text)
+            self.assertIn('SOURCE NOTE', text)
+
     def test_long_table_keeps_every_row_and_repeats_headers_in_native_pdf(self):
         from researchhelper.report_designer import STYLE,TEMPLATE_SCRIPT
         from pypdf import PdfReader
