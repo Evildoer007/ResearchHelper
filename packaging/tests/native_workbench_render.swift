@@ -153,6 +153,7 @@ struct NativeWorkbenchRender {
       "document.querySelector('#login-account').value='admin';document.querySelector('#login-password').value='66666666';document.querySelector('#login-submit').click();true",
       owner.webView)
     try wait { owner.workspaceControlsReady }
+    try check("empty Chat has no native delivery button", owner.nativeControls[2].isHidden)
     try theme("light", owner)
     try layout("empty-chat-1440", owner, desk: false)
     try capture("empty-chat-1440", owner, output)
@@ -172,20 +173,18 @@ struct NativeWorkbenchRender {
     try wait {
       truth("document.querySelectorAll('#task-list [data-task]').length>0", owner.webView)
     }
-    owner.openArtifacts()
     try wait {
       truth(
-        "!!document.querySelector('#task-actions [data-action=start]:not([disabled])')",
+        "!!document.querySelector('#chat-form .send-control[data-task-operation=start]:not([disabled])')",
         owner.webView)
     }
+    try check("a saved research question uses the regular App send control",
+      truth("!document.querySelector('#chat .rh-process [data-action=start]')", owner.webView))
     _ = try script(
-      "document.querySelector('#task-actions [data-action=start]').click();true", owner.webView)
+      "document.querySelector('#chat-form .send-control[data-task-operation=start]').click();true", owner.webView)
     try wait {
-      truth("!!document.querySelector('#task-actions [data-action=update]')", owner.webView)
+      truth("selected?.status==='已完成'&&!!selected.delivery", owner.webView)
     }
-    _ = try script(
-      "document.querySelector('#task-context:not([hidden]) [data-action=close-context]')?.click();true",
-      owner.webView)
     try check(
       "offline fixture actually delivered before snapshots",
       truth(
@@ -198,8 +197,33 @@ struct NativeWorkbenchRender {
       try theme(name, owner)
       _ = try script("document.querySelector('[data-mode=chat]').click();true", owner.webView)
       try layout("chat-1440-" + name, owner, desk: false)
+      try check(
+        "chat-1440-" + name + " one link opens the saved standard report",
+        truth(
+          "(()=>{const cards=document.querySelectorAll('#chat a.artifact-card'),card=cards[0];if(cards.length!==1)return false;const rect=card.getBoundingClientRect();const route=new URL(card.href);return card.target==='_blank'&&route.pathname==='/api/tasks/'+selected.id+'/report/'+selected.delivery.version&&rect.width<=card.parentElement.getBoundingClientRect().width&&rect.height>=44&&getComputedStyle(card).borderWidth==='0px'&&card.querySelectorAll('svg').length===1&&!card.querySelector('a,button,[tabindex]')&&!card.closest('.message').querySelector('.message__action--workpaper')})()",
+          owner.webView))
+      try wait { owner.nativeControls[2].isHidden }
+      let account = "document.querySelector('[data-account-menu-toggle]')"
+      _ = try script("\(account).dispatchEvent(new MouseEvent('click',{bubbles:true,detail:1}));true", owner.webView)
+      try check(
+        "chat-1440-" + name + " pointer menu leaves every action unfocused",
+        truth("\(account)===document.activeElement&&!document.querySelector('#account-menu').hidden&&document.querySelector('[data-account-pointer]')!==null", owner.webView))
+      _ = try script("\(account).dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));true", owner.webView)
+      // Offscreen WebKit tracks activeElement without painting :focus. The
+      // browser checks the focus fill with an active page.
+      try check(
+        "chat-1440-" + name + " keyboard focus enters the account menu",
+        truth("document.activeElement===document.querySelector('#account-menu [data-action=settings]')&&!document.querySelector('[data-account-pointer]')", owner.webView))
+      _ = try script("document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));true", owner.webView)
+      try check(
+        "chat-1440-" + name + " account Escape restores the trigger",
+        truth("\(account)===document.activeElement&&document.querySelector('#account-menu').hidden", owner.webView))
       try capture("chat-1440-" + name, owner, output)
-      _ = try script("document.querySelector('[data-mode=desk]').click();true", owner.webView)
+      _ = try script("document.querySelector('[data-mode=desk]').click();document.querySelector('#view-2').click();true", owner.webView)
+      try wait { !owner.nativeControls[2].isHidden }
+      try check(
+        "chat-1440-" + name + " the Desk tab opens the current workpaper",
+        truth("document.querySelector('#view-2').getAttribute('aria-selected')==='true'&&!document.querySelector('#artifacts').hidden", owner.webView))
       for stage in 0..<5 {
         _ = try script("document.querySelector('#view-\(stage)').click();true", owner.webView)
         if stage == 3 {
@@ -249,8 +273,21 @@ struct NativeWorkbenchRender {
       owner.openSettings()
       try wait {
         truth(
-          "!!document.querySelector('.workspace-settings-dialog iframe')?.contentDocument?.querySelector('#preferences')",
+          "!!document.querySelector('.workspace-settings-dialog iframe:not([hidden])')?.contentDocument?.querySelector('#preferences')",
           owner.webView)
+      }
+      if width < 620 {
+        try check(
+          "mobile settings close remains in the upper-right corner",
+          truth("""
+            (() => {
+              const frame = document.querySelector('.workspace-settings-dialog iframe');
+              const button = frame.contentDocument.querySelector('.settings-close');
+              const box = button.getBoundingClientRect();
+              const right = frame.contentDocument.documentElement.clientWidth - box.right;
+              return box.width === 44 && box.height === 44 && box.top >= 0 && box.top <= 10 && right >= 0 && right <= 10;
+            })()
+            """, owner.webView))
       }
       try capture("settings-\(width)", owner, output)
       _ = try script(
