@@ -7,7 +7,9 @@ import shutil
 import subprocess
 import tempfile
 from .contracts import ContractError
-from .layout import default_resource_root
+from .layout import default_resource_root, resource_directory
+
+_VISUAL_LIBRARY_START = b'<script>/* Shared offline ECharts grammar. Data and financial calculations stay frozen. */'
 
 
 def renderer_path(resources=None):
@@ -28,9 +30,10 @@ def renderer_path(resources=None):
     return worker
 
 
-def render_saved_html(source,*,expected_sha256,resources=None):
+def render_saved_html(source,*,expected_sha256,resources=None,refresh_chart_layout=False):
     source=Path(source).resolve()
-    if hashlib.sha256(source.read_bytes()).hexdigest()!=expected_sha256:
+    original=source.read_bytes()
+    if hashlib.sha256(original).hexdigest()!=expected_sha256:
         raise ContractError('HTML版本已变化，未转换')
     renderer=renderer_path(resources)
     # Some ZIP installers do not preserve execute bits. Run a private copy;
@@ -38,8 +41,20 @@ def render_saved_html(source,*,expected_sha256,resources=None):
     with tempfile.TemporaryDirectory(prefix='.pdf-render-',dir=source.parent) as folder:
         folder=Path(folder);executable=folder/'ResearchHelperHTMLPDF';target=folder/'report.pdf'
         shutil.copyfile(renderer,executable);executable.chmod(0o755)
+        print_source = source
+        if refresh_chart_layout:
+            start = original.find(_VISUAL_LIBRARY_START)
+            end = original.find(b'</script>', start) if start >= 0 else -1
+            if end > start:
+                frontend = resource_directory(resources or default_resource_root(), 'frontend')
+                library = b'<script>' + (frontend/'visual-library.js').read_bytes()
+                if library != original[start:end]:
+                    # Keep the exact archived data, chart choice and source
+                    # bytes. Use the current chart layout in the print copy.
+                    print_source = folder/'print-input.html'
+                    print_source.write_bytes(original[:start] + library + original[end:])
         try:
-            result=subprocess.run([str(executable),str(source),str(target)],cwd=folder,
+            result=subprocess.run([str(executable),str(print_source),str(target)],cwd=folder,
                 capture_output=True,text=True,timeout=40,
                 env={key:value for key,value in os.environ.items() if key not in {'DYLD_INSERT_LIBRARIES','PYTHONPATH'}})
             state=json.loads(result.stdout) if result.stdout else {}
