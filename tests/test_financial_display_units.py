@@ -7,12 +7,13 @@ from pathlib import Path
 import unittest
 
 from researchhelper.contracts import FINANCIAL_AMOUNT_UNITS, fingerprint
+from researchhelper.reports import READER_VERSION
 from researchhelper.visual import (MONEY_UNIT_FACTORS, display_money_scale,
     statement_display_text, render)
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path(os.environ.get('RESEARCHHELPER_CASHFLOW_REPORT_INPUT', str(
-    ROOT/'result/acceptance/one-sentence-research-pvgbk3m0/report.json')))
+from tests.financial_presentation_fixture import SOURCE as PRESENTATION_FIXTURE, load_content
+SOURCE = Path(os.environ.get('RESEARCHHELPER_CASHFLOW_REPORT_INPUT', str(PRESENTATION_FIXTURE)))
 
 
 class FinancialDisplayUnitTests(unittest.TestCase):
@@ -58,13 +59,13 @@ class FinancialDisplayUnitTests(unittest.TestCase):
 
     def test_real_completed_research_remains_frozen_when_presented_in_billions(self):
         original = SOURCE.read_bytes()
-        content = json.loads(original)
+        content = load_content(SOURCE)
         before = copy.deepcopy(content)
         resources = Path(os.environ.get('RESEARCHHELPER_CASHFLOW_REPORT_RESOURCES', str(ROOT)))
         page = render(content, resources)
         self.assertEqual(content, before)
         self.assertEqual(SOURCE.read_bytes(), original)
-        self.assertIn("data-reader-version='rh-reader-15'", page)
+        self.assertTrue(f"data-reader-version='{READER_VERSION}'" in page)
         self.assertIn('2,769.17亿元', page)
         self.assertIn('470.31亿元', page)
         self.assertIn('602.17亿元', page)
