@@ -455,6 +455,11 @@ def _figure_reading_width(spec):
 def _group_figures(section,specs,group_index,profile='standard'):
     figures=section.xpath('.//figure')
     if not figures:return
+    comparison_slots = section.xpath('./div[contains(concat(" ",normalize-space(@class)," ")," argument-comparisons ")]'
+                                     '/div[@class="argument-visual"]')
+    comparison = next((slot for slot in comparison_slots
+                       if all(slot in figure.iterancestors() for figure in figures)), None)
+    figure_parent = comparison if comparison is not None else section
     by_figure = {figure: next((specs[key] for key in figure.xpath('.//*[@id]/@id') if key in specs), {})
                  for figure in figures}
     for figure in figures:
@@ -474,7 +479,8 @@ def _group_figures(section,specs,group_index,profile='standard'):
         figure.getparent().remove(figure);figure.set('class',(figure.get('class','')+' chart-figure').strip())
     # Remove empty layout furniture, retaining all prose, labels and source links.
     for node in reversed(section.xpath('.//div')):
-        if not len(node) and not (node.text or '').strip():node.getparent().remove(node)
+        if node is not comparison and not len(node) and not (node.text or '').strip():
+            node.getparent().remove(node)
     groups=[]
     if len(figures)==3:
         first=figures[0];plot=first.xpath('.//*[@id]');spec=next((specs[n.get('id')] for n in plot if n.get('id') in specs),{})
@@ -530,7 +536,7 @@ def _group_figures(section,specs,group_index,profile='standard'):
         shared_context=contexts[0][0]
         for nodes in contexts:nodes[0].getparent().remove(nodes[0])
     for j,items in enumerate(groups,1):
-        columns=len(items);wrapper=etree.SubElement(section,'div',{'class':'paper-figure-group '+('support-row' if columns==2 else 'dividend-grid' if columns==3 else 'paper-wide'),
+        columns=len(items);wrapper=etree.SubElement(figure_parent,'div',{'class':'paper-figure-group '+('support-row' if columns==2 else 'dividend-grid' if columns==3 else 'paper-wide'),
           'data-columns':str(columns),'data-group-id':'paper-figures-'+str(group_index)+'-'+str(j)})
         if j==1 and shared_context is not None:
             shared_context.set('class','figure-context shared-figure-context');wrapper.append(shared_context)
@@ -548,6 +554,10 @@ def _group_figures(section,specs,group_index,profile='standard'):
         height=max(height,required_height)
         print_height=max(print_height,required_height)
         wrapper.set('style','--paper-chart-height:'+str(height)+'px;--paper-print-height:'+str(print_height)+'px'+(';--paper-mobile-height:'+str(max(220,required_height))+'px' if required_height else ''))
+    # The comparison already has a full-width reading order. Do not detach
+    # its evidence and let the single-chart layout replace that order.
+    if comparison is not None:
+        return
     body=section.xpath('./div[not(contains(@class,"paper-figure-group"))]|./p|./table')
     tabular=[node for node in body if node.tag=='table' or node.xpath('.//table')]
     prose=[node for node in body if node not in tabular]
