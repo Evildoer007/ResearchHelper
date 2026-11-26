@@ -5,6 +5,7 @@ import math
 import http.client
 import multiprocessing
 import os
+import re
 import socket
 import ssl
 import time
@@ -13,17 +14,65 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .contracts import ContractError, canonical, charge, fingerprint, now
+from .contracts import ContractError, DuplicateJSONField, canonical, charge, fingerprint, now, unique_json_object
 from .credentials import LocalSecretStore, configuration_lock, owned_bytes, replace_references
 from .https_transport import open_verified_https
 from .evidence import business_payload
 from .transport import TransportFailure, run_isolated
 
 MODEL_OPTIONAL_FIELDS = frozenset({'extraction_mode', 'reasoning_effort', 'planning_effort'})
+_JSON_QUOTE_OR_ESCAPE = re.compile(r'["\\]')
 
 
 class ModelCompletionError(ContractError):
     """A dispatched response did not contain a usable final completion."""
+
+
+class StructuredCompletionError(ModelCompletionError):
+    """The model finished, but its structured submission was rejected."""
+
+
+def _contains_private_completion(text, api_key, *, inspect_fields=False):
+    if business_payload(text, (api_key,)) != text:
+        return True
+    if inspect_fields:
+        # Draft replies are retained before the report renderer normalizes them.
+        body = text.strip().removeprefix('```json').removeprefix('```').removesuffix('```').strip()
+        try:
+            value = json.loads(body, object_pairs_hook=unique_json_object)
+        except DuplicateJSONField:
+            raise
+        except (ValueError, RecursionError):
+            pass
+        else:
+            if business_payload(value, (api_key,)) != value:
+                return True
+    if '\\' not in text:
+        return False
+    # A later JSON decode can expose a key or URL hidden by string escapes.
+    # Advance one cursor so malformed quoted strings never rescan their tails.
+    end = 0
+    while (start := text.find('"', end)) != -1:
+        end = start + 1
+        escaped = False
+        while True:
+            boundary = _JSON_QUOTE_OR_ESCAPE.search(text, end)
+            if boundary is None:
+                return False
+            end = boundary.end()
+            if boundary[0] == '"':
+                break
+            end += 1
+            escaped = True
+        if not escaped:
+            continue
+        try:
+            decoded = json.loads(text[start:end])
+        except ValueError:
+            continue
+        if business_payload(decoded, (api_key,)) != decoded:
+            return True
+    return False
 
 
 def analysis_completion_failure(task):
@@ -33,6 +82,9 @@ def analysis_completion_failure(task):
         if row.get('kind') == 'model_calls' and row.get('research_phase') == 'analyze'
         and row.get('batch') == task.get('batch')]
     event = events[-1] if events else {}
+    if (event.get('failure_code') == 'private_content'
+            or event.get('output_contract', {}).get('failure_code') == 'private_content'):
+        return dict(field='analysis.private_content', reason='模型回复含敏感内容，已拦截')
     if (event.get('status') != '失败' or event.get('response_body_complete') is not True
             or event.get('provider_completion_status') != 'completed' or event.get('finish_reason') != 'stop'
             or event.get('failure_code') != 'structured_output_rejected'):
@@ -51,7 +103,7 @@ def request_failure_category(payload):
     if not isinstance(payload, bytes) or len(payload) > 8192:
         return 'invalid_request_unspecified'
     try:
-        value = json.loads(payload)
+        value = json.loads(payload, object_pairs_hook=unique_json_object)
         error = value.get('error', {}) if isinstance(value, dict) else {}
         message = error.get('message', '') if isinstance(error, dict) else ''
     except (ValueError, UnicodeDecodeError):
@@ -180,7 +232,10 @@ class ModelSettings:
         raw = owned_bytes(self.path)
         if raw is None:
             return {"endpoint": "", "model": "", "api_key": ""}
-        saved = json.loads(raw)
+        try:
+            saved = json.loads(raw, object_pairs_hook=unique_json_object)
+        except (ValueError, RecursionError):
+            raise ContractError("模型配置JSON损坏或含重复字段，原件保留") from None
         if isinstance(saved, dict) and "secret_ref" in saved:
             if not {"endpoint", "model", "secret_ref"} <= set(saved) or set(saved) - {"endpoint", "model", "secret_ref"} - MODEL_OPTIONAL_FIELDS:
                 raise ContractError("模型配置字段无效")
@@ -247,6 +302,10 @@ class ModelService:
     MAX_RESPONSE_BYTES = 4 * 1024 * 1024
     READ_CHUNK_BYTES = 64 * 1024
 
+    def configured(self):
+        settings = self.settings.read() if self.settings is not None else {}
+        return all(settings.get(field) for field in ('endpoint', 'model', 'has_key'))
+
     @staticmethod
     def _response_socket(response):
         """Locate CPython HTTPResponse's live socket, without global overrides."""
@@ -265,7 +324,7 @@ class ModelService:
         headers=getattr(response,'headers',{})
         if headers.get('Content-Type','').split(';',1)[0].strip().lower()!='text/event-stream':
             record['failure_code']='unexpected_response_content_type'
-            raise ContractError('模型未返回已请求的流式协议，不自动切换协议或重试')
+            raise ModelCompletionError('模型未返回已请求的流式协议，不自动切换协议或重试')
         consumer=DeepSeekStream(record,on_progress)
         return self._read_response(response,started,timeout,record,consumer=consumer,byte_limit=MAX_WIRE_BYTES)
 
@@ -298,7 +357,7 @@ class ModelService:
             record["declared_response_bytes"] = expected
             if expected > limit:
                 record["failure_code"] = "response_too_large"
-                raise ContractError("模型响应超出大小限制，不作为有效研究产物")
+                raise ModelCompletionError("模型响应超出大小限制，不作为有效研究产物")
         else:
             expected = None
         record["received_response_bytes"] = 0
@@ -309,7 +368,7 @@ class ModelService:
             # the provider's declared body was completely received.
             if expected is not None and size != expected:
                 record["failure_code"] = "response_incomplete"
-                raise ContractError("模型响应正文未完整接收，不作为有效研究产物")
+                raise TransportFailure("response_incomplete", "模型响应正文未完整接收，不作为有效研究产物")
             record["response_body_complete"] = True
             return consumer.complete() if consumer is not None else b"".join(chunks)
 
@@ -317,23 +376,23 @@ class ModelService:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 record["failure_code"] = "response_deadline_exceeded"
-                raise ContractError("模型响应超过本次时限，不作为有效研究产物")
+                raise TransportFailure("response_deadline_exceeded", "模型响应超过本次时限，不作为有效研究产物")
             if connection is not None:
                 connection.settimeout(remaining)
             chunk = reader(min(self.READ_CHUNK_BYTES, limit + 1 - size))
             if time.monotonic() >= deadline:
                 record["failure_code"] = "response_deadline_exceeded"
-                raise ContractError("模型响应超过本次时限，不作为有效研究产物")
+                raise TransportFailure("response_deadline_exceeded", "模型响应超过本次时限，不作为有效研究产物")
             if not chunk:
                 return complete()
             if not isinstance(chunk, bytes):
                 record["failure_code"] = "invalid_response_encoding"
-                raise ContractError("模型响应字节格式无效，不采用该响应")
+                raise ModelCompletionError("模型响应字节格式无效，不采用该响应")
             size += len(chunk)
             record["received_response_bytes"] = size
             if size > limit:
                 record["failure_code"] = "response_too_large"
-                raise ContractError("模型响应超出大小限制，不作为有效研究产物")
+                raise ModelCompletionError("模型响应超出大小限制，不作为有效研究产物")
             if consumer is not None:
                 consumer.feed(chunk)
             else:
@@ -497,13 +556,14 @@ class ModelService:
         return self.reason(task, messages, phase='plan', output_schema=planning_output_schema(task),
                            output_protocol=planning_protocol(task)[0], planning_deadline=True)
 
-    def reason_structured_acquisition(self, task, messages, description):
+    def reason_structured_acquisition(self, task, messages, description, *, draft_completion=None):
         from .output_schema import acquisition_output_schema, ACQUISITION_PROTOCOL
         if not self.supports_structured_analysis():
             raise ContractError('严格导航仅用于显式支持配置，未派发请求')
+        checkpoint = {'draft_completion': draft_completion} if draft_completion is not None else {}
         return self.reason(task, messages, phase='acquire',
             output_schema=acquisition_output_schema(task, description),
-            output_protocol=ACQUISITION_PROTOCOL, schema_context=description)
+            output_protocol=ACQUISITION_PROTOCOL, schema_context=description, **checkpoint)
 
     def reason_structured_reading(self, task, messages, description):
         from .output_schema import reading_output_schema, READING_PROTOCOL
@@ -625,7 +685,15 @@ class ModelService:
         return {'role': 'assistant', 'content': content[0]['text']}, 'stop'
 
     def reason(self, task, messages, delivery=False, *, phase=None, output_schema=None,
-               output_protocol=None, schema_context=None, planning_deadline=False,delivery_margin=0):
+               output_protocol=None, schema_context=None, planning_deadline=False,delivery_margin=0,
+               draft_completion=None):
+        if draft_completion is not None:
+            if (task.get('draft_first_version') != 1 or phase not in ('draft_plan', 'acquire', 'draft_report')
+                    or not isinstance(draft_completion, tuple) or len(draft_completion) != 2
+                    or not isinstance(draft_completion[0], str)
+                    or re.fullmatch(r'[a-f0-9]{64}', draft_completion[0]) is None
+                    or not callable(draft_completion[1])):
+                raise ContractError('草稿回复保存上下文无效，未派发请求')
         if self.offline:
             raise ContractError("离线验收阻断真实模型调用，保存配置不改变执行权限")
         from .argument_support import enabled as requires_argument_support
@@ -753,6 +821,7 @@ class ModelService:
         body = {"model": config["model"], "messages": messages,
                 "response_format": {"type": "json_object"}, "max_tokens": output_limit}
         responses = ModelSettings.uses_responses(config)
+        draft_schema = responses and phase == 'draft_report' and task.get('draft_first_version') == 1
         stream=ModelSettings.supports_deepseek_controls(config) and not responses
         if stream:
             body.update(stream=True,stream_options={'include_usage':True})
@@ -787,6 +856,13 @@ class ModelService:
             if output_schema is not None:
                 body['text']['format'] = {'type': 'json_schema', 'name': function_name,
                     'strict': True, 'schema': wire_schema}
+            elif draft_schema:
+                from .output_schema import DRAFT_REPORT_SCHEMA_NAME, draft_report_output_schema
+
+                # Ask the provider for the right container. A complete usable
+                # draft is still normalized locally even if an optional field is absent.
+                body['text']['format'] = {'type': 'json_schema', 'name': DRAFT_REPORT_SCHEMA_NAME,
+                                         'strict': True, 'schema': draft_report_output_schema(task)}
         serialized=json.dumps(body).encode()
         input_budget=None
         if phase=='extract' and task.get('model_context_budget_version')==1:
@@ -813,7 +889,7 @@ class ModelService:
             record.update(response_protocol='deepseek_sse_v1',stream_progress_is_lower_bound=True)
         if responses:
             record.update(completion_api='deepseek_responses_v1',
-                          submission_transport='responses_json_schema_v1' if output_schema is not None
+                          submission_transport='responses_json_schema_v1' if output_schema is not None or draft_schema
                           else 'responses_json_object_v1')
         if long_extraction:
             record.update(wait_policy='bounded_long_extraction_v1', wait_cap_seconds=wait_cap)
@@ -824,9 +900,12 @@ class ModelService:
                           output_limit_policy='reasoning_and_visible_output_v1')
         if phase is not None:
             record["research_phase"] = phase
+        if draft_completion is not None:
+            record['draft_call_binding'] = draft_completion[0]
         if output_schema is not None:
             record.update(output_protocol=output_protocol, output_schema_hash=fingerprint(output_schema))
-            if ((type(task.get('structured_schema_sharing_version')) is int and task['structured_schema_sharing_version'] == 1)
+            if (wire_schema.get('$defs')
+                    or (type(task.get('structured_schema_sharing_version')) is int and task['structured_schema_sharing_version'] == 1)
                     or (type(task.get('request_schema_sharing_version')) is int and task['request_schema_sharing_version'] == 1)):
                 record.update(provider_output_schema_hash=fingerprint(wire_schema),
                               schema_sharing_version=1, schema_definitions_shared=bool(wire_schema.get('$defs')))
@@ -846,16 +925,26 @@ class ModelService:
             record["stage"] = "检查响应"
             if time.monotonic() - started > timeout:
                 record["failure_code"] = "response_deadline_exceeded"
-                raise ContractError("模型响应超过本次时限，不作为有效研究产物")
+                raise TransportFailure("response_deadline_exceeded", "模型响应超过本次时限，不作为有效研究产物")
             if len(payload) > self.MAX_RESPONSE_BYTES:
                 record["failure_code"] = "response_too_large"
-                raise ContractError("模型响应超出大小限制，不作为有效研究产物")
-            result = json.loads(payload)
+                raise ModelCompletionError("模型响应超出大小限制，不作为有效研究产物")
+            try:
+                result = json.loads(payload, object_pairs_hook=unique_json_object)
+            except DuplicateJSONField:
+                raise
+            except (ValueError, RecursionError):
+                record["failure_code"] = "invalid_response_json"
+                raise ModelCompletionError("模型响应不是有效JSON；已派发用量保留，不自动重试或换模型") from None
             if isinstance(result, dict):
                 # Provider usage is meaningful even when its answer is rejected.
                 # Never retain private reasoning_content or the raw response.
-                record.update(effective_model=business_payload(result.get("model"), [config["api_key"]]),
-                              usage=business_payload(result.get("usage", {}), [config["api_key"]]))
+                try:
+                    record.update(effective_model=business_payload(result.get("model"), [config["api_key"]]),
+                                  usage=business_payload(result.get("usage", {}), [config["api_key"]]))
+                except (ContractError, RecursionError):
+                    record["failure_code"] = "invalid_response_shape"
+                    raise ModelCompletionError("模型响应的用量或服务标识无法核对，不采用该响应") from None
             if responses:
                 response_message, response_finish = self._responses_message(result, record)
                 choices = [dict(message=response_message, finish_reason=response_finish)]
@@ -863,12 +952,12 @@ class ModelService:
                 choices = result.get("choices") if isinstance(result, dict) else None
             if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], dict) or not isinstance(choices[0].get("message"), dict):
                 record["failure_code"] = "invalid_response_shape"
-                raise ContractError("模型响应结构不完整，不作为有效研究产物")
+                raise ModelCompletionError("模型响应结构不完整，不作为有效研究产物")
             choice = choices[0]
             message = choice["message"]
             if "index" in choice and (type(choice["index"]) is not int or choice["index"] != 0):
                 record["failure_code"] = "invalid_response_shape"
-                raise ContractError("模型返回了非本次请求的候选，不作为有效研究产物")
+                raise ModelCompletionError("模型返回了非本次请求的候选，不作为有效研究产物")
             finish = choice.get("finish_reason")
             known_finishes = ("stop", "end_turn", "length", "content_filter", "tool_calls",
                               "function_call", "insufficient_system_resource", "aborted")
@@ -912,10 +1001,12 @@ class ModelService:
                         record['structured_failure_category'] = error.category
                         if error.diagnostic:
                             record['structured_output_diagnostic'] = error.diagnostic
+                        if finish in ('stop', 'tool_calls') and not message.get('refusal'):
+                            raise StructuredCompletionError(str(error)) from None
                     raise ModelCompletionError(str(error)) from None
-                if business_payload(text, [config['api_key']]) != text:
+                if _contains_private_completion(text, config['api_key']):
                     record['failure_code'] = 'private_content'
-                    raise ContractError('结构化分析包含敏感内容，未采用正文')
+                    raise ModelCompletionError('结构化分析包含敏感内容，未采用正文')
                 record.update(status='成功', stage='已完成')
                 return text
             if finish in ("content_filter", "tool_calls", "function_call"):
@@ -931,16 +1022,15 @@ class ModelService:
             text = message.get("content")
             if not isinstance(text, str) or not text.strip():
                 record["failure_code"] = "empty_content"
-                raise ContractError("模型未返回可处理的正文")
+                raise ModelCompletionError("模型未返回可处理的正文")
             # Business-response redaction operates on string values, not JSON
             # serialization. Applying it to the entire model text may remove
             # escape characters adjacent to a private URL and corrupt JSON.
             # Reject such content without rewriting it, retaining no raw text.
-            if business_payload(text, [config["api_key"]]) != text:
+            if _contains_private_completion(text, config["api_key"], inspect_fields=phase == 'draft_report'):
                 record["failure_code"] = "private_content"
-                raise ContractError("模型正文包含敏感内容，未改写或采用；已派发用量保留")
-            record.update(status="成功", stage="已完成", effective_model=business_payload(result.get("model"), [config["api_key"]]),
-                          usage=business_payload(result.get("usage", {}), [config["api_key"]]))
+                raise ModelCompletionError("模型正文包含敏感内容，未改写或采用；已派发用量保留")
+            record.update(status="成功", stage="已完成")
             return text
         except urllib.error.HTTPError as error:
             classifications = {401: ("authentication_failed", "模型认证未通过"),
@@ -955,13 +1045,16 @@ class ModelService:
                 except Exception:
                     record['request_failure_category'] = 'invalid_request_unspecified'
             error.close()
-            raise ContractError(message + "；已派发用量保留，不自动重试或换模型") from None
+            raise TransportFailure(code, message + "；已派发用量保留，不自动重试或换模型", error.code) from None
+        except DuplicateJSONField:
+            record.update(status="失败", failure_code="duplicate_response_field")
+            raise ModelCompletionError("模型响应包含重复字段，未采用正文") from None
         except ContractError:
             record["status"] = "失败"
             raise
         except (TimeoutError, socket.timeout):
             record.update(status="失败", failure_code="transport_timeout")
-            raise ContractError("模型连接或读取超时；已派发用量保留，不自动重试或换模型") from None
+            raise TransportFailure("transport_timeout", "模型连接或读取超时；已派发用量保留，不自动重试或换模型") from None
         except urllib.error.URLError as error:
             if isinstance(error.reason, (TimeoutError, socket.timeout)):
                 code, message = "transport_timeout", "模型连接或读取超时"
@@ -976,19 +1069,16 @@ class ModelService:
             else:
                 code, message = "connection_failed", "无法连接模型服务"
             record.update(status="失败", failure_code=code)
-            raise ContractError(message + "；已派发用量保留，不自动重试或换模型") from None
+            raise TransportFailure(code, message + "；已派发用量保留，不自动重试或换模型") from None
         except http.client.IncompleteRead:
             record.update(status="失败", failure_code="response_incomplete")
-            raise ContractError("模型响应正文未完整接收；已派发用量保留，不自动重试或换模型") from None
+            raise TransportFailure("response_incomplete", "模型响应正文未完整接收；已派发用量保留，不自动重试或换模型") from None
         except (http.client.RemoteDisconnected, ConnectionResetError, ConnectionAbortedError, BrokenPipeError, ssl.SSLEOFError):
             record.update(status="失败", failure_code="connection_interrupted")
-            raise ContractError("模型连接在响应完成前中断；已派发用量保留，不自动重试或换模型") from None
+            raise TransportFailure("connection_interrupted", "模型连接在响应完成前中断；已派发用量保留，不自动重试或换模型") from None
         except http.client.HTTPException:
             record.update(status="失败", failure_code="http_protocol_failure")
-            raise ContractError("模型HTTP响应协议不完整；已派发用量保留，不自动重试或换模型") from None
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            record.update(status="失败", failure_code="invalid_response_json")
-            raise ContractError("模型响应不是有效JSON；已派发用量保留，不自动重试或换模型") from None
+            raise TransportFailure("http_protocol_failure", "模型HTTP响应协议不完整；已派发用量保留，不自动重试或换模型") from None
         except Exception as error:
             record.update(status="失败", failure_code="unexpected_transport_failure")
             # Fixed categories only. Exception messages/args may contain a
@@ -1004,8 +1094,14 @@ class ModelService:
             elapsed = max(0, time.monotonic() - started)
             record["elapsed_seconds"] = elapsed
             task["ledger"]["used"]["seconds"] += elapsed
-            if self.journal:
-                self.journal(task)
+            try:
+                if draft_completion is not None and record['status'] == '成功':
+                    # Persist the accepted visible reply with its charged usage
+                    # before returning to an interruptible orchestration step.
+                    draft_completion[1](text)
+            finally:
+                if self.journal:
+                    self.journal(task)
 
 
 def _model_http_worker(connection, deadline):
