@@ -3,6 +3,7 @@
 import copy
 import unittest
 from pathlib import Path
+from lxml import html
 from unittest.mock import patch
 
 from researchhelper.contracts import ContractError, calculation_dependency_hash, fingerprint
@@ -26,22 +27,26 @@ class MethodReportBindingTests(unittest.TestCase):
         self.assertTrue(result.get("delivery"), result.get("error"))
         return result
 
-    def test_all_methods_render_mathml_frozen_versions_and_closed_details(self):
+    def test_all_methods_keep_inspectable_mathml_and_frozen_versions(self):
         for method in METHODS:
             with self.subTest(method=method):
                 task = self.task(method)
                 content = compose(task)
                 original = copy.deepcopy(content)
                 with patch("researchhelper.reports.ResearchKnowledge.method_binding", side_effect=AssertionError("Renderer must not upgrade knowledge")):
-                    page = render(content, ROOT)
+                    tree = html.document_fromstring(render(content, ROOT))
                 self.assertEqual(original, content)
-                self.assertIn("<math ", page)
-                self.assertIn("<details class='calculation-details'>", page)
-                self.assertNotIn("<details class='calculation-details' open", page)
-                self.assertIn(task["calculations"][0]["method_title"], page)
-                self.assertIn("锁定版本1", page)
-                self.assertIn("适用限制", page)
-                self.assertIn(f"计算值{task['calculations'][0]['output']['value']:.4f}%", page)
+                calculation = task["calculations"][0]
+                record = tree.get_element_by_id(calculation["id"])
+                self.assertTrue(record.xpath(".//math"))
+                self.assertTrue(record.xpath('ancestor::div[@id="report-records" and @hidden]'))
+                self.assertFalse(tree.xpath("//main//details"))
+                self.assertTrue(tree.xpath('//main//a[@href="#' + calculation["id"] + '"]'))
+                self.assertIn(calculation["method_title"], record.text_content())
+                self.assertIn("锁定版本" + str(calculation["method_binding"]["knowledge_version"]), record.text_content())
+                self.assertIn("实现版本" + str(calculation["implementation_version"]), record.text_content())
+                self.assertIn("适用限制", record.text_content())
+                self.assertIn(f"计算值{calculation['output']['value']:.4f}%", record.text_content())
 
     def test_method_binding_or_implementation_tampering_rejected_even_rehashed(self):
         task = self.task()
