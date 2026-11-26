@@ -17,10 +17,10 @@
           workArea.style.removeProperty('--chat-composer-clearance');
           return;
         }
-        const bounds = form.getBoundingClientRect();
+        const bounds = dropTarget.getBoundingClientRect();
         if (bounds.height <= 0) return;
         // Browser CSS zoom changes rect coordinates; native pageZoom does not.
-        const scale = form.offsetWidth ? bounds.width / form.offsetWidth : 1;
+        const scale = dropTarget.offsetWidth ? bounds.width / dropTarget.offsetWidth : 1;
         const bottom = workArea.getBoundingClientRect().bottom;
         workArea.style.setProperty('--chat-composer-clearance', Math.max(0, Math.ceil((bottom - bounds.top) / scale + 12)) + 'px');
       });
@@ -39,7 +39,7 @@
       if (lastMode !== shell.dataset.mode) {lastMode = shell.dataset.mode;resetDrag()}
       syncInputHeight();
     };
-    const add = files => {try {queue(Array.from(files))} catch (error) {onError(error.message)}};
+    const add = async files => {try {await queue(Array.from(files))} catch (error) {onError(error.message)}};
     const paste = event => {
       const files = Array.from(event.clipboardData?.files || []);
       if (!files.length) return;
@@ -89,7 +89,7 @@
       if (width > 0 && width !== lastWidth) {lastWidth = width;syncInputHeight()}
       else syncClearance();
     });
-    resize.observe(form);resize.observe(panel);
+    resize.observe(form);resize.observe(dropTarget);resize.observe(panel);
     sync();
     return {
       sync,
