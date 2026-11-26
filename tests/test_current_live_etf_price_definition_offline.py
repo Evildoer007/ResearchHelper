@@ -9,13 +9,13 @@ from unittest.mock import patch
 from core.bootstrap import configure_imports
 configure_imports()
 from researchhelper.contracts import fingerprint
-from researchhelper.knowledge import ENTRIES
+from researchhelper.knowledge import RETAINED_VERSIONS
 from tests import accept_current_live_etf_price_definition as probe
 
 
 class CurrentETFPriceDefinitionTests(unittest.TestCase):
     def setUp(self):
-        knowledge = copy.deepcopy(next(item for item in ENTRIES if item['id'] == 'rh_k_etf_measures' and item['version'] == 2))
+        knowledge = copy.deepcopy(RETAINED_VERSIONS[('rh_k_etf_measures', 2)])
         snapshot = {'errorcode': 0, 'tables': [{'thscode': probe.CODE, 'time': [probe.OBSERVATION],
                                                'table': {'close': [10.0]}}]}
         source = {'id': 'raw1', 'task_id': 'fixture', 'research_version': 1, 'source': 'ifind',
