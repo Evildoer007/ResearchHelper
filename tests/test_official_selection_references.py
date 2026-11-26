@@ -37,8 +37,11 @@ class OfficialSelectionReferenceTests(unittest.TestCase):
         return record
 
     def request(self, parameters):
-        return dict(id='read_original', source='official', operation='release_original',
+        request = dict(id='read_original', source='official', operation='release_original',
             parameters=parameters, question_ids=['q1'], selection_reason='核对已留存统计局原文')
+        if self.task.get('acquisition_reading_intent_version') == 1:
+            request['reading_queries'] = []
+        return request
 
     def tool(self):
         return next(item for item in data_request_contract(self.task)['tools']
