@@ -18,6 +18,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from researchhelper.service import make_server
+from researchhelper.evidence import current_snapshot_reference, direct_code_reference
 
 ROOT = Path(__file__).resolve().parents[2]
 CUTOFF = "2026-10-02T18:00:00+08:00"
@@ -55,6 +56,22 @@ def answer(ident, text):
     return {"answer": text, "refs": [ident], "calculation_refs": []}
 
 
+def mock_host_review(case, agent):
+    """Synthetic host verdicts isolate transport tests, never financial quality."""
+    from researchhelper import argument_support
+    from tests.test_argument_support_workflow import assessed
+    original = agent._prepare_argument_review
+    def prepare(task, proposal, selected):
+        if argument_support.enabled(task) and argument_support.find_record(task, proposal) is None:
+            _, result = assessed(task, proposal)
+            task.setdefault('argument_support_reviews', []).append(
+                argument_support.make_record(task, proposal, result, actor='host'))
+        return original(task, proposal, selected)
+    reviewer = patch.object(agent, '_prepare_argument_review', side_effect=prepare)
+    reviewer.start()
+    case.addCleanup(reviewer.stop)
+
+
 class SupplementInterfacesTests(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory(prefix="supplement-interface-", dir=ROOT / "result/acceptance")
@@ -69,6 +86,9 @@ class SupplementInterfacesTests(unittest.TestCase):
         guard.start()
         self.addCleanup(guard.stop)
         self.server = make_server(self.root / "app", ROOT, authentication=True, runtime_configurable=True)
+        # Retained three-phase fixtures explicitly select their old controller.
+        # Current default-Chat cases leave the production choice enabled.
+        self.server.agent.draft_first = getattr(self, "draft_first", False)
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": .01})
         self.thread.start()
         self.addCleanup(self.stop)
@@ -109,7 +129,8 @@ class SupplementInterfacesTests(unittest.TestCase):
         self.assertIn("SameSite=Strict", headers["Set-Cookie"])
         self.cookie = headers["Set-Cookie"].split(";", 1)[0]
 
-    def test_authenticated_app_directed_supplier_round_preserves_independent_answer(self):
+    def test_authenticated_legacy_transport_preserves_answer_without_certifying_raw_quote(self):
+        mock_host_review(self, self.server.agent)
         self.request("/api/settings/model", {"endpoint": "https://example.invalid/model", "model": "fabricated-model",
                                             "api_key": "fabricated-model-key"})
         self.request("/api/settings/data", {"ifind": {"access_token": "fabricated-source-key"}, "tinyshare": {}})
@@ -117,7 +138,7 @@ class SupplementInterfacesTests(unittest.TestCase):
         execution = {key: value for key, value in self.request("/api/bootstrap")[0]["execution"].items()
                      if key in ("mode", "policy_version")}
         task = self.request("/api/tasks", {"question": "核查600000.SH披露日期与2026-09-30收盘价", "objects": ["600000.SH"],
-                                          "cutoff": CUTOFF, "questions": QUESTIONS})[0]
+                                          "research_mode": "current", "questions": QUESTIONS})[0]
         route = f"/api/tasks/{task['id']}"
         task = self.request(route + "/material", {"name": "publication.txt", "base64": base64.b64encode(TEXT.encode()).decode()})[0]
         initial = material_spec(task["materials"][0])
@@ -126,12 +147,14 @@ class SupplementInterfacesTests(unittest.TestCase):
         def extraction(payload):
             live = self.server.agent.archive.get(task["id"])
             record = next(r for r in live["source_records"] if "second_close" in r.get("data_need_ids", []))
-            spec = dict(initial, id="close_value", artifact_id=record["id"], period="2026-09-30", unit="元", question_ids=["q2"],
-                        record_locator={"table": 0, "row": 0, "field": "close"}, raw_value=12, value=12, raw_unit="元", conversion_factor=1,
-                        identity={"provider_code": "600000.SH", "object": "600000.SH", "basis": "原任务明确同一代码",
-                                  "valid_from": "2026-01-01", "valid_to": "2026-12-31"})
-            spec.pop("text")
-            spec["review"] = dict(initial["review"], question_ids=["q2"])
+            spec = dict(id="close_value", artifact_id=record["id"], object="600000.SH", question_ids=["q2"],
+                record_locator={"table": 0, "row": 0, "field": "close"}, period="2026-09-30", nature="已实现事实",
+                raw_value=12, value=12, raw_unit="元", unit="元", conversion_factor=1,
+                published_at=None, publication=dict(at=None, basis_ref=None, precision="未知", timezone="未知",
+                    certainty="未知", basis="仅核对本次API响应，不证明历史当时可得"),
+                availability=current_snapshot_reference(live, record), direct_code_reference=direct_code_reference(live, record),
+                review=dict(question_ids=["q2"], allowed_natures=["已实现事实"], conditions=["仅核对当前版本"],
+                    reason="不把材料公布日借给API原值"))
             return {"evidence_specs": [spec]}
         def supplement_response(payload):
             live = self.server.agent.archive.get(task["id"])
@@ -157,16 +180,27 @@ class SupplementInterfacesTests(unittest.TestCase):
             else:
                 raise AssertionError("Unexpected external transport: " + req.full_url)
             return io.BytesIO(json.dumps(value).encode())
-        with patch("researchhelper.model.urllib.request.urlopen", side_effect=transport):
+        # This retained test mocks in-process HTTPS. Spawned transport is
+        # independently exercised by test_authenticated_spawn_workflow_offline.
+        from types import MethodType
+        from researchhelper.model import ModelService
+        from researchhelper.evidence import EvidenceCollector
+        agent = self.server.agent
+        with patch.object(agent.model, "_request_bytes", MethodType(ModelService._request_bytes, agent.model)), \
+                patch.object(agent.collector, "_http_json", MethodType(EvidenceCollector._http_json, agent.collector)), \
+                patch("researchhelper.model.urllib.request.urlopen", side_effect=transport):
             self.request(route + "/start", {"expected_execution": execution})
             self.server.agent.workers[task["id"]].join(10)
         final = self.request(route)[0]
-        self.assertEqual(final["status"], "已完成", {"error": final.get("error"), "gaps": final["gaps"], "rejected": final["rejected_evidence"]})
-        self.assertEqual((final["version"], final["cutoff"], final["ledger"]["supplements"]), (1, CUTOFF, 1))
+        self.assertEqual(final["status"], "部分完成", final.get("error") or final["gaps"])
+        self.assertEqual(final["questions"][1]["status"], "未回答")
+        self.assertEqual([row["id"] for row in final["evidence"]], ["publication"])
+        self.assertTrue(any(row["id"] == "close_value" for row in final["rejected_evidence"]))
+        self.assertEqual((final["version"], final["cutoff"], final["ledger"]["supplements"]), (1, task["cutoff"], 1))
         self.assertEqual(len(supplier), 2)
-        self.assertEqual(len(calls), 6)
+        self.assertEqual(len(calls), 5)
         self.assertEqual(final["ledger"]["used"]["data_requests"], 2)
-        self.assertEqual(final["ledger"]["used"]["model_calls"], 6)
+        self.assertEqual(final["ledger"]["used"]["model_calls"], 5)
         self.assertEqual(final["ledger"]["reserve"]["model_calls"], 1)
         self.assertEqual(final["ledger"]["limits"]["model_calls"], 8)
         self.assertEqual(final["questions"][0]["answer"], first_answer["answer"])
@@ -210,15 +244,29 @@ helpers=importlib.util.spec_from_file_location("fixtures",repository/"core/tests
 f=importlib.util.module_from_spec(helpers);helpers.loader.exec_module(f)
 with patch("socket.socket.connect",side_effect=AssertionError("No network")), patch("researchhelper.model.ModelService.reason",side_effect=AssertionError("No second model")):
  s=module.Session(project)
+ def review_checkpoint():
+  # Fabricated verdicts are submitted through the real public Skill API.
+  # This tests bindings and adoption, not financial semantic correctness.
+  request=s.argument_review_inputs(t["id"])["request"]
+  related=sorted({qid for target in request["targets"] for qid in target["question_ids"]})
+  wire=dict(version=request["version"],review_hash=request["review_hash"],questions=[
+   dict(question_id=qid,status="answered",reason="合成协议检查，不是金融质量批准",missing_evidence=[]) for qid in related],
+   reviews=[dict(target_id=target["id"],segments=[dict(text=target["text"],verdict="supported",
+    basis_refs=["evidence:"+target["evidence_refs"][0]] if target["evidence_refs"] else ["scope:task"],
+    explanation="合成复核，只验证完整覆盖和同版绑定")]) for target in request["targets"]])
+  s.review_arguments(t["id"],wire)
+  return s.resume(t["id"],defer_delivery=True)
  t=s.create("核查600000.SH披露日期与2026-09-30收盘价",objects=["600000.SH"],cutoff=f.CUTOFF,questions=f.QUESTIONS)
  r=s.material(t["id"],"publication.txt",f.TEXT.encode())
  text="合成验收材料，非真实行情。600000.SH在2026-09-30收盘价12元。发布于2026-10-01。"
  r2=s.material(t["id"],"price.txt",text.encode())
  first=s.run(t["id"],evidence_specs=[f.material_spec(r)],answers={"q1":f.answer("publication","披露日期2026-10-01")},defer_delivery=True)
  assert first["status"]=="待开始" and first.get("host_checkpoint") and not first.get("delivery"),first.get("error")
+ first=review_checkpoint()
  old=first["ledger"]["used"].copy()
  second=s.run(t["id"],supplement=f.proposal(artifact_ids=[r2["id"]]),evidence_specs=[f.material_spec(r2,"close_text","q2",text)],answers={"q2":f.answer("close_text","指定日收盘价12元")},defer_delivery=True)
  assert second["status"]=="待开始" and second.get("host_checkpoint") and not second.get("delivery"),second.get("error")
+ second=review_checkpoint()
  final=s.deliver(t["id"])
  assert final["status"]=="已完成",(final.get("error"),final["gaps"])
  assert final["version"]==first["version"]==1 and final["cutoff"]==first["cutoff"]==f.CUTOFF
