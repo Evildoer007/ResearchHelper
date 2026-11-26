@@ -108,7 +108,11 @@ class RepositoryAlignmentTests(unittest.TestCase):
             archive = builder.skill(output=Path(folder), install=False)
             with zipfile.ZipFile(archive) as package:
                 names = package.namelist()
-                self.assertEqual(len([name for name in names if name.startswith('researchhelper/modules/')]), 5)
+                guides = {'researchhelper/modules/' + module + '/module.md' for module in (
+                    'evidencecollector', 'researchanalyzer', 'thesisbuilder', 'reportcomposer',
+                    'visualrenderer', 'artifactexporter')}
+                self.assertEqual({name for name in names if name.startswith('researchhelper/modules/')}, guides)
+                self.assertTrue(all(package.read(name).strip() for name in guides))
                 self.assertFalse(any(name.startswith('researchhelper/modules/') and name.endswith('.py') for name in names))
                 manifest = json.loads(package.read('researchhelper/manifest.json'))
                 self.assertEqual(package.read('researchhelper/researchhelper/VERSION'), (ROOT / 'VERSION').read_bytes())
