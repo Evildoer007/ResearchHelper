@@ -24,14 +24,21 @@ class CurrentVersionReviewTests(original.VersionReviewTests):
         self.assertEqual([self.agent.archive.report(second['id'], version) for version in (1, 2)], reports)
 
     def test_report_has_named_versions_full_original_rule_and_toc(self):
+        from lxml import html
         before = self.complete(dict(original.RULE, benchmark='<原条件>'))
+        prior = self.agent.archive.report(before['id'], 1)
         after = self.update(before)
-        paper = self.agent.export(after['id'])['html']
-        for text in ('版本1判断', '版本2判断', '原版适用资格解释', '本版适用资格解释',
-                     '下一次主动更新', '&lt;原条件&gt;', "id='changes'"):
-            self.assertIn(text, paper)
-        self.assertNotIn("href='#changes'", paper)
-        self.assertEqual(fingerprint(self.agent.archive.report(after['id'], 2)['content']), after['delivery']['digest'])
+        tree = html.document_fromstring(self.agent.export(after['id'])['html'])
+        self.assertIn('对比发布版本1', tree.get_element_by_id('changes').text_content())
+        self.assertIn('本版适用资格解释', tree.find('.//main').text_content())
+        self.assertTrue(tree.xpath('//nav//a[@href="#changes"]'))
+        conditions = tree.get_element_by_id('version-original-conditions')
+        self.assertIn('<原条件>', conditions.text_content())
+        self.assertFalse(conditions.xpath('.//原条件'))
+        frozen = self.agent.archive.report(after['id'], 2)
+        self.assertEqual(frozen['content']['changes']['prior_basis']['theses'][0]['title'],'原版适用资格解释')
+        self.assertEqual(self.agent.archive.report(before['id'],1),prior)
+        self.assertEqual(fingerprint(frozen['content']),after['delivery']['digest'])
 
     def test_third_version_save_failure_keeps_history_and_can_retry_without_new_research(self):
         second = self.update(self.complete())
@@ -72,11 +79,22 @@ class CurrentVersionReviewTests(original.VersionReviewTests):
         thesis = self.fixture.thesis('反对')
         thesis.update(title='原适用资格论点被修订条款反对', support=['effective_date'],
                       counter=['eligibility'], tracking=None)
+        from researchhelper.judgment_review import contract
+        anchor=contract(task)['anchors'][0]
+        review=dict(prior_thesis_id=anchor['id'],prior_thesis_hash=anchor['thesis_hash'],
+            prior_version=task['update_from']['version'],conditions_hash=anchor['conditions_hash'],
+            assessment='调整',current_thesis_indices=[0],dimensions=dict(
+                facts=dict(state='依据有变化',answer='新版原件明确撤销原资格。',refs=['eligibility'],calculation_refs=[]),
+                mechanism=dict(state='反对',answer='撤销条款不再支持原适用资格解释。',refs=['eligibility'],calculation_refs=[]),
+                expectations=dict(state='不适用',answer='本问题不比较预测与实际结果。',refs=[],calculation_refs=[]),
+                price=dict(state='不适用',answer='本问题没有研究市场价格。',refs=[],calculation_refs=[])))
         done = self.agent.start(task['id'], {'evidence_specs': specs,
             'answers': {'q1': {'answer': '政策自2026年7月21日起生效；原适用资格已撤销。',
                               'refs': ['effective_date', 'eligibility'], 'calculation_refs': []}},
-            'theses': [thesis]})
+            'theses': [thesis],'judgment_reviews':[review]})
         self.assertEqual(done['status'], '已完成', done.get('error') or done.get('gaps'))
+        self.assertEqual(len(done['judgment_reviews']),1)
+        self.assertEqual(done['judgment_reviews'][0]['dimensions']['price']['state'],'不适用')
         self.assertEqual(done['theses'][0]['judgment'], '反对')
         self.assertEqual(done['theses'][0]['counter'], ['eligibility'])
         self.assertEqual(done['changes']['prior_judgments'], ['支持'])
