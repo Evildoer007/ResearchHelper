@@ -1,30 +1,23 @@
 """Correction retains review budget; failed reasoning is not missing data."""
 import copy
-import json
-from pathlib import Path
 import socket
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from tests.legacy_replay_fixtures import financial_task, numeric_proposal
 from researchhelper.argument_support import VERSION
 from researchhelper.contracts import ContractError, charge
 from researchhelper.engine import ResearchAgent
 from researchhelper.model import ModelCompletionError
 
-ROOT = Path(__file__).resolve().parents[1]
-FAILED = ROOT/'result/acceptance/one-sentence-research-7s8j8_l8/task.json'
-TRUNCATED = ROOT/'result/acceptance/one-sentence-research-220kvryl/task.json'
-
-
 class ReviewedAnalysisRecoveryTests(unittest.TestCase):
     def setUp(self):
-        self.original = {p:p.read_bytes() for p in (FAILED, TRUNCATED)}
-        self.task = json.loads(self.original[FAILED])
+        self.task = financial_task()
         self.task['argument_support_contract'] = VERSION
         self.task['ledger']['used']['model_calls'] = 6
         self.task['reasoning_state'].pop('final_delivery', None)
-        self.proposal = copy.deepcopy(self.task['host_result'])
+        self.proposal = numeric_proposal(valid=False)
         self.agent = ResearchAgent.__new__(ResearchAgent)
         self.agent.model = SimpleNamespace(supports_final_delivery=lambda:True, reason_final_analysis=lambda:None)
         self.agent._save_model_checkpoint = Mock()
@@ -37,9 +30,6 @@ class ReviewedAnalysisRecoveryTests(unittest.TestCase):
         self.agent._reason_on_verified_material = Mock(side_effect=corrected)
         guard = patch.object(socket.socket, 'connect', side_effect=AssertionError('No network'))
         guard.start(); self.addCleanup(guard.stop)
-
-    def tearDown(self):
-        for path, original in self.original.items(): self.assertEqual(path.read_bytes(), original)
 
     def test_correction_uses_ordinary_budget_and_retains_review_reserve(self):
         self.assertEqual(self.agent._finalize_numeric_submission(self.task, self.proposal), self.result)
@@ -54,6 +44,15 @@ class ReviewedAnalysisRecoveryTests(unittest.TestCase):
         self.assertIs(self.agent._finalize_numeric_submission(self.task, self.proposal), self.proposal)
         self.agent._reason_on_verified_material.assert_not_called()
         self.assertNotIn('numeric_resubmission', self.task['reasoning_state'])
+
+    def test_already_reserved_review_leaves_no_new_correction_slot(self):
+        for status in ('已派发', '已提交', '未采用'):
+            task = copy.deepcopy(self.task)
+            task['reasoning_state']['final_delivery'] = dict(status=status, reason='argument_support')
+            with self.subTest(status=status):
+                self.assertIs(self.agent._finalize_numeric_submission(task, self.proposal), self.proposal)
+                self.assertNotIn('numeric_resubmission', task['reasoning_state'])
+        self.agent._reason_on_verified_material.assert_not_called()
 
     def test_correction_does_not_touch_evidence_calculations_or_original_proposal(self):
         before = copy.deepcopy((self.task['evidence'], self.task['calculations'], self.proposal))
@@ -100,7 +99,9 @@ class ReviewedAnalysisRecoveryTests(unittest.TestCase):
         self.assertFalse(feedback['automatic_repair'])
 
     def test_truncated_analysis_is_not_reported_as_unacquired_financial_values(self):
-        task = json.loads(self.original[TRUNCATED])
+        task = financial_task()
+        task['argument_support_contract'] = VERSION
+        task['reasoning_state']['analysis'] = {'output_rejected': True}
         task['gaps'] = []; task['gap_records'] = []
         before = copy.deepcopy((task['evidence'], task['calculations']))
         self.agent._answer_questions(task, [q['id'] for q in task['questions']], task['host_result'], {})
