@@ -98,6 +98,7 @@ class ReviewBasisAliasTests(unittest.TestCase):
         self.assertEqual(self.request,before)
 
     def test_new_formal_tasks_use_new_encoding_without_modifying_legacy_tasks(self):
+        original=copy.deepcopy(self.fixture.task)
         with tempfile.TemporaryDirectory(prefix='basis-alias-',dir=ROOT/'result/acceptance') as folder:
             agent=ResearchAgent(ResearchArchive(folder),ROOT,offline=True,require_argument_support=True)
             try:
@@ -105,7 +106,8 @@ class ReviewBasisAliasTests(unittest.TestCase):
                 self.assertEqual(task['argument_reference_format'],2)
             finally:
                 for worker in agent.close_runtime():worker.join(timeout=5)
-        self.assertNotIn('argument_reference_format',self.fixture.task)
+        self.assertEqual(self.fixture.task['argument_reference_format'],1)
+        self.assertEqual(self.fixture.task,original)
 
     def test_official_transport_accepts_alias_wire_and_retains_one_call_accounting(self):
         service=self.fixture.service()
