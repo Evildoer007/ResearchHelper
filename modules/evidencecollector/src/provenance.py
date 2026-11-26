@@ -95,7 +95,9 @@ def collection_coverage(task):
     """
     if type(task.get('financial_batch_query_version')) is not int or task['financial_batch_query_version'] != 1:
         return []
+    from .draft_sources import _number
     from .financial_sources import financial_batch_response
+    from .subject_scope import subject_allowed
     result = []
     for source in task.get('source_records', []):
         if source.get('source') != 'ifind' or source.get('operation') != 'smart_stock_picking':
@@ -103,17 +105,21 @@ def collection_coverage(task):
         try:
             batch = financial_batch_response(task, source['parameters'], source['snapshot'])
             reference = query_reference(task, source)
-        except ContractError:
+        except (ContractError, KeyError, TypeError, ValueError):
             continue
-        rows = []
+        rows, period = [], batch['period']
+        columns = {field: f'{field}[{period}]' for field in batch['fields']}
         for location in batch['row_locations']:
             table = source['snapshot']['tables'][location['table']]['table']
             row = location['row']
-            rows.append(dict(code=table['股票代码'][row], name=table['股票简称'][row],
+            code, name = table['股票代码'][row], table['股票简称'][row]
+            if not subject_allowed(task, code) or not subject_allowed(task, name or ''):
+                continue
+            received = {field: key in table and _number(table[key][row]) is not None
+                        for field, key in columns.items()}
+            rows.append(dict(code=code, name=name,
                 classification=table.get('所属同花顺行业', [None] * len(table['股票代码']))[row],
-                fields={field: field + '[' + batch['period'] + ']' in table
-                    and table[field + '[' + batch['period'] + ']'][row] not in (None, '')
-                    for field in batch['fields']}))
+                fields=received))
         result.append(dict(version=1, reference=reference, source=source['source'],
             topic=batch['topic'], discovery_kind=batch['discovery_kind'],
             obtained_at=source['obtained_at'], requested_period=batch['period'],
