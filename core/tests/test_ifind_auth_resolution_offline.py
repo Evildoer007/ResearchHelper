@@ -13,7 +13,8 @@ from researchhelper.evidence import EvidenceCollector
 
 ACCESS = "access-fixture-not-real"
 REFRESH = "refresh-fixture-not-real"
-PARAMS = {"codes": "600000.SH", "indicators": "close", "startdate": "2026-09-01", "enddate": "2026-09-02", "functionpara": {"Fill": "Blank"}}
+PARAMS = {"codes": "600000.SH", "indicators": "close", "startdate": "2026-09-01", "enddate": "2026-09-02",
+          "functionpara": {"Currency": "RMB", "CPS": "1", "Fill": "Omit"}}
 
 
 def response(value):
@@ -22,7 +23,11 @@ def response(value):
 
 class IfindAuthResolutionTests(unittest.TestCase):
     def setUp(self):
-        self.task = {"id": "auth-resolution-fixture", "version": 1, "batch": 0, "ledger": budget()}
+        self.task = {"id": "auth-resolution-fixture", "version": 1, "batch": 0, "ledger": budget(),
+                     "cutoff": "2026-09-02", "objects": ["600000.SH"]}
+        network = patch("socket.socket.connect", side_effect=AssertionError("No external network"))
+        network.start()
+        self.addCleanup(network.stop)
         self.journal = []
         self.collector = EvidenceCollector(False, lambda task: self.journal.append(copy.deepcopy(task)))
         self.business = {"errorcode": 0, "tables": [{"thscode": "600000.SH", "time": ["2026-09-01"], "table": {"close": [10]}}]}
@@ -59,14 +64,34 @@ class IfindAuthResolutionTests(unittest.TestCase):
             self.assertIsNone(redirected.get_header("Access_token"))
             self.assertIsNone(redirected.get_header("Refresh_token"))
 
-    def test_explicit_access_wins_without_exchange_or_refresh_fallback(self):
+    def test_access_only_has_no_token_exchange(self):
         with patch("urllib.request.urlopen", return_value=response(self.business)) as transport:
-            self.acquire({"access_token": ACCESS, "refresh_token": REFRESH})
+            self.acquire({"access_token": ACCESS})
         self.assertEqual(transport.call_count, 1)
         self.assertTrue(transport.call_args.args[0].full_url.endswith('/cmd_history_quotation'))
-        with patch("urllib.request.urlopen", return_value=response({"errorcode": -1, "errmsg": ACCESS})) as transport, self.assertRaises(ContractError):
+        self.assertEqual(transport.call_args.args[0].get_header("Access_token"), ACCESS)
+
+    def test_refresh_takes_priority_over_a_saved_access_token(self):
+        saved_access = "stale-access-fixture"
+        replies = [response({"errorcode": 0, "data": {"access_token": ACCESS}}), response(self.business)]
+        with patch("urllib.request.urlopen", side_effect=replies) as transport:
+            self.acquire({"access_token": saved_access, "refresh_token": REFRESH})
+        auth, business = [call.args[0] for call in transport.call_args_list]
+        self.assertTrue(auth.full_url.endswith('/get_access_token'))
+        self.assertEqual(auth.get_header("Refresh_token"), REFRESH)
+        self.assertEqual(business.get_header("Access_token"), ACCESS)
+        self.assertNotIn(saved_access, json.dumps(self.journal))
+
+    def test_failed_refresh_records_authentication_without_using_saved_access(self):
+        error = urllib.error.HTTPError("https://example.invalid", 401, REFRESH, {}, None)
+        with patch("urllib.request.urlopen", side_effect=error) as transport, self.assertRaisesRegex(ContractError, "HTTP状态401") as raised:
             self.acquire({"access_token": ACCESS, "refresh_token": REFRESH})
         self.assertEqual(transport.call_count, 1)
+        self.assertTrue(transport.call_args.args[0].full_url.endswith('/get_access_token'))
+        self.assertNotIn(REFRESH, str(raised.exception))
+        event = self.task["ledger"]["dispatches"][-1]
+        self.assertEqual(event["http_status"], 401)
+        self.assertEqual(event["supplier_rejection_category"], "authentication_failed")
 
     def test_cache_is_bound_to_refresh_and_expires_in_five_minutes(self):
         clock = [0]
@@ -75,12 +100,18 @@ class IfindAuthResolutionTests(unittest.TestCase):
             calls.append(request.full_url)
             return response({"errorcode": 0, "data": {"access_token": ACCESS}} if request.full_url.endswith('get_access_token') else self.business)
         with patch("time.monotonic", side_effect=lambda: clock[0]), patch("urllib.request.urlopen", side_effect=transport):
+            self.assertEqual(self.collector.ifind_authentication_cost({"refresh_token": REFRESH}), 1)
             self.acquire()
+            self.assertEqual(self.collector.ifind_authentication_cost({"refresh_token": REFRESH}), 0)
             self.acquire()
             self.assertEqual(sum(url.endswith('get_access_token') for url in calls), 1)
+            self.assertEqual(self.collector.ifind_authentication_cost({"refresh_token": "different-refresh-fixture"}), 1)
             self.acquire({"refresh_token": "different-refresh-fixture"})
             self.assertEqual(sum(url.endswith('get_access_token') for url in calls), 2)
             clock[0] = 301
+            self.assertEqual(self.collector.ifind_authentication_cost({"refresh_token": "different-refresh-fixture"}), 1)
+            self.assertEqual(self.collector.ifind_authentication_cost({"access_token": ACCESS, "refresh_token": REFRESH}), 1)
+            self.assertEqual(self.collector.ifind_authentication_cost({"access_token": ACCESS}), 0)
             self.acquire({"refresh_token": "different-refresh-fixture"})
             self.assertEqual(sum(url.endswith('get_access_token') for url in calls), 3)
         self.assertEqual(self.task["ledger"]["used"]["data_requests"], 7)
