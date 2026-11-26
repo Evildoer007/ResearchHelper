@@ -1,29 +1,25 @@
-"""Replay a rejected proposal only in a copy; never amend the failed study."""
+"""Verify the rejected subject and context cases using a retained financial original."""
 import copy
 import hashlib
-import json
-from pathlib import Path
 import unittest
 from unittest.mock import patch
 
+from tests.test_financial_context_choices import legacy_financial_context, misplaced_entity_basis
+from tests.test_financial_value_reference import FIXTURE
 from researchhelper.reasoning import filing_object_binding,evidence_contract
 from researchhelper.output_schema import financial_extraction_output_schema
 from researchhelper.evidence import candidate_evidence
 from researchhelper.contracts import ContractError
 
-ROOT=Path(__file__).resolve().parents[1]
-RETAINED=ROOT/'result/acceptance/one-sentence-research-5mp4kywz/task.json'
-
-
 class FilingObjectBindingTests(unittest.TestCase):
     def setUp(self):
-        self.digest=hashlib.sha256(RETAINED.read_bytes()).hexdigest()
-        self.task=json.loads(RETAINED.read_text())
+        self.task, self.views, specs, self.digest = legacy_financial_context()
         self.record=next(record for record in self.task['source_records'] if record['kind']=='filing')
-        self.specs=copy.deepcopy(self.task['host_result']['evidence_specs'])
+        self.specs = [dict(misplaced_entity_basis(spec), object=spec['calculation_context']['entity_id'])
+                      for spec in specs]
 
     def tearDown(self):
-        self.assertEqual(hashlib.sha256(RETAINED.read_bytes()).hexdigest(),self.digest)
+        self.assertEqual(hashlib.sha256(FIXTURE.read_bytes()).hexdigest(),self.digest)
 
     def test_legal_entity_name_does_not_silently_become_a_security_code(self):
         original=self.specs[0]
@@ -49,7 +45,7 @@ class FilingObjectBindingTests(unittest.TestCase):
             candidate_evidence(self.task,self.record,spec)
 
     def test_schema_and_contract_distinguish_security_object_from_entity_context(self):
-        views=self.task['reasoning_state']['reading']['bundle']['views']
+        views=self.views
         source=evidence_contract(self.task,views)['sources'][0]
         self.assertEqual(source['object_binding']['value'],self.record['directory']['issuer'])
         schema=financial_extraction_output_schema(self.task,views)
