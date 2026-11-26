@@ -15,4 +15,5 @@ assert.equal(label({source:'official',operation:'release_catalog',parameters:{ch
 assert.equal(label({source:'official',operation:'release_catalog'}),'官方发布目录');
 assert.equal(label({source:'official',kind:'material',operation:'release_original',snapshot:{official_origin:{title:'FOMC声明 2026-09-16'}}}),'FOMC声明 2026-09-16');
 assert.equal(label({source:'ifind',kind:'api',operation:'date_sequence'}),'iFinD 序列数据');
-console.log(JSON.stringify({status:'passed',checks:6,nativeWindowOpened:false}));
+for (const [channel,name] of [['pbc_news','中国人民银行发布目录'],['mof_news','财政部发布目录'],['cninfo','巨潮公告目录'],['hkex','披露易公告目录']]) assert.equal(label({source:'official',operation:'release_catalog',parameters:{channel}}),name);
+console.log(JSON.stringify({status:'passed',checks:10,nativeWindowOpened:false}));
