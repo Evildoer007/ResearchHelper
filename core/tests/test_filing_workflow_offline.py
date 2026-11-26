@@ -98,7 +98,8 @@ class FilingWorkflowTests(unittest.TestCase):
         catalog = next(record for record in task["source_records"] if record.get("operation") == "report_query")
         return {"question_ids": ["q1"], "reason": "目录只有标题，缺政策原文", "expected_change": "取得实际PDF以核对条款生效日",
             "data_requests": [{"id": "original", "source": "ifind", "operation": "filing_original",
-                "parameters": {"catalog_id": catalog["id"], "source_id": "10001"}, "question_ids": ["q1"]}],
+                "parameters": {"catalog_id": catalog["id"], "source_id": "10001"}, "question_ids": ["q1"],
+                "selection_reason": "核对本公告政策条款的实际生效日期"}],
             "calculations": [], "artifact_ids": [], "stop_reason": ""}
 
     def test_catalog_only_does_not_answer_body_question(self):
@@ -116,7 +117,8 @@ class FilingWorkflowTests(unittest.TestCase):
         settings.save({"endpoint": "https://example.invalid/model", "model": "fabricated-fixture-model", "api_key": "fabricated-only"})
         self.agent.model = ModelService(settings, offline=False, journal=self.agent._journal)
         plan = {"questions": question_specs(self.task), "data_requests": [self.need], "calculations": []}
-        outputs = [plan, {"evidence_specs": []},
+        # A directory is navigation input, so it does not spend an extraction call.
+        outputs = [plan,
             lambda _: self.download_proposal(self.agent.archive.get(self.task["id"])),
             lambda _: {"evidence_specs": [self.spec(next(record for record in self.agent.archive.get(self.task["id"])["source_records"] if record["kind"] == "filing"))]},
             self.answer()]
@@ -127,7 +129,9 @@ class FilingWorkflowTests(unittest.TestCase):
         self.assertEqual(result["status"], "已完成", result.get("error") or result["gaps"])
         self.assertEqual(self.dispatches, ["report_query", "filing_original"])
         self.assertEqual(result["ledger"]["used"]["data_requests"], 2)
-        self.assertEqual(result["ledger"]["used"]["model_calls"], 5)
+        self.assertEqual(result["ledger"]["used"]["model_calls"], 4)
+        self.assertEqual(len(model.requests), 4)
+        self.assertFalse(model.outputs)
         self.assertEqual(result["ledger"]["supplements"], 1)
         self.assertEqual(result["evidence"][0]["source_check"], "通过")
         self.assertEqual(result["evidence"][0]["applicability_check"], "通过")
