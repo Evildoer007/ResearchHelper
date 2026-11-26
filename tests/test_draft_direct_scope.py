@@ -9,6 +9,8 @@ from researchhelper.engine import ResearchAgent
 from researchhelper.contracts import ENTRIES
 from researchhelper.evidence import snapshot_record
 from researchhelper.planning import input_fingerprint
+from researchhelper.publication_content import DRAFT_READING_POLICY, DRAFT_READING_VERSION
+from researchhelper.report_designer import render_html
 
 POLICY='draft_direct_scope_version'
 
@@ -29,6 +31,9 @@ class DirectDraftScopeTests(unittest.TestCase):
         task=self.create();self.assertEqual(task.get(POLICY),1)
         old=deepcopy(task);old.pop(POLICY)
         self.assertNotEqual(input_fingerprint(old),task['input_hash'])
+        old = deepcopy(task)
+        old.pop(DRAFT_READING_POLICY)
+        self.assertNotEqual(input_fingerprint(old), task['input_hash'])
     def test_empty_first_reports_respect_each_entry_and_direct_kind(self):
         for entry in ENTRIES:
             for kind in ('fact','comparison'):
@@ -37,11 +42,16 @@ class DirectDraftScopeTests(unittest.TestCase):
                     self.assertTrue(done.get('delivery'),done.get('error'))
                     draft=done['draft_report']
                     self.assertEqual(draft.get('organization'),kind)
-                    self.assertEqual(len(draft['logics']),1)
-                    self.assertNotIn('盈利预期',''.join(item['analysis'] for item in draft['logics']))
-                    self.assertNotIn('利率与风险溢价',str(draft['logics']))
-                    main=html.document_fromstring(self.archive.report(done['id'],1)['html']).xpath('//main')[0].text_content()
-                    self.assertNotIn('策略逻辑',main)
+                    self.assertEqual(draft['logics'],[])
+                    frozen = self.archive.report(done['id'],1)
+                    for profile in ('standard','detailed'):
+                        page = render_html(frozen['content'], ROOT, profile=profile)
+                        tree = html.document_fromstring(page)
+                        main = tree.xpath('//main')[0].text_content()
+                        self.assertIn('未取得',main)
+                        self.assertNotIn('策略逻辑',main)
+                        self.assertFalse(tree.xpath('//main//section[starts-with(@id,"logic-")]'))
+                        self.assertFalse(tree.xpath('//main//footer'))
                     self.assertEqual(done['ledger']['used']['model_calls'],0)
                     self.assertEqual(done['ledger']['used']['data_requests'],0)
     def test_actual_original_values_are_linked_without_new_prose_claims(self):
@@ -58,15 +68,36 @@ class DirectDraftScopeTests(unittest.TestCase):
         self.assertEqual(done['source_records'],[source])
         content=self.archive.report(done['id'],1)['content']
         self.assertEqual(content[POLICY],1)
+        self.assertEqual(draft[DRAFT_READING_POLICY], DRAFT_READING_VERSION)
+        for profile in ('standard', 'detailed'):
+            tree = html.document_fromstring(render_html(content, ROOT, profile=profile))
+            lines = tree.xpath('//main')[0].text_content()
+            self.assertIn('原始观测', lines)
+            self.assertNotIn('列示已取得的原始数值', lines)
+            self.assertNotIn('期间、统计范围或计量口径不同', lines)
+            self.assertFalse(tree.xpath('//main//*[@id="risk"]'))
+            self.assertTrue(tree.xpath('//main//a[@href="#draft-basis-1"]'))
     def test_submitted_research_prose_is_preserved(self):
         report=dict(title='指定分析',conclusion='原始结论',logics=[dict(title='指定逻辑',analysis='按照原问题检验具体解释。')])
         done=self.run_task(self.create(),report)
         self.assertEqual(done['draft_report']['logics'][0]['analysis'],report['logics'][0]['analysis'])
         self.assertEqual(done['draft_report']['title'],report['title'])
-    def test_required_investment_question_is_not_reduced_to_a_direct_check(self):
-        task=self.create(kind='investment');done=self.run_task(task)
-        self.assertNotIn(done['draft_report'].get('organization'),('fact','comparison'))
-        self.assertGreater(len(done['draft_report']['logics']),1)
+    def test_required_investment_question_keeps_the_judgment_boundary_without_evidence(self):
+        question = '分析600519.SH是否有足够依据支持增持。'
+        task = self.agent.create(question, entry='个股', objects=['600519.SH'],
+            questions=[dict(id='q1', question=question, kind='investment', required=True)])
+        done = self.run_task(task)
+        draft = done['draft_report']
+        self.assertTrue(done.get('delivery'))
+        self.assertNotIn(draft.get('organization'), ('fact', 'comparison'))
+        self.assertIn('足以形成投资判断的资料', draft['conclusion'])
+        self.assertEqual(draft['facts'], [])
+        self.assertEqual(draft['logics'], [])
+        content = self.archive.report(done['id'], 1)['content']
+        for profile in ('standard', 'detailed'):
+            main = html.document_fromstring(render_html(content, ROOT, profile=profile)).find('.//main')
+            self.assertIn(draft['conclusion'], main.text_content())
+            self.assertNotIn('策略逻辑', main.text_content())
     def test_new_version_adopts_policy_and_preserves_legacy_report(self):
         task=self.create();task.pop(POLICY,None);task.pop('draft_question_scope_version',None)
         task['input_hash']=input_fingerprint(task);self.archive.save(task)
