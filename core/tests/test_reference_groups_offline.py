@@ -26,10 +26,11 @@ class ReferenceGroupsTests(unittest.TestCase):
     def test_renamed_same_bytes_share_carrier_not_event(self):
         task = self.fixture.task(kind='mechanism')
         original = task['materials'][0]
-        text = versions.fixtures.TEXT
-        task = self.agent.add_material(task['id'], 'renamed.txt', text.encode())
-        self.assertNotEqual(original['id'], task['materials'][1]['id'])
-        evidence = {str(i): {'artifact': record} for i, record in enumerate(task['materials'])}
+        task = self.agent.add_material(task['id'], 'renamed.txt', versions.fixtures.TEXT.encode())
+        self.assertEqual(len(task['materials']), 1)
+        self.assertEqual(task['materials'][0], original)
+        # Distinct citations still reference the same retained carrier.
+        evidence = {'0': {'artifact': original}, '1': {'artifact': task['materials'][0]}}
         groups = reference_groups(evidence, ['0', '1', '0'])
         self.assertEqual(len(groups['source_groups']), 1)
         self.assertEqual(groups['event_groups'], [])
