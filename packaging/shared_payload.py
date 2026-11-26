@@ -59,9 +59,12 @@ def copy_tree(source, target):
 
 def copy_report_design(frontend, root=ROOT):
     """Bundle the report shell, named definitions and composition renderer."""
+    from researchhelper.layout import research_library_guides
     source = Path(root) / 'modules/visualrenderer/assets'
     destination = Path(frontend) / 'report-design'
     destination.mkdir(parents=True, exist_ok=True)
+    (destination / 'library-guides.json').write_text(
+        json.dumps(research_library_guides(root), ensure_ascii=False), encoding='utf-8')
     for name in ('report.html', 'evidence-charts.js', 'table-pagination.js', 'templates/report-standard.template.json', 'templates/report-detailed.template.json'):
         (destination / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source / name, destination / name)
