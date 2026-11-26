@@ -1,6 +1,7 @@
 """The rebuilt paper follows three investment theses with exact case numbers."""
 import hashlib,importlib.util,json,re,tempfile,unittest
 from pathlib import Path
+from lxml import html
 from tests import ROOT
 
 FILE=ROOT/'modules/reportcomposer/examples/broker_report.py'
@@ -25,19 +26,22 @@ class BrokerStrategyReportTests(unittest.TestCase):
 
     def test_inexact_selling_estimate_is_never_turned_into_precise_completion(self):
         self.assertEqual(self.data['reduction'],dict(trillion=1.5,completion='九成以上',status='原材料估计'))
-        chain=module.figures(self.data)[0]
-        self.assertEqual(chain['scheme'],'evidence')
-        self.assertTrue(all(set(r)=={'id','name','level'} for r in chain['data']['nodes']))
+        figures=module.figures(self.data)
+        self.assertTrue(all(not {'completion','completion_percent','completed_pct'}.intersection(item['data']) for item in figures))
+        comparison=next(item for item in figures if item['target']=='valuation-chart')
+        self.assertEqual(comparison['scheme'],'scatter')
+        self.assertEqual([(row['x'],row['y']) for row in comparison['data']['points']],[(row['price'],row['revenue']) for row in self.data['sectors']])
 
     def test_dividend_ranges_have_no_invented_midpoint_or_prior_year_data(self):
-        item=module.figures(self.data)[3]
+        item=next(item for item in module.figures(self.data) if item['target']=='dividend-chart')
+        self.assertEqual(item['scheme'],'range')
         self.assertEqual(item['data']['ranges'],[dict(name='A股券商',min=1.8,max=1.9),dict(name='H股券商',min=3.8,max=4.0)])
         self.assertEqual(self.data['dividends']['cash'],735);self.assertEqual(self.data['dividends']['cash_growth'],32)
         self.assertEqual(self.data['dividends']['payout'],33);self.assertEqual(self.data['dividends']['payout_change_pp'],4)
 
     def test_the_paper_is_core_conclusion_and_three_named_investment_logics(self):
-        text=module.render(self.data);body=text.split('<main>',1)[1].split('</main>',1)[0]
-        self.assertEqual(body.count('class="strategy"'),3)
+        text=module.render(self.data);main=html.document_fromstring(text).find('.//main');body=main.text_content()
+        self.assertEqual(len(main.xpath('.//section[starts-with(@id,"logic-")]')),3)
         for title in ['核心结论','策略逻辑一：卖压衰减','策略逻辑二：盈利改善','策略逻辑三：分红提升']:
             self.assertTrue(title in body,title)
         self.assertNotIn('三、关键数据',body);self.assertNotIn('四、跟踪与风险',body)
@@ -53,7 +57,9 @@ class BrokerStrategyReportTests(unittest.TestCase):
         text=module.render(self.data)
         self.assertFalse('<details' in text);self.assertFalse('<summary' in text)
         self.assertFalse(bool(re.search(r'<(?:script|link)[^>]+(?:src|href)=["\']https?://',text)))
-        self.assertEqual(len(module.figures(self.data)),4)
+        figures=module.figures(self.data)
+        self.assertEqual({item['scheme'] for item in figures},{'scatter','ranked_bar','percentile','cash_index','payout_units','range'})
+        self.assertEqual(len({item['target'] for item in figures}),len(figures))
 
     def test_original_is_preserved_and_no_network_is_needed(self):
         with tempfile.TemporaryDirectory() as folder:
