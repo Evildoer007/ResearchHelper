@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from tests import ROOT
+from tests.test_fomc_current_observation_date import ORIGINAL, retained_statement_scope
 from researchhelper.archive import ResearchArchive
 from researchhelper.engine import ResearchAgent
 from researchhelper.model import ModelService, ModelSettings
@@ -22,14 +23,13 @@ from researchhelper.reasoning import evidence_contract, extractable_source_views
 from researchhelper.evidence import candidate_evidence
 
 
-RETAINED = ROOT / 'result/acceptance/one-sentence-research-r_5_wxfy/task.json'
 FLAG = 'official_temporal_contract_version'
 
 
 class FOMCExtractionTemporalContractTests(unittest.TestCase):
     def setUp(self):
-        self.original = RETAINED.read_bytes()
-        self.task = json.loads(self.original)
+        self.original = ORIGINAL.read_bytes()
+        self.task = retained_statement_scope()
         self.task[FLAG] = 1
         self.views = extractable_source_views(self.task)
         self.record = next(record for record in self.task['source_records'] if record['operation'] == 'release_original')
@@ -41,7 +41,7 @@ class FOMCExtractionTemporalContractTests(unittest.TestCase):
         self.addCleanup(network.stop)
 
     def tearDown(self):
-        self.assertEqual(RETAINED.read_bytes(), self.original)
+        self.assertEqual(ORIGINAL.read_bytes(), self.original)
 
     def wire(self):
         question = self.task['questions'][0]
@@ -84,9 +84,11 @@ class FOMCExtractionTemporalContractTests(unittest.TestCase):
 
     def test_unsupported_full_publication_wire_is_rejected_before_adoption(self):
         wire = self.wire()
-        old = copy.deepcopy(self.task['host_result']['evidence_specs'][0])
-        old['review']['evidence_need_texts'] = wire['evidence_specs'][0]['review']['evidence_need_texts']
-        wire['evidence_specs'] = [old]
+        spec, = wire['evidence_specs']
+        spec.pop('availability')
+        spec.pop('publication_mode')
+        spec['published_at'] = '2026-09-16'
+        spec['publication'] = dict(at=spec['published_at'], precision='date', timezone='未知', certainty='确定')
         schema = material_extraction_output_schema(self.task, self.views)
         self.assertFalse(_matches(wire, schema))
         with self.assertRaises(StructuredOutputError):
