@@ -110,14 +110,21 @@ class DraftQuestionScopeTests(unittest.TestCase):
         self.assertEqual(report.get('organization'), 'fact')
         self.assertEqual(report['logics'][0]['analysis'], '保留这段正文。')
 
-    def test_research_presentation_keeps_research_fallback_and_conclusion(self):
+    def test_research_without_evidence_keeps_scope_and_reports_its_limit(self):
         for kind in (None, 'investment'):
             with self.subTest(kind=kind):
                 report = normalize_report(dict(report_scope='research'), self.task(kind), [])
                 self.assertEqual(report.get('organization'), 'research')
-                self.assertGreater(len(report['logics']), 1)
-                self.assertIn('研究逻辑', report['conclusion'])
-                self.assertNotEqual(report['logics'][0]['title'], '原始观测')
+                self.assertEqual(report['logics'], [])
+                self.assertEqual(report['conclusion'], '本次未取得足以形成投资判断的资料。')
+
+    def test_authored_investment_hypothesis_is_kept_without_generic_sections(self):
+        task = self.task('investment')
+        statement = '若后续现金回款恢复，才重新评估盈利变化是否具有持续性。'
+        report = normalize_report(dict(report_scope='research',
+            logics=[dict(title='回款验证', analysis=statement)]), task, [])
+        self.assertEqual([row['analysis'] for row in report['logics']], [statement])
+        self.assertEqual(report['logics'][0]['display_heading'], '策略逻辑一：回款验证')
 
     def test_invalid_optional_scope_neither_blocks_nor_rewrites_prose(self):
         for selected in (None, 'unknown', [], {'fact': True}):
@@ -165,11 +172,16 @@ class DraftQuestionScopeTests(unittest.TestCase):
     def test_frozen_legacy_task_does_not_silently_adopt_new_presentation(self):
         task = self.task()
         task.pop(POLICY)
+        # A pre-scope task also predates the independently versioned tracking
+        # contract. Keep both absent rather than reuse a current-task fixture.
+        task.pop('draft_tracking_version')
+        before = deepcopy(task)
         report = normalize_report(dict(report_scope='fact',
             logics=[dict(title='原样保留', analysis='保留旧版组织。')]), task, [])
         self.assertNotIn('organization', report)
         self.assertEqual(client_report_brief(task), CLIENT_REPORT_BRIEF)
         self.assertIsNone(draft_research_scope(task))
+        self.assertEqual(task, before)
 
     def mechanism_task(self, **options):
         question = '解释ETF折溢价变化的可能机制，不评价买入价值'
@@ -237,20 +249,67 @@ class DraftQuestionScopeTests(unittest.TestCase):
         self.assertEqual(report.get('organization'), 'mechanism')
         self.assertEqual(task, before)
 
-    def test_mechanism_fallback_retains_the_question_without_company_boilerplate(self):
+    def test_mechanism_fallback_exposes_the_gap_without_template_sections(self):
         task = self.mechanism_task()
         done = self.agent.start(task['id'], dict(draft_report={}, data_requests=[]))
         self.assertTrue(done.get('delivery'), done.get('error'))
         self.assertEqual(done['status'], '部分完成')
         draft = done['draft_report']
         self.assertEqual(draft.get('organization'), 'mechanism')
-        self.assertEqual(len(draft['logics']), 1)
-        self.assertEqual(draft['logics'][0]['title'], task['question'])
-        self.assertNotIn('现金兑现', str(draft['logics']))
+        self.assertFalse(draft['logics'])
+        self.assertEqual(done['question'], task['question'])
         main = html.document_fromstring(self.archive.report(done['id'], 1)['html']).xpath('//main')[0].text_content()
-        self.assertIn('传导逻辑一', main)
-        self.assertNotIn('策略逻辑', main)
+        self.assertIn('现有资料不足以解释所问变化', main)
+        self.assertNotIn('传导逻辑', main)
         self.assertEqual(done['ledger']['used']['model_calls'], 0)
+
+    def test_relevant_mechanism_uses_the_locked_entry_and_registered_source(self):
+        task = self.agent.create('本轮不联网，降息通常如何影响资产估值？', research_mode='current')
+        done = self.agent.start(task['id'])
+        self.assertEqual(done['status'], '部分完成', done.get('error'))
+        self.assertEqual(done['questions'][0]['status'], '待回答')
+        draft = done['draft_report']
+        self.assertEqual(draft['organization'], 'mechanism')
+        logic, = draft['logics']
+        citation, = logic['knowledge_refs']
+        self.assertEqual(citation['id'], 'rh_k_rate_transmission')
+        self.assertTrue(citation['entry_hash'])
+        self.assertFalse(logic['data_refs'] or logic['source_refs'] or logic['calculation_refs'])
+        page = html.document_fromstring(self.archive.report(done['id'], 1)['html'])
+        self.assertIn('风险溢价', page.get_element_by_id('logic-1').text_content())
+        self.assertTrue(page.get_element_by_id('draft-basis-1').xpath('.//a[starts-with(@href, "https://www.ecb.europa.eu/")]'))
+        self.assertIn('European Central Bank', page.find('.//main/footer').text_content())
+
+    def test_inflation_explanation_follows_the_requested_profit_channel(self):
+        task = self.agent.create('本轮不联网，解释CPI变化如何影响企业利润。', entry='宏观', intent='解释变化')
+        done = self.agent.start(task['id'])
+        self.assertEqual(done['status'], '部分完成', done.get('error'))
+        draft = done['draft_report']
+        self.assertIn('销量、投入成本和费用', draft['conclusion'])
+        logic, = draft['logics']
+        self.assertEqual(logic['title'], '物价变化的利润传导')
+        self.assertIn('消费价格不是企业收入', logic['analysis'])
+        self.assertEqual([row['id'] for row in logic['knowledge_refs']], ['rh_k_inflation_transmission'])
+
+    def test_firm_financing_and_bank_margin_choose_distinct_mechanisms(self):
+        for question, entry, expected in (
+                ('解释降息怎样通过银行贷款影响企业融资成本。', '宏观', 'rh_k_rate_transmission'),
+                ('解释降息后银行净息差为何变化。', '行业', 'rh_k_bank_rate_repricing')):
+            with self.subTest(question=question):
+                task = self.agent.create('本轮不联网，'+question, entry=entry, intent='解释变化')
+                done = self.agent.start(task['id'])
+                self.assertEqual(done['status'], '部分完成', done.get('error'))
+                logic, = done['draft_report']['logics']
+                self.assertEqual([row['id'] for row in logic['knowledge_refs']], [expected])
+
+    def test_an_unverified_company_event_does_not_adopt_incidental_knowledge(self):
+        task = self.agent.create('本轮不联网，解释600519.SH所问资产收购对盈利的影响。',
+                                 entry='事件', intent='解释变化')
+        done = self.agent.start(task['id'])
+        self.assertEqual(done['status'], '部分完成', done.get('error'))
+        self.assertIn('rh_k_cash_profit', {entry['id'] for entry in done['knowledge']['entries']})
+        self.assertFalse(done['draft_report']['logics'])
+        self.assertIn('未取得可核验的事件依据', done['draft_report']['conclusion'])
 
     def test_explicit_investment_cannot_be_downgraded_to_mechanism(self):
         task = self.task('investment')
@@ -281,7 +340,8 @@ class DraftQuestionScopeTests(unittest.TestCase):
                 self.assertEqual(draft_research_scope(task)['mode'], 'mechanism')
                 done = self.agent.start(task['id'], dict(draft_report={}, data_requests=[]))
                 self.assertTrue(done.get('delivery'), done.get('error'))
-                self.assertEqual([logic['title'] for logic in done['draft_report']['logics']], [question])
+                self.assertFalse(done['draft_report']['logics'])
+                self.assertIn('仍待核对', done['draft_report']['conclusion'])
                 self.assertEqual(done['status'], '部分完成')
                 self.assertEqual(done['ledger']['used']['model_calls'], 0)
 
@@ -296,7 +356,8 @@ class DraftQuestionScopeTests(unittest.TestCase):
         self.assertEqual(task, before)
         questions = [dict(id='q'+str(i),question='解释渠道'+str(i),kind='mechanism',required=True) for i in range(1,12)]
         task = self.agent.create('分别解释这些渠道',questions=questions)
-        report = normalize_report({}, task, [])
+        submitted = [dict(title=item['question'], analysis='传导强度取决于融资条件和需求。') for item in questions]
+        report = normalize_report(dict(logics=submitted), task, [])
         self.assertEqual(len(report['logics']), len(questions))
         self.assertEqual([logic['title'] for logic in report['logics']], [item['question'] for item in questions])
         self.assertEqual(report['logics'][-1]['display_heading'], '传导逻辑11：解释渠道11')
@@ -324,7 +385,8 @@ class DraftQuestionScopeTests(unittest.TestCase):
         self.assertEqual([row['raw_value'] for row in done['draft_report']['facts']], ['101.25', '102.50'])
         paper = self.archive.report(task['id'], 1)
         main = html.document_fromstring(paper['html']).xpath('//main')[0].text_content()
-        self.assertEqual(paper['content']['template_version'], 'rh-draft-8')
+        self.assertEqual(task['draft_tracking_version'], 1)
+        self.assertEqual(paper['content']['template_version'], 'rh-draft-9')
         self.assertIn('一、已取得的数据', main)
         self.assertNotIn('策略逻辑', main)
         document = json.loads(html.document_fromstring(paper['html']).get_element_by_id('rh-publication-document').text)
