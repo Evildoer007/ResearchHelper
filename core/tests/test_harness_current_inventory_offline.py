@@ -1,8 +1,8 @@
 """Current executable inventory and version invariants, not supplier permissions.
 
-The older fixed-size catalogue and four-registry tests remain unchanged. These
-checks cover the actual five families and retained knowledge versions without
-turning documented operations or historical originals into approved evidence.
+Checks cover every registered family and the task-applicable planning subset.
+Neither adapter registration nor documentation grants supplier permission or
+approves a source as financial evidence.
 """
 import copy
 import socket
@@ -15,6 +15,7 @@ from researchhelper.evidence import (
     IDENTITY_REQUEST_REGISTRY, active_source_capabilities, data_request_contract,
     validate_ifind_report_request,
 )
+from researchhelper import evidence as adapters
 from researchhelper.economic_sources import ECONOMIC_REQUEST_REGISTRY
 from researchhelper.financial_sources import FINANCIAL_REQUEST_REGISTRY
 from researchhelper.knowledge import ENTRIES, RETAINED_VERSIONS, ResearchKnowledge
@@ -41,9 +42,11 @@ class CurrentHarnessInventoryTests(unittest.TestCase):
                 'ledger': budget(), 'source_records': [], 'materials': []}
 
     def test_public_and_planning_operations_equal_all_five_registries(self):
-        expected = set().union(FIELD_REGISTRY, IDENTITY_REQUEST_REGISTRY,
-                               FILING_REQUEST_REGISTRY, FINANCIAL_REQUEST_REGISTRY,
-                               ECONOMIC_REQUEST_REGISTRY)
+        expected = set().union(*(getattr(adapters, name) for name in (
+            'FIELD_REGISTRY', 'IDENTITY_REQUEST_REGISTRY', 'FILING_REQUEST_REGISTRY',
+            'FINANCIAL_REQUEST_REGISTRY', 'ECONOMIC_REQUEST_REGISTRY', 'SERIES_REQUEST_REGISTRY',
+            'INDEX_REQUEST_REGISTRY', 'FINANCIAL_QUERY_REGISTRY', 'IFIND_METADATA_REGISTRY',
+            'CALENDAR_REQUEST_REGISTRY', 'OFFICIAL_REQUEST_REGISTRY')))
         task = self.task()
         before = fingerprint(task)
         public = [source + '.' + operation['operation']
@@ -52,9 +55,13 @@ class CurrentHarnessInventoryTests(unittest.TestCase):
         planned = [tool['source'] + '.' + tool['operation']
                    for tool in data_request_contract(task)['tools']]
         self.assertEqual(set(public), expected)
-        self.assertEqual(set(planned), expected)
+        required = set().union(FIELD_REGISTRY, IDENTITY_REQUEST_REGISTRY,
+                               FILING_REQUEST_REGISTRY, FINANCIAL_REQUEST_REGISTRY,
+                               ECONOMIC_REQUEST_REGISTRY) - {'official.index_file', 'official.etf_pcf'}
+        self.assertTrue(required.issubset(planned))
+        self.assertTrue(set(planned).issubset(expected))
         self.assertEqual(len(public), len(expected))
-        self.assertEqual(len(planned), len(expected))
+        self.assertEqual(len(planned), len(set(planned)))
         self.assertIn('ifind.edb_service', expected)
         self.assertEqual(fingerprint(task), before)
 
@@ -99,6 +106,11 @@ class CurrentHarnessInventoryTests(unittest.TestCase):
                 self.assertNotIn('api_key', item)
         inventory['ifind']['registered_operations'].clear()
         self.assertTrue(active_source_capabilities()['ifind']['registered_operations'])
+        implemented = {item['operation'] for item in CAPABILITIES['ifind']['registered_operations']}
+        self.assertIn('basic_data_service', implemented)
+        self.assertIn('basic_data_service', CAPABILITIES['ifind']['endpoints'])
+        self.assertNotIn('basic_data_service', {item['operation'] for item in CAPABILITIES['ifind']['documented_only']})
+        self.assertEqual(CAPABILITIES['ifind']['state'], '真实权限未验收')
 
     def test_current_knowledge_entries_match_their_exact_retained_versions(self):
         before = fingerprint(ENTRIES)
