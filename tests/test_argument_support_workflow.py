@@ -4,13 +4,14 @@ Mock reviewer verdicts test the workflow, not financial reasoning quality.
 """
 import copy
 import json
-from pathlib import Path
 import socket
 import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from tests import ROOT
+from tests.argument_review_fixture import financial_review_fixture
 from researchhelper import argument_support as support
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, charge, DOCUMENT_CONTENT_INTENT
@@ -18,10 +19,6 @@ from researchhelper.engine import ResearchAgent
 from researchhelper.knowledge import ResearchKnowledge
 from researchhelper.model import ModelCompletionError
 from researchhelper.reports import compose, render
-
-ROOT = Path(__file__).resolve().parents[1]
-RETAINED = ROOT / 'result/acceptance/one-sentence-research-v799vtkq/task.json'
-
 
 def assessed(task, proposal, rejected=(), completion=None):
     request = support.review_request(task, proposal)
@@ -40,8 +37,7 @@ def assessed(task, proposal, rejected=(), completion=None):
 
 class ArgumentSupportWorkflowTests(unittest.TestCase):
     def setUp(self):
-        self.original = RETAINED.read_bytes()
-        self.task = json.loads(self.original)
+        self.task, _ = financial_review_fixture()
         self.task['argument_support_contract'] = support.VERSION
         self.task['gaps'], self.task['gap_records'] = [], []
         self.proposal = copy.deepcopy(self.task['host_result'])
@@ -53,9 +49,6 @@ class ArgumentSupportWorkflowTests(unittest.TestCase):
         self.agent.model = SimpleNamespace(reason_argument_support=self.model_call)
         guard = patch.object(socket.socket, 'connect', side_effect=AssertionError('No networking'))
         guard.start(); self.addCleanup(guard.stop)
-
-    def tearDown(self):
-        self.assertEqual(RETAINED.read_bytes(), self.original)
 
     def model_review(self, task, proposal, *, delivery):
         charge(task['ledger'], 'model_calls', delivery=delivery)
@@ -168,6 +161,7 @@ class ArgumentSupportWorkflowTests(unittest.TestCase):
 
     def test_last_call_is_consumed_once_and_checkpoint_retained(self):
         self.task['run_mode'] = 'model'
+        self.task['ledger']['used']['model_calls'] = 7
         self.agent._prepare_argument_review(self.task, self.proposal, ['q1'])
         self.assertEqual(self.task['ledger']['used']['model_calls'], 8)
         self.assertEqual(self.task['reasoning_state']['final_delivery']['reason'], 'argument_support')
@@ -233,6 +227,42 @@ class ArgumentSupportWorkflowTests(unittest.TestCase):
             self.assertEqual(result['ledger']['used']['model_calls'], self.task['ledger']['used']['model_calls'])
             self.assertIsNone(agent.model)
             self.assertIn('html', agent.archive.report(ident, result['version']))
+
+    def test_partial_host_review_archives_superseded_diagnostics(self):
+        stale = ('论证复核未完成，未采用未经复核的研究回答与判断。',
+                 '本问题的回答未通过论证复核，未采用该陈述；原始资料与登记计算保留。',
+                 '部分陈述缺少足够依据，未采用对应回答或论点；已核验原值和计算保留。')
+        with tempfile.TemporaryDirectory(prefix='support-partial-') as folder:
+            agent, ident = self.host_archive(folder)
+            try:
+                waiting = agent.start(ident, defer_delivery=True)
+                rejected, _ = assessed(waiting, self.proposal, rejected=['answer:q1.answer'])
+                agent.submit_argument_review(ident, rejected)
+                agent.start(ident, defer_delivery=True)
+                checkpoint = agent.archive.get(ident)
+                for gap in checkpoint['gap_records']:
+                    if gap['message'] in stale:
+                        for field in ('category', 'task_id', 'research_version', 'method_ids'):
+                            gap.pop(field, None)
+                agent.archive.save(checkpoint)
+                wire, _ = assessed(checkpoint, self.proposal, completion={'q1': 'requires_evidence'})
+                agent.submit_argument_review(ident, wire)
+                final = agent.start(ident)
+                self.assertEqual(final['status'], '部分完成')
+                self.assertEqual(final['questions'][0]['status'], '未回答')
+                self.assertTrue(final['questions'][0]['answer'])
+                self.assertEqual(len(final['calculations']), 2)
+                self.assertTrue(any('仍缺少关键依据' in gap for gap in final['gaps']))
+                self.assertTrue(set(stale).isdisjoint(final['gaps']))
+                self.assertEqual({row['message'] for row in final['resolved_gap_records'] if row['message'] in stale},
+                                 set(stale))
+                for profile in ('standard', 'detailed'):
+                    page = render(agent.archive.report(ident, 1)['content'], ROOT, report_profile=profile)
+                    self.assertTrue(all(message not in page for message in stale))
+                self.assertEqual(final['ledger']['used']['model_calls'], 0)
+                self.assertEqual(final['ledger']['used']['data_requests'], 0)
+            finally:
+                agent.close_runtime()
 
     def test_host_stale_submission_and_running_state_are_rejected(self):
         with tempfile.TemporaryDirectory(prefix='support-stale-', dir=ROOT/'result/acceptance') as folder:
