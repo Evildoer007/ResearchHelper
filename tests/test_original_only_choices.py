@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from tests import ROOT, test_original_bound_choices as fixtures
+from tests.legacy_replay_fixtures import ETF_NAV, ETF_VALUATION_DATE
 from researchhelper import original_choices as choices
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, calculation_context_contract, fingerprint, validate_calculation_context
@@ -15,7 +16,7 @@ from researchhelper.model import ModelService, ModelSettings
 from researchhelper.output_schema import (StructuredOutputError, original_span_output_schema,
     original_span_prompt, decode_original_spans)
 from researchhelper.planning import input_fingerprint
-from researchhelper.reasoning import extractable_source_views, evidence_contract, model_object, PHASE_FIELDS
+from researchhelper.reasoning import evidence_contract, model_object, PHASE_FIELDS
 from researchhelper.reports import compose
 
 
@@ -32,7 +33,7 @@ class OriginalOnlyChoiceTests(unittest.TestCase):
         nav = copy.deepcopy(self.fixture.wire['selections'][1])
         nav.update(source_ref='source_1',
             number_ref=next(ref for ref, value in self.found['numbers'].items()
-                            if value['raw_token'] == '2.3272'),
+                            if value['raw_token'] == ETF_NAV),
             unit_ref=next(iter(self.found['units'])),
             context_refs={field: next(ref for ref, value in self.found['contexts'].items()
                 if value['field'] == field and (field != 'valuation_date' or value['value'] == '2026-06-30'))
@@ -55,7 +56,7 @@ class OriginalOnlyChoiceTests(unittest.TestCase):
         spec = self.decode()['evidence_specs'][0]
         source = next(item for item in self.task['source_records'] if item['id'] == spec['artifact_id'])
         fact = candidate_evidence(self.task, source, spec)
-        self.assertEqual((fact['value'], fact['unit'], fact['period']), (2.3272, '元', '2026-06-30'))
+        self.assertEqual((fact['value'], fact['unit'], fact['period']), (float(ETF_NAV), '元', ETF_VALUATION_DATE))
         self.assertEqual(fact['calculation_context']['nav_kind'], 'official')
         self.assertEqual(len(self.task['evidence']), len(self.fixture.task['evidence']))
         self.assertFalse(self.task['calculations'])
@@ -142,6 +143,7 @@ class OriginalOnlyChoiceTests(unittest.TestCase):
             self.assertNotIn(choices.ORIGINAL_ONLY_POLICY, agent.create_case('mechanism'))
 
     def test_rejected_transport_retains_usage_and_safe_diagnostic(self):
+        original_views = fingerprint(self.views)
         wire = copy.deepcopy(self.wire)
         wire['selections'][0]['number_ref'] = 'PRIVATE_REF_DO_NOT_ECHO'
         reply = dict(object='response', status='completed', error=None, incomplete_details=None,
@@ -162,23 +164,13 @@ class OriginalOnlyChoiceTests(unittest.TestCase):
         self.assertEqual(self.task['ledger']['used']['model_calls'], before['model_calls'] + 1)
         event = self.task['ledger']['dispatches'][-1]
         self.assertEqual(event['structured_failure_category'], 'invalid_original_choices')
+        self.assertEqual(event['output_schema_hash'], fingerprint(self.schema))
         self.assertNotIn('PRIVATE_REF_DO_NOT_ECHO', json.dumps(event))
-        self.assertEqual(len(self.task['evidence']), len(self.fixture.task['evidence']))
-
-    def test_retained_failure_prompt_keeps_schema_hash_but_removes_ambiguous_refs(self):
-        path = ROOT / 'result/acceptance/one-sentence-research-c33y0hgo/task.json'
-        before = path.read_bytes(); task = json.loads(before)
-        views = extractable_source_views(task)
-        schema = original_span_output_schema(task, views)
-        first = next(row for row in task['ledger']['dispatches'] if row.get('research_phase') == 'extract')
-        self.assertEqual(fingerprint(schema), first['output_schema_hash'])
-        shown = original_span_prompt(dict(untrusted_sources=views,
-            evidence_contract=evidence_contract(task, views)), task)
+        shown = original_span_prompt(payload, self.task)
         self.assertTrue(shown['original_choices']['numbers'])
         self.assertTrue(all('number_ref' not in item for item in shown['original_choices']['numbers']))
-        self.assertEqual(path.read_bytes(), before)
-        # Matching the retained schema hash does not recover the model reply.
-        self.assertFalse(task['evidence'])
+        self.assertEqual(fingerprint(self.views), original_views)
+        self.assertFalse(self.task['evidence'])
 
 
 if __name__ == '__main__':
