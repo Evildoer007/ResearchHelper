@@ -97,11 +97,12 @@ struct NativeStartupParity {
             if !reduced {
                 try wait { (try? script("!!document.querySelector('.login-splash__reference-logo')", in: owner.webView)) as? Bool == true }
                 let geometry = try script("""
-                (()=>{const logo=document.querySelector('.login-splash__reference-logo'),disc=logo.querySelector('.login-splash__reference-disc').getBoundingClientRect(),arc=logo.querySelector('.login-splash__reference-arc');return {pathFills:__startupProbe.pathFills,textFills:__startupProbe.textFills,samples:__startupProbe.samples,diameter:disc.width,arcOpacity:arc.querySelector('path').getAttribute('opacity'),svgTexts:logo.querySelectorAll('text').length}})()
+                (()=>{const logo=document.querySelector('.login-splash__reference-logo'),disc=logo.querySelector('.login-splash__reference-disc').getBoundingClientRect(),axis=logo.querySelector('#researchhelper-axis');return {pathFills:__startupProbe.pathFills,textFills:__startupProbe.textFills,samples:__startupProbe.samples,diameter:disc.width,axisOpacity:axis.querySelector('path').getAttribute('opacity'),inkGroups:logo.querySelectorAll('.login-splash__reference-ink').length,svgTexts:logo.querySelectorAll('text').length}})()
                 """, in: owner.webView) as! [String: Any]
                 try check(theme + " fixed paths sampled in real WebKit", geometry["pathFills"] as? Int == 2 && geometry["textFills"] as? Int == 0)
                 try check(theme + " glyph pixels are nonempty", (geometry["samples"] as? Int ?? 0) > 0)
-                try check(theme + " arc opacity stays on child path", geometry["arcOpacity"] as? String == ".42")
+                try check(theme + " supplied axis opacity stays on child path", geometry["axisOpacity"] as? String == ".28")
+                try check(theme + " four supplied ink groups animate", geometry["inkGroups"] as? Int == 4)
                 try check(theme + " no system-font SVG text", geometry["svgTexts"] as? Int == 0)
                 let expected = min(336.0, Double(width) * 0.49) * 256 / 1053
                 try check(theme + " disc matches OH physical diameter", abs((geometry["diameter"] as? Double ?? 0) - expected) < 0.1)
