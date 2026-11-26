@@ -138,7 +138,8 @@ class CuratedMacroKnowledgeTests(unittest.TestCase):
         package = self.package()
         self.assertEqual(package[CATALOGUE_POLICY], 2)
         self.assertIn(IDENT, package['index']); self.knowledge.validate_package(package, revision=2)
-        self.assertEqual(package['index'][IDENT], 1)
+        self.assertEqual(package['index'][IDENT], 2)
+        self.assertEqual(next(item for item in package['entries'] if item['id']==IDENT), self.entry)
         self.assertNotIn('2026年9月制造业PMI为', self.entry['content'])
 
     def test_old_catalogue_and_unbound_legacy_read_do_not_adopt_new_entry(self):
@@ -150,15 +151,16 @@ class CuratedMacroKnowledgeTests(unittest.TestCase):
     def test_later_entry_revision_does_not_erase_old_catalogue_body(self):
         from researchhelper import knowledge
         newer = copy.deepcopy(self.entry)
-        newer.update(version=2, catalogue_introduced=3, content='合成的后续版本，用于目录隔离检查')
+        next_version=self.entry['version']+1;next_catalogue=CATALOGUE_REVISION+1
+        newer.update(version=next_version, catalogue_introduced=next_catalogue, content='合成的后续版本，用于目录隔离检查')
         entries = [newer if item['id'] == IDENT else item for item in ENTRIES]
-        retained = dict(knowledge.RETAINED_VERSIONS); retained[(IDENT, 2)] = newer
+        retained = dict(knowledge.RETAINED_VERSIONS); retained[(IDENT, next_version)] = newer
         with (patch.object(knowledge, 'ENTRIES', entries), patch.object(knowledge, 'RETAINED_VERSIONS', retained),
-              patch.object(knowledge, 'CATALOGUE_REVISION', 3)):
+              patch.object(knowledge, 'CATALOGUE_REVISION', next_catalogue)):
             old = next(item for item in self.knowledge.catalog(2) if item['id'] == IDENT)
-            current = next(item for item in self.knowledge.catalog(3) if item['id'] == IDENT)
+            current = next(item for item in self.knowledge.catalog(next_catalogue) if item['id'] == IDENT)
             self.assertEqual(old, self.entry); self.assertEqual(current, newer)
-            package = self.package(2); self.assertEqual(package['index'][IDENT], 1)
+            package = self.package(2); self.assertEqual(package['index'][IDENT], self.entry['version'])
             self.knowledge.validate_package(package, revision=2)
 
     def test_old_task_does_not_offer_new_planning_definition(self):
@@ -169,7 +171,7 @@ class CuratedMacroKnowledgeTests(unittest.TestCase):
         self.assertIn(IDENT, {row['id'] for row in current['candidates']})
 
     def test_unknown_catalogue_revision_is_not_treated_as_latest(self):
-        for value in (True, False, None, 0, 3, '2', 2.0):
+        for value in (True, False, None, 0, CATALOGUE_REVISION+1, '2', 2.0):
             with self.assertRaises(ContractError): catalogue_revision(value)
             with self.assertRaises(ContractError): self.package(value)
 
@@ -198,7 +200,7 @@ class CuratedMacroKnowledgeTests(unittest.TestCase):
             task = agent.create('解释制造业PMI的计量含义', entry='宏观', research_mode='current')
             self.assertEqual(task[CATALOGUE_POLICY], CATALOGUE_REVISION)
             agent._adopt_method_knowledge(task)
-            self.assertEqual(task['knowledge'][CATALOGUE_POLICY], 2)
+            self.assertEqual(task['knowledge'][CATALOGUE_POLICY], CATALOGUE_REVISION)
             self.assertIn(IDENT, task['knowledge']['index'])
             self.assertFalse(task['evidence']); self.assertIsNone(agent.model)
             self.assertEqual(task['ledger']['used']['model_calls'], 0)
@@ -229,7 +231,7 @@ class CuratedMacroKnowledgeTests(unittest.TestCase):
             agent._adopt_method_knowledge(task)
             contract = self.knowledge.definition_contract(task, task['questions'][0])
             self.assertTrue(contract['generation_ready']); self.assertFalse(contract['fact_approval'])
-            self.assertEqual(contract['knowledge_refs'], [dict(id=IDENT, version=1)])
+            self.assertEqual(contract['knowledge_refs'], [dict(id=IDENT, version=self.entry['version'])])
             self.assertFalse(task['evidence']); self.assertFalse(task['calculations'])
             old = copy.deepcopy(task); old.pop(CATALOGUE_POLICY)
             with self.assertRaises(ContractError): self.knowledge.definition_contract(old, old['questions'][0])
@@ -290,16 +292,36 @@ class CuratedMacroKnowledgeTests(unittest.TestCase):
 
     def test_report_and_archive_preserve_catalogue_and_processing_policy(self):
         from researchhelper.reports import compose
-        task = self.state_task(); task[CATALOGUE_POLICY] = 2; task['knowledge'] = self.package()
-        task['input_hash'] = input_fingerprint(task)
+        task = self.state_task(); before=canonical(task)
+        self.assertEqual(task[CATALOGUE_POLICY], CATALOGUE_REVISION)
         content = compose(task)
-        self.assertEqual(content[CATALOGUE_POLICY], 2); self.assertEqual(content[STATE_POLICY], 1)
+        self.assertEqual(canonical(task), before)
+        self.assertEqual(content[CATALOGUE_POLICY], CATALOGUE_REVISION); self.assertEqual(content[STATE_POLICY], 1)
         self.assertIn(IDENT, content['knowledge']['index'])
         with tempfile.TemporaryDirectory(prefix='curated-archive-') as folder:
             archive = ResearchArchive(folder); private = copy.deepcopy(task); private['revision'] = 0
             archive.save(private); restored = archive.get(private['id'])
             self.assertEqual(restored['knowledge'], task['knowledge'])
             self.assertEqual(processing_state(restored), processing_state(task))
+
+    def test_changing_catalogue_after_verification_does_not_rebind_old_receipts(self):
+        from researchhelper.reports import compose
+        task=self.state_task();before=canonical(self.fixture['fresh'])
+        task[CATALOGUE_POLICY]=2;task['knowledge']=self.package(2)
+        task['input_hash']=input_fingerprint(task)
+        with self.assertRaisesRegex(ContractError,'两类核验记录'):
+            compose(task)
+        self.assertEqual(canonical(self.fixture['fresh']),before)
+
+    def test_retained_pmi_revision_one_remains_valid_in_an_old_locked_package(self):
+        from researchhelper.knowledge import RETAINED_VERSIONS
+        package=self.package(2)
+        original=copy.deepcopy(RETAINED_VERSIONS[(IDENT,1)])
+        package['entries']=[original if item['id']==IDENT else item for item in package['entries']]
+        package['index'][IDENT]=1;before=canonical(package)
+        self.knowledge.validate_package(package,revision=2)
+        self.assertEqual(canonical(package),before)
+        self.assertNotEqual(fingerprint(original),fingerprint(self.entry))
 
 
 if __name__ == '__main__': unittest.main()
