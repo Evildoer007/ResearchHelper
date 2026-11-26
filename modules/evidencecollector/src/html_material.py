@@ -6,7 +6,7 @@ import re
 from .contracts import ContractError
 
 EXTRACT_VERSION = "html-2"
-EXTRACT_VERSIONS = ("html-1", "html-2")
+EXTRACT_VERSIONS = ("html-1", "html-2", "html-pbc-1", "html-miit-1")
 LIMITATION = "仅提取静态HTML文字，不执行脚本或读取外部资源；动态内容及显示状态未核验。"
 MAX_NODES = 100_000
 MAX_DEPTH = 256
@@ -118,13 +118,63 @@ class StaticHTMLReader(HTMLParser):
             self.buffer.append(normalized)
 
 
+class OfficialArticleReader(HTMLParser):
+    """Read an official page's head and the registered article body."""
+    def __init__(self, body_id, publisher):
+        super().__init__(convert_charrefs=False)
+        self.body_id, self.publisher = body_id, publisher
+        self.head_depth = 0
+        self.body_depth = 0
+        self.roots = 0
+        self.fragments = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'head': self.head_depth += 1
+        if self.body_depth:
+            if tag not in StaticHTMLReader.VOID: self.body_depth += 1
+        elif dict(attrs).get('id') == self.body_id:
+            self.body_depth = 1
+            self.roots += 1
+        if self.head_depth or self.body_depth: self.fragments.append(self.get_starttag_text())
+
+    def handle_startendtag(self, tag, attrs):
+        if self.head_depth or self.body_depth: self.fragments.append(self.get_starttag_text())
+
+    def handle_endtag(self, tag):
+        if self.head_depth or self.body_depth: self.fragments.append('</'+tag+'>')
+        if self.body_depth and tag not in StaticHTMLReader.VOID: self.body_depth -= 1
+        if tag == 'head' and self.head_depth: self.head_depth -= 1
+
+    def handle_data(self, value):
+        if self.head_depth or self.body_depth: self.fragments.append(value)
+
+    def handle_entityref(self, value):
+        self.handle_data('&'+value+';')
+
+    def handle_charref(self, value):
+        self.handle_data('&#'+value+';')
+
+    def article(self):
+        if self.roots != 1 or self.body_depth:
+            raise ContractError(self.publisher + '原文正文区域未识别或不唯一，保留原件，不采用导航文字')
+        return ''.join(self.fragments)
+
+
 def extract_html(payload, *, extract_version=None):
     version = EXTRACT_VERSION if extract_version is None else extract_version
     if version not in EXTRACT_VERSIONS:
         raise ContractError('HTML提取版本未登记，不改写留存正文')
     text = payload.decode("utf-8-sig")  # No guessed encoding or replacement bytes.
-    reader = StaticHTMLReader(include_metadata=version == 'html-2')
+    scopes = {'html-pbc-1': ('zoom', '央行'), 'html-miit-1': ('con_con', '工信部')}
+    if version in scopes:
+        scoped = OfficialArticleReader(*scopes[version])
+        scoped.feed(text)
+        scoped.close()
+        text = scoped.article()
+    reader = StaticHTMLReader(include_metadata=version != 'html-1')
     reader.feed(text)
     reader.close()
     reader.flush("表" if reader.table else None)
+    if version in scopes and not any(row['text'].strip() and not row['locator'].startswith('标题') for row in reader.parts):
+        raise ContractError(scopes[version][1] + '原文没有可读取的正文，保留原件，不把标题当正文')
     return reader.metadata_parts + reader.parts
