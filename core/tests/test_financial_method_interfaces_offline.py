@@ -1,4 +1,8 @@
-"""Authenticated App and isolated installed Skill must deliver equal financial semantics."""
+"""Authenticated App and isolated Skill preserve identical financial calculations.
+
+Reviewer verdicts are fabricated; this verifies bindings, calculation and
+adoption, not independent financial-semantic quality. No provider is used.
+"""
 import base64
 import hashlib
 import json
@@ -43,6 +47,13 @@ class FinancialMethodInterfacesTests(unittest.TestCase):
         guard = patch("socket.socket.connect", loopback_only)
         guard.start()
         self.addCleanup(guard.stop)
+        self.installation = self.root / "installed-skill"
+        build_skill_fixture(self.installation)
+        for name in ("app/web/report.css", "assets/vendor/echarts.min.js"):
+            target = self.installation / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source_file(name), target)
+
         self.server = make_server(self.root / "app-store", ROOT, authentication=True, runtime_configurable=True)
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": .01})
         self.thread.start()
@@ -57,13 +68,6 @@ class FinancialMethodInterfacesTests(unittest.TestCase):
         identity, headers = self.request("/api/auth/login", {"account": "admin", "password": "interface-admin-test"})
         self.assertEqual(identity["role"], "admin")
         self.cookie = headers["Set-Cookie"].split(";", 1)[0]
-        self.installation = self.root / "installed-skill"
-        build_skill_fixture(self.installation)
-
-        for name in ("app/web/report.css", "assets/vendor/echarts.min.js"):
-            target = self.installation / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(ROOT / name, target)
 
     def stop(self):
         for worker in self.server.agent.workers.values():
@@ -85,6 +89,8 @@ class FinancialMethodInterfacesTests(unittest.TestCase):
             return json.load(response), response.headers
 
     def run_method(self, method):
+        from tests.test_autonomous_supplement_interfaces_offline import mock_host_review
+        mock_host_review(self, self.server.agent)
         outer = self
         class AppSources:
             def create(self, question, **options):
@@ -130,11 +136,23 @@ for index,item in enumerate(host['evidence_specs']):
     for anchor in anchors:
         if anchor['kind']!='unverified':
             anchor.update(artifact_id=record['id'],snapshot_hash=record['snapshot_hash'])
-final=session.run(task['id'],**host)
+checkpoint=session.run(task['id'],**host,defer_delivery=True)
+request=session.argument_review_inputs(task['id'])['request']
+related=sorted({qid for target in request['targets'] for qid in target['question_ids']})
+wire=dict(version=request['version'],review_hash=request['review_hash'],questions=[
+    dict(question_id=qid,status='answered',reason='合成协议检查，不是金融质量批准',missing_evidence=[]) for qid in related],
+    reviews=[dict(target_id=target['id'],segments=[dict(text=target['text'],verdict='supported',
+        basis_refs=['evidence:'+target['evidence_refs'][0]] if target['evidence_refs'] else ['scope:task'],
+        explanation='合成标签，只验证完整覆盖、引用绑定和采用')]) for target in request['targets']])
+session.review_arguments(task['id'],wire)
+final=session.deliver(task['id'])
 target=session.export(task['id'])
-assert target.is_file() and target.with_suffix('.json').is_file()
+assert target.is_file()
+frozen=session.archive.report(task['id'],final['version'])
+assert frozen['html_integrity_verified']
 assert session.archive.root==Path(data['project']).resolve()/'data/researchhelper'
-print(json.dumps({'task':final,'content':json.loads(target.with_suffix('.json').read_text())},ensure_ascii=False))
+print(json.dumps({'task':final,'content':frozen['content']},ensure_ascii=False))
+session.agent.close_runtime()
 '''
         packet = {"installation": str(self.installation), "project": str(self.root / "independent-project"), "task": task, "host": host}
         result = subprocess.run([sys.executable, "-I", "-B", "-c", program], input=json.dumps(packet), text=True,
