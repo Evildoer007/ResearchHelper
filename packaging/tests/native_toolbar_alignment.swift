@@ -30,15 +30,15 @@ struct NativeToolbarAcceptance {
         app.finishLaunching()
         let owner = ResearchHelperApp()
         owner.runtimeURL = url
-        owner.window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1320, height: 860),
-                                styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
-        owner.window.isReleasedWhenClosed = false
-        owner.window.delegate = owner
-        owner.window.titleVisibility = .hidden
-        owner.window.titlebarAppearsTransparent = true
         owner.webView = owner.createWebView(persistent: false)
-        owner.window.contentView = owner.webView
+        owner.window = owner.makeMainWindow(containing: owner.webView)
         owner.installNativeControls()
+        guard let content = owner.window.contentView,
+              let backdrop = content.subviews.first as? NSVisualEffectView else {
+            throw NSError(domain: "Missing sidebar material layer", code: 1)
+        }
+        try check("OH sidebar material and WebKit are separate layers", content.subviews == [backdrop, owner.webView] &&
+                  backdrop.material == .sidebar && backdrop.blendingMode == .behindWindow && backdrop.state == .active)
         try check("native workspace controls hidden before readiness", owner.nativeControls.count == 3 && owner.nativeControls.allSatisfy { $0.isHidden && !$0.isEnabled })
         try check("only nonpersistent test browser storage", !owner.webView.configuration.websiteDataStore.isPersistent)
         try check("WebKit zoom uses native pageZoom without pinch magnification", owner.webView.pageZoom == 1 && !owner.webView.allowsMagnification)
@@ -47,7 +47,16 @@ struct NativeToolbarAcceptance {
         try check("settings command disabled before readiness", !owner.validateMenuItem(settings))
         owner.webView.load(URLRequest(url: url))
         try wait { owner.workspaceControlsReady }
-        try check("real WKScriptMessage reveals controls only after ready", owner.nativeControls.allSatisfy { !$0.isHidden && $0.isEnabled })
+        try check("Chat reveals only sidebar and search after the workspace is ready",
+                  owner.nativeControls.prefix(2).allSatisfy { !$0.isHidden && $0.isEnabled } &&
+                  owner.nativeControls[2].isHidden && !owner.nativeControls[2].isEnabled)
+        let delivery = NSMenuItem(title: "任务与交付", action: #selector(ResearchHelperApp.openArtifacts), keyEquivalent: "")
+        try check("Chat does not expose the delivery menu action", !owner.validateMenuItem(delivery))
+        _ = try script("window.webkit.messageHandlers.researchhelper.postMessage({action:'delivery-state',available:true});true", in: owner.webView)
+        try wait { !owner.nativeControls[2].isHidden }
+        try check("the active Desk can open delivery", owner.nativeControls[2].isEnabled && owner.validateMenuItem(delivery))
+        _ = try script("window.webkit.messageHandlers.researchhelper.postMessage({action:'delivery-state',available:false});true", in: owner.webView)
+        try wait { owner.nativeControls[2].isHidden }
         try check("native settings command enabled in workspace", owner.validateMenuItem(settings))
         let originals = owner.nativeControls
         for _ in 0..<6 { owner.installNativeControls() }
@@ -88,6 +97,9 @@ struct NativeToolbarAcceptance {
         owner.window.setContentSize(NSSize(width:1024,height:768))
         owner.windowDidResize(Notification(name:NSWindow.didResizeNotification, object:owner.window))
         try check("resized titlebar retains OH right inset", abs(owner.nativeControls[2].frame.maxX - (bar.bounds.maxX - 14)) < 0.01)
+        content.layoutSubtreeIfNeeded()
+        try check("material and WebKit continue to fill the same content bounds", backdrop.frame == content.bounds &&
+                  owner.webView.frame == content.bounds)
         // Navigation away resets readiness immediately, not only after load.
         owner.webView.load(URLRequest(url:url.appendingPathComponent("login/index.html")))
         try wait { !owner.workspaceControlsReady && !owner.webView.isLoading }
