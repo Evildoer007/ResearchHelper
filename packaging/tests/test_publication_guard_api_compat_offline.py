@@ -5,18 +5,17 @@ no approval receipt; publication rejection is exercised through the real gate.
 Legacy TestCase classes remain inside imported modules, outside discovery.
 """
 import copy
-import io
 import json
 import unittest
 from unittest.mock import patch
 
 from researchhelper.contracts import ContractError, fingerprint
 from researchhelper.evidence import (FIELD_REGISTRY, _source_extract, candidate_evidence,
-    evidence_binding, snapshot_record, validate_calculation_context_basis, validate_provenance)
+    evidence_binding, snapshot_record, validate_calculation_context_basis, validate_provenance,
+    verification_receipt, expand_direct_code_reference)
 from researchhelper.reports import compose
 from tests import test_evidence_chain_offline as chain
 from tests import test_market_background_sources_offline as market
-from tests import test_calculation_context_sources_offline as context_fixture
 
 
 class PublicationGuardAPICompatibilityTests(unittest.TestCase):
@@ -30,7 +29,7 @@ class PublicationGuardAPICompatibilityTests(unittest.TestCase):
 
     def extraction_only(self, task, artifact, specification):
         """Exercise registered extraction, with neither source nor review approval."""
-        item = copy.deepcopy(specification)
+        item = copy.deepcopy(expand_direct_code_reference(task, artifact, specification))
         item.pop('review', None)
         definition = FIELD_REGISTRY[artifact['source'] + '.' + artifact['operation']]
         field = specification['record_locator']['field']
@@ -49,29 +48,36 @@ class PublicationGuardAPICompatibilityTests(unittest.TestCase):
         self.assertEqual(item['applicability_check'], '待核验')
         return item
 
-    def reject_publication(self, task, artifact, spec, pattern='首次公开时间缺少原始来源定位'):
+    def reject_publication(self, task, artifact, spec, pattern='证据published_at缺失'):
+        # Current acquisition can answer current questions without a first-release
+        # date. This negative proposal explicitly omits that limited availability.
+        unsupported = copy.deepcopy(spec)
+        unsupported.pop('availability', None)
         before = fingerprint(task)
-        with patch('researchhelper.evidence.verification_receipt') as receipt:
+        with patch('researchhelper.evidence.verification_receipt', wraps=verification_receipt) as receipt:
             with self.assertRaisesRegex(ContractError, pattern):
-                candidate_evidence(task, artifact, spec)
-            receipt.assert_not_called()
+                candidate_evidence(task, artifact, unsupported)
+            self.assertFalse(any(call.args[0]['id'] == spec['id'] for call in receipt.call_args_list))
         self.assertEqual(fingerprint(task), before)
 
     def retained_rejection(self, spec, artifact):
-        done = self.fixture.run_spec(spec)
+        unsupported = copy.deepcopy(spec)
+        unsupported.pop('availability', None)
+        used = copy.deepcopy(self.fixture.task['ledger']['used'])
+        done = self.fixture.run_spec(unsupported)
         self.assertEqual(done['status'], '部分完成', done.get('error'))
         self.assertEqual(done['evidence'], [])
         self.assertEqual(done['calculations'], [])
         self.assertEqual(done['source_records'][-1], artifact)
-        self.assertIn('首次公开时间缺少原始来源定位', done['rejected_evidence'][0]['rejection'])
-        self.assertEqual(done['ledger']['used']['data_requests'], 0)
-        self.assertEqual(done['ledger']['used']['model_calls'], 0)
+        self.assertIn('证据published_at缺失', done['rejected_evidence'][0]['rejection'])
+        for kind in ('data_requests', 'model_calls'):
+            self.assertEqual(done['ledger']['used'][kind], used[kind])
         self.assertFalse(done['synthetic'])
         return done
 
     def test_tinyshare_raw_cell_retained_without_publication_receipts(self):
-        artifact = self.fixture.snapshot()
-        spec = self.fixture.spec(artifact)
+        artifact = self.fixture.acquired()
+        spec = self.fixture.current_spec(artifact)
         task = self.fixture.agent.archive.get(self.fixture.task['id'])
         item = self.extraction_only(task, artifact, spec)
         self.assertEqual(item['raw_value'], 10)
@@ -83,22 +89,21 @@ class PublicationGuardAPICompatibilityTests(unittest.TestCase):
         self.retained_rejection(spec, artifact)
 
     def test_ifind_raw_table_currency_identity_retained_without_approval(self):
-        raw = {'errorcode': 0, 'tables': [{'thscode': '600000.SH', 'time': ['2026-07-19'], 'table': {'close': [10]}}]}
-        artifact = self.fixture.snapshot('ifind', raw)
-        spec = self.fixture.spec(artifact, record_locator={'table': 0, 'row': 0, 'field': 'close'})
+        artifact = self.fixture.acquired('ifind')
+        spec = self.fixture.current_spec(artifact)
         task = self.fixture.agent.archive.get(self.fixture.task['id'])
         item = self.extraction_only(task, artifact, spec)
-        self.assertEqual(item['artifact']['snapshot'], raw)
+        self.assertEqual(item['artifact']['snapshot'], chain.QUOTE_RESPONSE)
         self.assertEqual(item['artifact']['parameters'], chain.IFIND_PARAMS)
         self.assertEqual(item['field_definition']['registry'], 'ifind.cmd_history_quotation')
         self.assertEqual((item['raw_value'], item['value'], item['raw_unit'], item['unit']), (10, 10, '元', '元'))
-        self.assertEqual(item['identity']['provider_code'], raw['tables'][0]['thscode'])
+        self.assertEqual(item['identity']['provider_code'], chain.QUOTE_RESPONSE['tables'][0]['thscode'])
         self.reject_publication(task, artifact, spec)
         self.retained_rejection(spec, artifact)
 
     def test_thousand_yuan_conversion_is_extraction_only(self):
-        artifact = self.fixture.snapshot()
-        spec = self.fixture.spec(artifact, record_locator={'row': 0, 'field': 'amount'},
+        artifact = self.fixture.acquired()
+        spec = self.fixture.current_spec(artifact, record_locator={'row': 0, 'field': 'amount'},
             raw_value=2, raw_unit='千元', value=2000, conversion_factor=1000)
         task = self.fixture.agent.archive.get(self.fixture.task['id'])
         item = self.extraction_only(task, artifact, spec)
@@ -112,66 +117,65 @@ class PublicationGuardAPICompatibilityTests(unittest.TestCase):
 
     def test_ifind_mock_dispatch_once_retains_checkpoint_without_fallback(self):
         fixture = self.fixture
-        raw = {'errorcode': 0, 'tables': [{'thscode': '600000.SH', 'time': ['2026-07-19'], 'table': {'close': [10]}}]}
+        fixture.create_current()
         fixture.agent.offline = fixture.agent.collector.offline = False
         fixture.agent.source_credentials = {'ifind': {'access_token': 'independent-fake-token'}}
-        need = {'id': 'daily_close', 'operation': 'cmd_history_quotation', 'parameters': chain.IFIND_PARAMS, 'question_ids': ['q1']}
-        spec = fixture.spec({'id': 'pending'}, record_locator={'table': 0, 'row': 0, 'field': 'close'})
-        spec.pop('artifact_id')
-        spec['request_id'] = 'daily_close'
-        with patch('urllib.request.urlopen', return_value=io.BytesIO(json.dumps(raw).encode())) as transport, \
+        need = dict(id='daily_close', source='ifind', operation='cmd_history_quotation',
+            parameters=chain.IFIND_PARAMS, question_ids=['q1'], selection_reason='核验合成收盘原值')
+        def receive(task, request, timeout, event):
+            self.assertEqual(request.get_header('Access_token'), 'independent-fake-token')
+            self.assertEqual(json.loads(request.data), chain.IFIND_PARAMS)
+            persisted = fixture.agent.archive.get(task['id'])
+            self.assertEqual(persisted['ledger']['used']['data_requests'], 1)
+            self.assertEqual(persisted['ledger']['dispatches'][-1]['status'], '已派发')
+            chain.isolated_response(event)
+            return copy.deepcopy(chain.QUOTE_RESPONSE)
+        # This is a collector-boundary fixture, not proof of real wire transport.
+        with patch.object(fixture.agent.collector, '_http_json', side_effect=receive) as transport, \
                 patch.object(fixture.agent.collector, '_require_tinyshare', side_effect=AssertionError('Silent fallback forbidden')) as fallback:
-            done = fixture.agent.start(fixture.task['id'], {'data_requests': [need], 'evidence_specs': [spec],
-                'answers': {'q1': {'answer': '10元', 'refs': [spec['id']]}}})
-        self.assertEqual(transport.call_count, 1)
+            fixture.task = fixture.agent.start(fixture.task['id'], {'data_requests': [need]}, defer_delivery=True)
+            record = fixture.task['source_records'][0]
+            spec = fixture.current_spec(record)
+            done = self.retained_rejection(spec, record)
+        transport.assert_called_once()
         fallback.assert_not_called()
-        request = transport.call_args.args[0]
-        self.assertEqual(json.loads(request.data), chain.IFIND_PARAMS)
-        self.assertEqual(done['status'], '部分完成', done.get('error'))
-        self.assertEqual(done['evidence'], [])
-        self.assertEqual(done['calculations'], [])
         self.assertEqual(done['ledger']['used']['data_requests'], 1)
         self.assertEqual(done['ledger']['used']['model_calls'], 0)
         self.assertEqual(len(done['ledger']['dispatches']), 1)
         self.assertEqual(len(done['source_records']), 1)
-        record = done['source_records'][0]
         self.assertEqual(record['source'], 'ifind')
-        self.assertEqual(record['snapshot'], raw)
+        self.assertEqual(record['snapshot'], chain.QUOTE_RESPONSE)
         self.assertEqual(record['parameters'], chain.IFIND_PARAMS)
         self.assertEqual(record['data_need_ids'], ['daily_close'])
-        self.assertEqual(record['hash'], fingerprint(raw))
-        extracted = self.extraction_only(done, record, dict(spec, artifact_id=record['id']))
+        self.assertEqual(record['hash'], fingerprint(chain.QUOTE_RESPONSE))
+        extracted = self.extraction_only(done, record, spec)
         self.assertEqual((extracted['raw_value'], extracted['value']), (10, 10))
         self.assertEqual(fixture.agent.archive.get(done['id']), done)
         self.assertEqual(fixture.agent.archive.report(done['id'], 1)['content']['source_records'], done['source_records'])
         self.assertNotIn('independent-fake-token', json.dumps(done))
-        self.assertIn('首次公开时间缺少原始来源定位', done['rejected_evidence'][0]['rejection'])
 
     def test_api_context_exact_cell_request_and_binding_without_approval(self):
-        fixture = context_fixture.CalculationContextSourcesTests()
+        from tests.test_identity_period_provenance import IdentityPeriodFixture, CODE, SESSION
+        from researchhelper.evidence import direct_code_reference
+        fixture = IdentityPeriodFixture()
+        self.addCleanup(fixture.doCleanups)
         fixture.setUp()
-        params = {'codes': '600000.SH', 'indicators': 'close', 'startdate': '2026-09-29', 'enddate': '2026-09-30',
-                  'functionpara': {'Currency': 'RMB', 'CPS': '1', 'Fill': 'Omit'}}
-        record = snapshot_record(fixture.task, 'ifind', 'cmd_history_quotation', params,
-            {'errorcode': 0, 'tables': [{'thscode': '600000.SH', 'time': ['2026-09-30'], 'table': {'close': [10]}}]})
-        fixture.task['source_records'].append(record)
-        context = {'security_id': '示例公司', 'currency': 'CNY', 'price_basis': 'unadjusted', 'price_kind': 'close',
-                   'observation_date': '2026-09-30', 'window_start': '2026-09-29', 'window_end': '2026-09-30'}
-        spec = {'id': 'price', 'object': '示例公司', 'record_locator': {'table': 0, 'row': 0, 'field': 'close'},
-            'identity': {'provider_code': '600000.SH', 'object': '示例公司', 'basis': '合成测试身份记录',
-                         'valid_from': '2026-01-01', 'valid_to': '2026-12-31'},
-            'published_at': '2026-09-30', 'period': '2026-09-30', 'nature': '已实现事实',
-            'raw_value': 10, 'value': 10, 'raw_unit': '元', 'unit': '元', 'conversion_factor': 1,
-            'calculation_context': context, 'calculation_context_basis': {key: {'kind': 'api',
-                'artifact_id': record['id'], 'snapshot_hash': record['hash'], 'field': key} for key in context}}
+        record = fixture.artifact
+        spec = copy.deepcopy(fixture.spec)
+        spec.pop('identity')
+        spec['direct_code_reference'] = direct_code_reference(fixture.task, record)
+        context = dict(security_id=CODE, currency='CNY', price_basis='unadjusted', price_kind='close',
+            observation_date=SESSION, window_start=SESSION, window_end=SESSION)
+        spec.update(calculation_context=context, calculation_context_basis={key:dict(kind='api',
+            artifact_id=record['id'], snapshot_hash=record['hash'], field=key) for key in context})
         item = self.extraction_only(fixture.task, record, spec)
-        fixture.check(item)
+        validate_calculation_context_basis(item, fixture.task['source_records'])
         before = evidence_binding(item)
         changed = copy.deepcopy(item)
         changed['calculation_context']['window_end'] = '2026-10-01'
         self.assertNotEqual(evidence_binding(changed), before)
         with self.assertRaises(ContractError):
-            fixture.check(changed)
+            validate_calculation_context_basis(changed, fixture.task['source_records'])
         with self.assertRaises(ContractError):
             validate_provenance(changed, fixture.task)
         bad = copy.deepcopy(item)
@@ -179,8 +183,8 @@ class PublicationGuardAPICompatibilityTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             validate_calculation_context_basis(bad, fixture.task['source_records'])
         self.reject_publication(fixture.task, record, spec)
-        self.assertEqual(record['parameters'], params)
-        self.assertEqual(record['snapshot']['tables'][0]['table']['close'], [10])
+        self.assertEqual(record['parameters']['codes'], CODE)
+        self.assertEqual(record['snapshot']['tables'][0]['table']['close'], [4.5])
 
     def test_legal_filing_evidence_tampered_conditions_fail_report_recheck(self):
         record, spec = self.fixture.filing()
@@ -234,10 +238,10 @@ class PublicationGuardAPICompatibilityTests(unittest.TestCase):
                 spec = fixture.spec(artifact, 'pe', 0)
                 with self.assertRaises(ContractError):
                     self.extraction_only(fixture.task, artifact, spec)
-                with patch('researchhelper.evidence.verification_receipt') as receipt:
+                with patch('researchhelper.evidence.verification_receipt', wraps=verification_receipt) as receipt:
                     with self.assertRaises(ContractError):
                         candidate_evidence(fixture.task, artifact, spec)
-                    receipt.assert_not_called()
+                    self.assertFalse(any(call.args[0]['id'] == spec['id'] for call in receipt.call_args_list))
                 self.assertEqual(artifact, original)
                 self.assertNotEqual(artifact['snapshot']['data'][0]['pe'], 0)
         artifact = fixture.snapshot('pb', -1.5)
@@ -263,10 +267,10 @@ REPLACED_EXPECTATIONS = {
 ADAPTATION_NOTES = {
     original: {'replacement': replacement, 'old_test_modified': False,
         'coverage': {
-            'test_tinyshare_raw_cell_retained_without_publication_receipts': 'Exact raw cell, identity, request, units, zero usage and retained source; missing publication rejected without issuing either approval receipt.',
-            'test_ifind_raw_table_currency_identity_retained_without_approval': 'iFinD table/row/field, RMB/unadjusted/Omit request, registered units and identity retained; ordinary research remains incomplete.',
+            'test_tinyshare_raw_cell_retained_without_publication_receipts': 'Exact raw cell, registered current-code identity, request and units remain unapproved during extraction. Removing current availability rejects unknown publication; no extra use is charged. Current acceptance is separately preserved by the base tests.',
+            'test_ifind_raw_table_currency_identity_retained_without_approval': 'iFinD raw table, request, units and current-code identity remain exact. Only the negative copy without current availability is rejected; unknown first-publication time is not a universal current-research block.',
             'test_thousand_yuan_conversion_is_extraction_only': '2 thousand yuan remains raw 2 and extracted 2000 yuan; incorrect value/unit/factor rejected; extraction does not grant research approval.',
-            'test_ifind_mock_dispatch_once_retains_checkpoint_without_fallback': 'One real mocked transport dispatch, one ledger use, exact request/source checkpoint/hash/data_need_id, no tinyshare fallback or credential leak; no publication approval.',
+            'test_ifind_mock_dispatch_once_retains_checkpoint_without_fallback': 'One fabricated collector-boundary response and one ledger use preserve exact request, checkpoint, hash and need id. No Tinyshare fallback or credential leak. This is not a wire-transport or supplier-permission assertion.',
             'test_api_context_exact_cell_request_and_binding_without_approval': 'Exact API context derivation, fingerprint, changed-window and wrong-field rejection retained separately from publication refusal.',
             'test_legal_filing_evidence_tampered_conditions_fail_report_recheck': 'Same-original filing directory gives lawful publication anchor; both receipts exist before review-condition tampering; compose rejects and archive remains unchanged.',
             'test_all_market_field_units_survive_with_candidate_cross_original_rejection': 'All 15 registered fields retain raw/converted units, values, identity, request and period; borrowed publication rejected at candidate stage with zero approval receipts.',
