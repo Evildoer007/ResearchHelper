@@ -6,8 +6,10 @@ import unittest
 from decimal import Decimal
 from lxml import html as html_parser
 from tests import ROOT
+from researchhelper.contracts import fingerprint
 from researchhelper.drafts import draft_figures,render
-from researchhelper.draft_visuals import comparison_figures,comparison_table
+from researchhelper.draft_visuals import ARGUMENT_VISUAL_SCOPE_VERSION,comparison_figures,comparison_table,logic_figure_plan
+from researchhelper.report_designer import design
 
 SOURCE=ROOT/'result/acceptance/one-sentence-research-vgjkyxq9/report.json'
 HK=ROOT/'result/acceptance/one-sentence-research-_kw2k9ap/report.json'
@@ -26,10 +28,13 @@ class DraftVisualComparisonTests(unittest.TestCase):
     def figures(self,content):
         return comparison_figures(content,draft_figures(content['draft']['facts']))
 
-    def test_three_comparisons_replace_five_repeated_amount_charts(self):
+    def test_comparisons_keep_three_metrics_and_margin_attribution(self):
         figures=self.figures(self.content)
-        self.assertEqual([row['kind'] for row in figures],['changes','paired','paired'])
-        self.assertEqual(len(figures),3)
+        self.assertEqual([row['kind'] for row in figures], ['changes', 'paired', 'margin_bridge', 'paired'])
+        bridge = figures[2]
+        data = bridge['data']
+        self.assertEqual(bridge['scheme'], 'waterfall')
+        self.assertAlmostEqual(data['start'] + sum(step['value'] for step in data['steps']), data['end'])
 
     def test_growth_is_the_five_actual_registered_changes_without_rounding_source_values(self):
         figure=self.figures(self.content)[0]
@@ -46,7 +51,7 @@ class DraftVisualComparisonTests(unittest.TestCase):
         self.assertEqual(figure['unit'],'%')
 
     def test_cash_coverage_is_a_multiple_not_a_cash_collection_claim(self):
-        figure=self.figures(self.content)[2]
+        figure, = [row for row in self.figures(self.content) if row.get('unit') == '倍']
         self.assertEqual([round(v,2) for v in figure['pairs'][0]],[1.98,3.03])
         self.assertEqual(figure['unit'],'倍')
         self.assertNotIn('回款改善',figure['name'])
@@ -149,6 +154,30 @@ class DraftVisualComparisonTests(unittest.TestCase):
         self.assertTrue(all(tree.xpath('//a[@href="#'+target+'"]') for target in targets))
         self.assertIn('<math xmlns=',html)
         self.assertTrue(all(tree.get_element_by_id(target).get('data-inspection-title') for target in targets))
+
+    def test_cash_and_profit_keep_four_observations_without_a_redundant_plot(self):
+        content = copy.deepcopy(self.content)
+        content['draft']['argument_visual_scope_version'] = ARGUMENT_VISUAL_SCOPE_VERSION
+        facts = {row['id']: row for row in content['draft']['facts']}
+        changes = [row for row in content['draft']['calculations'] if row['method'] == 'raw_change_v1'
+                   and facts[row['data_refs'][0]]['field'] in ('ths_ncf_from_oa_stock', 'ths_np_atoopc_stock')]
+        self.assertEqual(len(changes), 2)
+        refs = [ref for row in changes for ref in row['data_refs']]
+        content['draft']['logics'] = [dict(title='经营质量分化', analysis='两项经营读数变动的幅度不同。',
+                                          implication='', risk='', source_refs=[], knowledge_refs=[],
+                                          data_refs=refs, calculation_refs=[row['id'] for row in changes])]
+        content.pop('content_hash')
+        content['content_hash'] = fingerprint(content)
+        for profile in ('standard', 'detailed'):
+            with self.subTest(profile=profile):
+                self.assertEqual(logic_figure_plan(content, report_profile=profile), [])
+                paper = design(content, ROOT, profile=profile)
+                coverage = paper['document']['figure_coverage']['logic-1']
+                self.assertEqual(set(coverage['data_refs']), set(refs))
+                self.assertEqual(coverage['status'], 'numeric_text' if profile == 'standard' else 'numeric_table')
+                section = html_parser.document_fromstring(paper['html']).get_element_by_id('logic-1')
+                for calculation in changes:
+                    self.assertIn(calculation['display'] + '%', section.text_content())
 
 
 if __name__=='__main__':unittest.main()
