@@ -52,6 +52,108 @@ class DraftKnowledgeTests(unittest.TestCase):
         self.assertEqual(options['phase'],'draft_report');self.assertTrue(options['delivery'])
         self.assertEqual(canonical(self.task),before)
 
+    def test_app_and_skill_share_the_versioned_method_guidance(self):
+        from researchhelper.research_methods import catalogue, method_selection
+
+        with TemporaryDirectory() as folder:
+            session = Session(folder)
+            self.addCleanup(session.agent.close_runtime)
+            task = session.create('对照600519.SH营收、利润和经营现金流', entry='个股', cutoff='2026-11-21')
+            methods = session.research_methods(task['id'])
+            self.assertEqual(methods, method_selection(task))
+            self.assertEqual([item['id'] for item in methods['methods']], ['stock.financial'])
+            packet = self.knowledge.draft_context(task)
+            self.assertEqual([item['id'] for item in packet['research_methods']], ['stock.financial'])
+            self.assertNotIn('knowledge_refs', methods)
+            self.assertEqual({row['subject'] for row in catalogue()['methods']},
+                             {'个股', 'ETF', '指数', '行业', '事件', '宏观', '跨市场'})
+            locked = dict(task, research_methods=methods)
+            self.assertEqual(method_selection(dict(locked, question='市盈率估值')), methods)
+            changed = method_selection(dict(locked, input_hash='changed', question='市盈率估值'))
+            self.assertEqual([item['id'] for item in changed['methods']], ['stock.valuation'])
+
+    def test_industry_addendum_and_historical_cutoff_are_specific(self):
+        from researchhelper.research_methods import select_methods
+
+        task = dict(entry='行业', question='研究券商行业景气与供需', cutoff='2026-11-21')
+        self.assertEqual([item['id'] for item in select_methods(task)], ['industry.cycle', 'industry.broker'])
+        task['cutoff'] = '2025-11-21'
+        self.assertEqual([item['id'] for item in select_methods(task)], ['industry.cycle'])
+        task.update(entry='ETF', question='比较沪深300ETF管理费与跟踪误差')
+        self.assertEqual([item['id'] for item in select_methods(task)], ['etf.tracking'])
+
+    def test_general_financial_method_works_for_an_earlier_research_cutoff(self):
+        from researchhelper.research_methods import method_guidance
+
+        task = dict(entry='个股', question='复盘贵州茅台600519.SH年报利润和经营现金流',
+                    cutoff='2024-12-31')
+        guidance, = method_guidance(task)
+        self.assertEqual(guidance['id'], 'stock.financial')
+        self.assertNotIn('年度报告准则', canonical(guidance))
+
+    def test_direct_reads_do_not_inherit_unrequested_methods(self):
+        from researchhelper.research_methods import select_methods
+
+        for question in ('查询600519.SH的open和close，不分析财务',
+                         '只查510300.SH最新单位净值', '核对600519.SH历史open'):
+            with self.subTest(question=question):
+                self.assertEqual(select_methods(dict(entry='混合', question=question, cutoff='2026-11-21')), [])
+        task = dict(entry='个股', question='核对600519.SH业绩预告，不做估值', cutoff='2026-11-21')
+        self.assertEqual([row['id'] for row in select_methods(task)], ['stock.disclosure'])
+
+    def test_method_selection_distinguishes_research_scope_and_task(self):
+        from researchhelper.research_methods import select_methods
+
+        cases = (
+            ('混合', '分析中国CPI同比的走势和食品价格变化，不研究利率', ['macro.inflation']),
+            ('宏观', '解读PMI与实际GDP是否说明需求修复', ['macro.activity']),
+            ('事件', '解释FOMC降息与短端利率变化', ['macro.finance']),
+            ('宏观', '比较专项债发行与财政预算执行', ['macro.fiscal']),
+            ('宏观', '分析国际收支、外需与贸易差额', ['macro.external']),
+            ('个股', '对照600519.SH和0700.HK在同一交易窗口的涨跌和币种口径', ['cross.returns']),
+            ('混合', '比较A股与H股同一发行人的A/H溢价和估值', ['cross.valuation']),
+            ('事件', '研究美股与港股的跨市场传导和观察先后', ['cross.transmission']),
+            ('行业', '按券商行业样本覆盖率解释财务分化', ['industry.sample', 'industry.broker']),
+            ('混合', '获取证券行业半年报营业收入，用完整公司名单核对覆盖情况。', ['industry.sample', 'industry.broker']),
+            ('行业', '比较行业估值分位与可比公司市盈率', ['industry.valuation']),
+            ('产业链', '梳理产业链成本向下游利润的传导', ['industry.earnings']),
+            ('行业', '研究港股创新药行业监管事件，美国政策作为背景', ['industry.policy', 'industry.drug']),
+            ('宏观', '只查询最新一期CPI同比读数', []),
+            ('指数', '比较两个指数的价格走势与全收益', ['index.performance']),
+            ('指数', '分析成分股的权重贡献以及上涨家数', ['index.breadth']),
+            ('混合', '沪深300指数是少数权重股带动还是普涨？', ['index.breadth']),
+            ('指数', '查询沪深300最新交易日涨跌幅', []),
+            ('事件', '研究公告发布后的交易窗口与价格反应', ['event.timeline']),
+            ('混合', '分析IPO事件窗口与同期市场走势', ['event.timeline']),
+            ('事件', '列出公告的发布时间', []),
+        )
+        for entry, question, expected in cases:
+            with self.subTest(entry=entry, question=question):
+                task = dict(entry=entry, question=question, cutoff='2026-11-21')
+                self.assertEqual([row['id'] for row in select_methods(task)], expected)
+
+    def test_method_guidance_survives_the_draft_context_budget(self):
+        with TemporaryDirectory() as folder:
+            session = Session(folder)
+            self.addCleanup(session.agent.close_runtime)
+            task = session.create('比较A股和港股同一交易窗口的涨跌及币种', entry='混合', cutoff='2026-11-21')
+            guidance = self.knowledge.draft_context(task)
+            stored = session.research_methods(task['id'])
+            self.assertEqual([row['id'] for row in guidance['research_methods']], ['cross.returns'])
+            self.assertEqual(stored['binding']['input_hash'], task['input_hash'])
+            self.assertEqual([(row['id'], row['version']) for row in guidance['research_methods']],
+                             [(row['id'], row['version']) for row in stored['methods']])
+            self.assertLessEqual(len(canonical(guidance)), 3200)
+
+    def test_malformed_saved_method_reference_does_not_break_the_prompt(self):
+        from researchhelper.research_methods import method_guidance
+
+        binding = dict(id='study', version=1, input_hash='bound')
+        task = dict(binding, entry='ETF', question='比较管理费', cutoff='2026-11-21')
+        for reference in ({'binding': binding}, {'binding': binding, 'methods': [{'id': [], 'version': 1}]}):
+            task['research_methods'] = reference
+            self.assertEqual([row['id'] for row in method_guidance(task)], ['etf.tracking'])
+
     def test_entry_scope_is_not_expanded_by_a_valid_but_unrelated_package(self):
         self.task['entry']='ETF'
         packet=self.knowledge.draft_context(self.task)
@@ -170,7 +272,8 @@ def make_ui_fixture(output):
                 source_binding=source_binding(task),origin='synthetic_knowledge_fixture')
             task['status']='部分完成';task=agent.archive.save(task);content=compose(task)
             standard=design(content,ROOT)['html'];detailed=design(content,ROOT,profile='detailed')['html']
-            task['pending_html']=standard;task=agent.archive.save(task)
+            from researchhelper.reports import stage_pending_html
+            task['pending_content']=content;stage_pending_html(task,standard);task=agent.archive.save(task)
             task=agent.archive.deliver(task,content,standard)
             output.parent.mkdir(parents=True,exist_ok=True)
             output.write_text(json.dumps(dict(task=task,entry=entry,standard=standard,detailed=detailed),ensure_ascii=False))
