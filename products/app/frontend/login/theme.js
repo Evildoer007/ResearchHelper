@@ -3,8 +3,8 @@ const ALLOWED = new Set(["light", "dark", "auto"]);
 const subscribers = new Set();
 const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)");
 const favicon = {
-  light: "/app-icon.svg",
-  dark: "/app-icon.svg",
+  light: "app-icon.svg",
+  dark: "app-icon-dark.svg",
 };
 
 function preferenceOf(value) {
@@ -41,7 +41,10 @@ function storedPreference() {
 
 function updateFavicon(theme) {
   const link = document.querySelector('link[rel="icon"]');
-  if (link) link.href = favicon[theme];
+  if (link) {
+    const current = link.getAttribute?.("href") || link.href || favicon.light;
+    link.href = current.replace(/[^/]*$/, favicon[theme]);
+  }
 }
 
 function notifyNativeShell(theme, preference, surfaceTheme) {
