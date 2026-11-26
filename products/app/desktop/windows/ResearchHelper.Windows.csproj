@@ -12,4 +12,9 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="[1.0.3485.44]" />
   </ItemGroup>
+  <Target Name="UseWebView2WinFormsOnly" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" />
+    </ItemGroup>
+  </Target>
 </Project>
