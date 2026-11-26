@@ -1523,13 +1523,10 @@ def render_research(content, resources, visual_profile=None, report_profile='sta
             bound_figures += observations_for(dict(id='thesis-'+str(index+1), status='已回答',
                 refs=thesis['support']), include_tables=not bound_figures, admitted=admitted)
         bound_figures += event_timeline(thesis['support'], thesis['title'], admitted)
-        # Lead with the conclusion, show its question's actual figures, then
-        # retain the full reasoning. A chart must not pin a multi-page answer
-        # into half the paper. Sparse measurements remain ordinary tables.
-        paired_chart = bound_figures and "data-presentation='chart'" in bound_figures
-        if paired_chart:
-            layout_class = ' argument-comparisons'
-            argument = ("<div class='argument-reading" + layout_class + "'><div class='argument-introduction'>"
+        # Keep the conclusion, comparison evidence and complete reasoning in
+        # reading order, even when the evidence is a table or inline values.
+        if bound_figures:
+            argument = ("<div class='argument-reading argument-comparisons'><div class='argument-introduction'>"
                 + narrative + "</div><div class='argument-visual'>" + bound_figures + '</div>'
                 + ("<div class='argument-continuation'>" + basis + '</div>' if basis else '') + '</div>')
         else:
