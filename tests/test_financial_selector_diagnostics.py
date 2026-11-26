@@ -37,11 +37,12 @@ class FinancialSelectorDiagnosticsTests(unittest.TestCase):
         wire = dict(version=1, binding_ref='bound', sources=[dict(source_ref='source_1',
             selection=dict(version=9, financial_cells=items, text_quotes=[], amount_cells=[]))])
         before = copy.deepcopy(wire)
-        def local_decoder(selection, schema, context):
-            return dict(evidence_specs=[dict(id=item['id']) for item in selection['financial_cells']])
-        with patch('researchhelper.output_schema._original_batch_choices', return_value=self.choices), \
-             patch('researchhelper.output_schema.decode_financial_references', side_effect=local_decoder):
-            result = _decode_independent_financial_batch(wire, self.schema, self.task, [{}])
+        def local_decoder(task, choice, selection):
+            return [dict(id=item['id']) for item in selection['financial_cells']]
+
+        choices = {choice['source_ref']: choice for choice in self.choices}
+        with patch('researchhelper.output_schema._decode_batch_selection', side_effect=local_decoder):
+            result = _decode_independent_financial_batch(wire, self.schema, self.task, choices)
         self.assertEqual(wire, before)
         return result
 
