@@ -9,6 +9,7 @@ import sys
 import unittest
 
 from researchhelper.contracts import fingerprint
+from researchhelper.knowledge import ResearchKnowledge
 from tests.test_autonomous_supplement_interfaces_offline import SupplementInterfacesTests
 
 from tests.skill_fixture_support import build_skill_fixture, source_file
@@ -39,7 +40,8 @@ class KnowledgeMarketInterfacesTests(unittest.TestCase):
     def test_bootstrap_catalog_and_task_adoption_are_separate(self):
         bootstrap = self.fixture.request("/api/bootstrap")[0]
         catalog = {entry["id"] for entry in bootstrap["knowledge"]}
-        self.assertEqual(len(catalog), 12)
+        self.assertEqual(catalog, {entry["id"] for entry in ResearchKnowledge().catalog()})
+        self.assertEqual(len(catalog), len(bootstrap["knowledge"]))
         self.assertTrue({"rh_k_cash_profit", "rh_k_rate_transmission", "rh_k_index_structure", "rh_k_etf_exposure"}.issubset(catalog))
         self.assertEqual(bootstrap["field_registry"]["tinyshare.daily_basic"]["permission"], "未验收")
         task = self.app_task()
