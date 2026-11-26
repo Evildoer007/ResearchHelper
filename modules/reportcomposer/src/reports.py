@@ -5,6 +5,7 @@ from __future__ import annotations
 from .market_calendar import covered_need_ids as calendar_need_ids, scope_basis as calendar_scope_basis
 
 import copy
+from hashlib import sha256
 import html
 import json
 import math
@@ -24,8 +25,9 @@ from .planning import thesis_obligations
 from .layout import resource_directory
 
 TEMPLATE_VERSION = "rh-paper-3"
-READER_VERSION = "rh-reader-17"
+READER_VERSION = "rh-reader-33"
 VERSION_CHANGES_CONTRACT = 2
+DRAFT_VERSION_CHANGES_CONTRACT = 3
 CALCULATION_COMPARISON_FIELDS = (
     'id', 'method', 'method_title', 'method_binding', 'inputs', 'input_refs',
     'parameters', 'assumptions', 'output', 'question_ids', 'implementation_version',
@@ -46,7 +48,8 @@ COMPARISON_VALUE_LABELS = dict(revenue='营业收入', net_profit='报表净利�
 
 def _changes_contract(task):
     version = task.get('version_changes_contract', VERSION_CHANGES_CONTRACT)
-    if type(version) is not int or version not in (1, VERSION_CHANGES_CONTRACT):
+    if (type(version) is not int or version not in (1, VERSION_CHANGES_CONTRACT, DRAFT_VERSION_CHANGES_CONTRACT)
+            or version == DRAFT_VERSION_CHANGES_CONTRACT and not isinstance(task.get('draft_report'), dict)):
         raise ContractError('版本差异契约未登记，不能跳过复核后交付')
     return version
 
@@ -89,7 +92,7 @@ def version_basis(value, version, *, contract_version=1):
                        "value", "text", "question_ids", "calculation_context", "calculation_context_basis", "availability")
     thesis_fields = ("id", "title", "judgment", "question_ids", "support", "counter", "calculation_refs",
                      "investment_meaning", "limitation")
-    if contract_version == 2:
+    if contract_version >= 2:
         evidence_fields += ('observation_date', 'observation_period', 'field_definition', 'identity', 'usage_scope')
     basis = {"task_id": value.get("task_id", value.get("id")), "research_version": version,
             "cutoff": value["cutoff"],
@@ -98,7 +101,7 @@ def version_basis(value, version, *, contract_version=1):
             "theses": [{key: copy.deepcopy(item[key]) for key in thesis_fields if key in item} for item in value["theses"]],
             "conditions": copy.deepcopy(value["tracking"]),
             "knowledge_versions": copy.deepcopy(value.get("knowledge", {}).get("index", {}))}
-    if contract_version == 2:
+    if contract_version >= 2:
         records = value.get('calculations', [])
         if (not isinstance(records, list) or any(not isinstance(item, dict)
                 or not isinstance(item.get('id'), str) or not item['id'] for item in records)
@@ -192,7 +195,7 @@ def _version_changes(task, prior, digest):
             or parent.get("knowledge_versions") != prior.get("knowledge_versions")):
         raise ContractError("主动更新的原版本、交付或验证条件不一致")
     current = version_basis(task, task["version"], contract_version=contract_version)
-    if contract_version == 2 and (prior.get('basis_contract_version') != 2
+    if contract_version >= 2 and (prior.get('basis_contract_version') != 2
             or type(prior.get('calculations_retained')) is not bool or not isinstance(prior.get('calculations'), list)):
         raise ContractError('原版本缺少计算比较依据，不能伪造版本差异')
     before = {e["id"]: e for e in prior["evidence"]}
@@ -209,7 +212,7 @@ def _version_changes(task, prior, digest):
             "original_conditions": copy.deepcopy(prior["conditions"]),
             "knowledge_changes": [{"id": key, "prior_version": old_knowledge.get(key), "current_version": new_knowledge.get(key)}
                                   for key in sorted(set(old_knowledge) | set(new_knowledge)) if old_knowledge.get(key) != new_knowledge.get(key)]}
-    if contract_version == 2:
+    if contract_version >= 2:
         changes['calculation_changes'] = _calculation_changes(prior, current)
         changes['calculation_rows'] = calculation_change_rows(changes)
     return changes
@@ -219,14 +222,29 @@ def build_version_changes(task, prior_report):
     content = prior_report["content"]
     if fingerprint(content) != prior_report["digest"]:
         raise ContractError("原交付内容与冻结哈希不一致，不能主动复核")
-    return _version_changes(task, version_basis(content, content["research_version"],
-        contract_version=_changes_contract(task)), prior_report["digest"])
+    version = _changes_contract(task)
+    changes = _version_changes(task, version_basis(content, content["research_version"],
+        contract_version=version), prior_report["digest"])
+    if version == DRAFT_VERSION_CHANGES_CONTRACT:
+        from .draft_version import compare_observations
+        changes['draft_observations'] = compare_observations(content, task)
+        if type(task.get('draft_tracking_version')) is int and task['draft_tracking_version'] == 1:
+            from .drafts import draft_conditions
+            original = draft_conditions(content)
+            if task['update_from'].get('draft_conditions') != original:
+                raise ContractError('原报告条件与冻结版本不一致，不能覆盖后复核')
+            changes['draft_conditions'] = dict(version=1, prior=original, current=draft_conditions(task))
+        from .draft_version import comparison_enabled, compare_reports
+        if comparison_enabled(task):
+            changes['draft_report_comparison'] = compare_reports(content, task)
+    return changes
 
 
 def validate_version_changes(task, prior_report=None):
     if task.get("version_changes_contract") is None:
         return  # Frozen legacy reports remain readable without rewriting them.
-    _changes_contract(task)
+    if _changes_contract(task) == DRAFT_VERSION_CHANGES_CONTRACT and prior_report is None:
+        raise ContractError('草稿观测差异须与原交付重新核对')
     changes = task.get("changes")
     if not isinstance(changes, dict) or not isinstance(changes.get("prior_basis"), dict):
         raise ContractError("主动更新缺少同版差异记录")
@@ -238,6 +256,7 @@ def validate_version_changes(task, prior_report=None):
 # Rendering uses frozen calculation metadata; these are mathematical notation,
 # not a lookup of the latest knowledge revision for an old published report.
 METHOD_NOTATION = {
+    "residual_present_value_v1": ("情景残值现值", "<mi>V</mi><mo>=</mo><mfrac><mrow><mi>C</mi><mo>−</mo><mi>D</mi><mo>−</mo><mi>F</mi></mrow><mrow><mi>N</mi><mo>×</mo><msup><mrow><mo>(</mo><mn>1</mn><mo>+</mo><mi>r</mi><mo>)</mo></mrow><mi>t</mi></msup></mrow></mfrac>", "C为收款，D为债务，F为费用，N为股数，r为必要回报率，t为年数。金额与股本使用相同百万量级。"),
     "etf_daily_nav_premium_v1": ("收盘价与同估值日净值偏离率", "<mi>Q</mi><mo>=</mo><mo>(</mo><mfrac><mi>P</mi><mi>NAV</mi></mfrac><mo>−</mo><mn>1</mn><mo>)</mo><mo>×</mo><mn>100</mn><mo>%</mo>", "P为收盘价，NAV为同一基金份额、人民币及估值日的官方单位净值，均为元。仅作日度事后比较，不表示同一时刻可成交或可实现套利；公布日不代替净值所属日。"),
     "management_custody_fee_summary_v1": ("年度管理托管费率合计及比较", "<msub><mi>T</mi><mi>A</mi></msub><mo>=</mo><msub><mi>M</mi><mi>A</mi></msub><mo>+</mo><msub><mi>C</mi><mi>A</mi></msub><mo>;</mo><msub><mi>T</mi><mi>B</mi></msub><mo>=</mo><msub><mi>M</mi><mi>B</mi></msub><mo>+</mo><msub><mi>C</mi><mi>B</mi></msub><mo>;</mo><mi>D</mi><mo>=</mo><msub><mi>T</mi><mi>A</mi></msub><mo>−</mo><msub><mi>T</mi><mi>B</mi></msub>", "M、C分别为管理费和托管费年费率，T为登记计算的两项合计，单位%/年；D为两基金合计之差，单位百分点/年。合计不是原件直接披露值，不是全部费用率或实际持有收益差。"),
     "observed_index_change_v1": ("已观测指数区间变化", "<mi>R</mi><mo>=</mo><mo>(</mo><mfrac><msub><mi>L</mi><mn>1</mn></msub><msub><mi>L</mi><mn>0</mn></msub></mfrac><mo>−</mo><mn>1</mn><mo>)</mo><mo>×</mo><mn>100</mn><mo>%</mo>", "L₀、L₁为同指数、同收益版本、同计价币种及基期的起终收盘点位，单位点。R为该版本已观测变化，不是基金或用户实际收益、事件因果或预测概率。"),
@@ -250,6 +269,18 @@ METHOD_NOTATION = {
     "fee_difference_v1": ("同口径年度费用差", "<mi>D</mi><mo>=</mo><msub><mi>f</mi><mi>A</mi></msub><mo>−</mo><msub><mi>f</mi><mi>B</mi></msub>", "fₐ、fᵦ为同口径年度费用率，单位%/年；D为费用差，单位百分点/年，不是实际收益差。"),
     "fee_difference_v2": ("同口径单项年度费率差", "<mi>D</mi><mo>=</mo><msub><mi>f</mi><mi>A</mi></msub><mo>−</mo><msub><mi>f</mi><mi>B</mi></msub>", "fₐ、fᵦ为同类单项年费率；原文单位与独立年度频率均保留。D单位为百分点/年，不是合计费用、实际扣费或持有收益差。"),
 }
+
+
+def calculation_notation(calculation):
+    """Present a frozen method and its input unit without refreshing knowledge."""
+    method = calculation["method"]
+    title, notation, variables = METHOD_NOTATION.get(method,
+        (calculation.get("method_title", method), "", ""))
+    if METHOD_REGISTRY.get(method, {}).get("same_input_unit"):
+        variables = variables.replace("百万元", calculation["parameters"]["amount_unit"])
+    formula = ('<math xmlns="http://www.w3.org/1998/Math/MathML" display="block">'
+        + notation + '</math>') if notation else ""
+    return title, formula, variables
 
 
 def compose(task):
@@ -507,7 +538,7 @@ def compose(task):
                    'index_weight_evidence_version', 'analysis_input_presentation_version',
                    'review_choice_delivery_version', 'identity_candidate_lookup_version',
                    'name_candidate_observation_version', 'original_number_catalogue_capacity_version',
-                   'original_explicit_unit_reference_version', 'acquisition_reading_intent_version',
+                   'original_explicit_unit_reference_version', 'original_quantity_qualifier_version', 'acquisition_reading_intent_version',
                    'financial_acquisition_route_version', 'original_duration_anchor_version', 'catalogue_alternative_version', 'typed_evidence_needs_version', 'typed_observation_contract_version', 'typed_numeric_selection_version', 'required_numeric_completion_version', 'original_observation_reference_version', 'shared_original_dates_version', 'source_extraction_batches_version', 'source_extraction_id_choices_version', 'official_index_sources_version'):
         if policy in task:
             content[policy] = task[policy]
@@ -685,6 +716,10 @@ def report_heading(content):
     """A display label, not a summary, evidence claim or rewritten question."""
     if content.get("intent") == DOCUMENT_CONTENT_INTENT:
         return DOCUMENT_CONTENT_INTENT
+    from .knowledge import definition_title
+    title = definition_title(content)
+    if title:
+        return title
     original = content["title"]
     if len(original) <= 36 and not any(character in original for character in "\n\r。；;！？!?<>"):
         return original
@@ -748,4 +783,43 @@ from .visual import source_locator_label, research_figures
 
 def render(content, resources, visual_profile=None, report_profile='standard'):
     from .report_designer import render_html
-    return render_html(content,resources,profile=report_profile,theme=(visual_profile or {}).get('theme','research'))
+    return render_html(content, resources, profile=report_profile, visual_profile=visual_profile)
+
+
+def stage_pending_html(task, page):
+    """Bind the exact standard report page before saving its checkpoint."""
+    from .report_designer import read_presentation_document
+
+    if not isinstance(page, str) or not page.strip():
+        raise ContractError('报告页面尚未生成，请重试保存')
+    digest = fingerprint(task['pending_content'])
+    tree, document = read_presentation_document(page)
+    body = tree.find('body')
+    if (type(document.get('version')) is not int or document['version'] != 1
+            or document.get('output_type') != 'report' or document.get('profile') != 'standard'
+            or document.get('content_hash') != digest or body is None
+            or body.get('data-report-variant') != 'standard' or body.find('.//main') is None):
+        raise ContractError('报告页面与待保存的正文或详略不一致')
+    task['pending_html_binding'] = dict(content_digest=digest, html_sha256=sha256(page.encode()).hexdigest())
+    title = document.get('title')
+    if isinstance(title, str) and title.strip():
+        task['pending_html_binding']['title'] = ' '.join(title.split())
+    task['pending_html'] = page
+
+
+def pending_html_sha256(task, content_digest):
+    """Verify retained bytes against the receipt made at rendering time."""
+    page, binding = task.get('pending_html'), task.get('pending_html_binding')
+    if (not isinstance(page, str) or not page.strip() or not isinstance(binding, dict)
+            or binding.get('content_digest') != content_digest):
+        return None
+    try:
+        digest = sha256(page.encode()).hexdigest()
+    except UnicodeEncodeError:
+        return None
+    return digest if digest == binding.get('html_sha256') else None
+
+
+def clear_pending_html(task):
+    task.pop('pending_html', None)
+    task.pop('pending_html_binding', None)
