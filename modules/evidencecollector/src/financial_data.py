@@ -5,15 +5,13 @@ preserves original cells and locations for the later financial validator.
 """
 from __future__ import annotations
 
-import base64
 import copy
-from decimal import Decimal, InvalidOperation
-import hashlib
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
 import unicodedata
 
 from .contracts import ContractError, fingerprint
-from .financial_sources import (financial_table_candidates, financial_context_cells,
+from .financial_sources import (_financial_column_unit, financial_table_candidates, financial_context_cells,
     financial_shared_context_choices, financial_reporting_currency_choices,
     financial_reporting_standard_choices, context_binding)
 from .evidence import current_original_reference
@@ -22,7 +20,23 @@ UNIT_FACTORS = {'元': Decimal(1), '千元': Decimal(1000), '万元': Decimal(10
                 '百万元': Decimal(1000000), '亿元': Decimal(100000000)}
 NUMBER = r'(?:[（(]\s*\d[\d,]*(?:\.\d+)?\s*[）)]|[+−-]?\d[\d,]*(?:\.\d+)?)'
 DURATION = re.compile(r'截至\s*(\d{4})\s*年\s*6\s*月\s*30\s*日\s*止\s*6\s*个\s*月\s*期间')
+HALF_YEAR = re.compile(r'(\d{4})年半年度')
 CHAPTER = re.compile(r'第[一二三四五六七八九十]+节[\u4e00-\u9fff、]+')
+BRIDGE_START = '将净利润调节为经营活动现金流量'
+BRIDGE_TOTAL = '经营活动产生的现金流量净额'
+CASH_BRIDGE_POLICY = 'draft_cash_bridge_version'
+CASH_BRIDGE_FIELDS = {
+    'cash_bridge_inventory': ('存货的', '存货变动'),
+    'cash_bridge_receivables': ('经营性应收项目的', '经营性应收变动'),
+    'cash_bridge_payables': ('经营性应付项目的', '经营性应付变动'),
+}
+_SUMMARY_FIELDS = {
+    '营业收入': 'ths_revenue_stock',
+    '归属于上市公司股东的净利润': 'ths_np_atoopc_stock',
+    '归属于母公司股东的净利润': 'ths_np_atoopc_stock',
+    '归属于母公司所有者的净利润': 'ths_np_atoopc_stock',
+    BRIDGE_TOTAL: 'ths_ncf_from_oa_stock',
+}
 
 
 class FinancialDataUnavailable(ContractError):
@@ -58,7 +72,7 @@ def monetary_cell(value):
         raise FinancialDataUnavailable('金额不是有限十进制数') from None
     if not number.is_finite():
         raise FinancialDataUnavailable('金额不是有限十进制数')
-    return -number if negative else number
+    return number.copy_negate() if negative else number
 
 
 def _page(part):
@@ -81,50 +95,41 @@ def _citation(record, part, quote):
 
 def proven_disclosures(task, security):
     """Check actual acquisition and bytes; this is not financial adoption."""
-    result = []
-    for record in task.get('source_records', []):
-        if record.get('kind') != 'filing' or record.get('directory', {}).get('issuer') != security:
-            continue
-        if record.get('task_id') != task['id'] or record.get('research_version') != task['version']:
-            raise FinancialDataUnavailable('原件不属于本任务同版标的')
-        acquisition = record.get('acquisition', {})
-        if current_original_reference(task, record) is None or type(acquisition.get('dispatch_index')) is not int:
-            raise FinancialDataUnavailable('原件没有实际取得记录')
-        try:
-            event = task['ledger']['dispatches'][acquisition['dispatch_index']]
-        except (KeyError, IndexError):
-            raise FinancialDataUnavailable('原件请求账本缺失') from None
-        material = record['snapshot']['material']
-        if (event.get('operation') != 'filing_original' or event.get('status') != '成功'
-                or event.get('source') != 'ifind' or event.get('response_snapshot_hash') != fingerprint(record['snapshot'])
-                or record['hash'] != fingerprint(record['snapshot'])
-                or event.get('response_original_hash') != material['hash']):
-            raise FinancialDataUnavailable('原件与实际响应或账本不一致')
-        try:
-            raw = base64.b64decode(material['original_base64'], validate=True)
-        except (ValueError, KeyError):
-            raise FinancialDataUnavailable('原件字节缺失') from None
-        if hashlib.sha256(raw).hexdigest() != material['hash']:
-            raise FinancialDataUnavailable('原件字节指纹不一致')
-        result.append(record)
-    return result
+    records = [record for record in task.get('source_records', []) if record.get('kind') == 'filing'
+               and record.get('directory', {}).get('issuer') == security]
+    for record in records:
+        _verify_disclosure(task, record)
+    return records
+
+
+def _verify_disclosure(task, record):
+    if record.get('task_id') != task['id'] or record.get('research_version') != task['version']:
+        raise FinancialDataUnavailable('原件不属于本任务同版标的')
+    if current_original_reference(task, record) is None:
+        raise FinancialDataUnavailable('原件没有实际取得记录')
 
 
 def _cfo_contexts(task, record, periods=None):
     material = record['snapshot']['material']
     view = dict(id=record['id'], kind=record['kind'], snapshot_hash=record['hash'], parts=material['parts'])
+    selected = dict(maximum=64, selected_metrics=('operating_cash_flow',))
+    contexts = {row['financial_value_reference']: row for row in financial_context_cells(task, record, view, **selected)}
     result = {}
-    for cell in financial_table_candidates(task, record, view, maximum=64)['cells']:
-        if cell['metric'] != 'operating_cash_flow':
+    for cell in financial_table_candidates(task, record, view, **selected)['cells']:
+        context = contexts.get(cell['candidate_id'])
+        if (cell['metric'] != 'operating_cash_flow' or not context
+                or context['context']['accounting_scope'] != 'consolidated'
+                or context['context']['currency'] != 'CNY'):
             continue
         fields = cell['proposal_fields']
-        match = re.fullmatch(r'截至(\d{4})年6月30日止6个月期间', compact(fields['period']))
+        literal = compact(fields['period'])
+        match = DURATION.fullmatch(literal) or HALF_YEAR.fullmatch(literal)
         period = match[1] + '0630' if match else None
         if period is None or periods is not None and period not in periods:
             continue
         if period in result:
             raise FinancialDataUnavailable('同一期间现金流列不唯一')
-        result[period] = fields
+        result[period] = dict(fields, statement_context=context)
     return result
 
 
@@ -172,7 +177,8 @@ def core_financial_values(task, security, periods):
                 issuer=security, context_complete=complete))
     rows, missing = [], []
     for (period, metric), choices in matches.items():
-        signatures = {(item['value'], item['unit'], item['accounting_standard'],
+        # Compare exact amounts; keep each original token and financial context.
+        signatures = {(Decimal(item['value']), item['unit'], item['accounting_standard'],
                        item['context']['context']['currency'] if item['context'] else None,
                        item['context']['context']['accounting_scope'] if item['context'] else None)
                       for item in choices}
@@ -215,20 +221,113 @@ def capital_expenditure(task, record, periods):
         except FinancialDataUnavailable as error:
             missing.append(dict(period=period, reason=str(error)))
             continue
+        header = locator['financial_column']
+        unit_basis = locator.get('financial_unit_scope')
+        if not unit_basis:
+            declaration = _financial_column_unit(parts[header['header_part']], header['header_quote'],
+                                                  parts[locator['unit_part']]['text'])
+            if not declaration or declaration['unit'] != context['unit']:
+                missing.append(dict(period=period, reason='资本开支列缺少对应的金额单位'))
+                continue
+            unit_basis = dict(unit_part=locator['unit_part'], unit_quote=declaration['quote'])
         output.append(dict(period=period, value=str(value),
             raw_token=columns[column], unit=context['unit'], period_literal=context['period'],
-            unit_basis=copy.deepcopy(locator.get('financial_unit_scope')),
-            period_basis=_citation(record, parts[locator['financial_column']['header_part']],
-                                   locator['financial_column']['header_quote']),
+            unit_basis=copy.deepcopy(unit_basis),
+            period_basis=_citation(record, parts[header['header_part']], header['header_quote']),
             citation=_citation(record, part, rows[0])))
     return dict(status='decoded' if not missing else 'partial' if output else 'incomplete',
                 values=output, missing=missing, financial_adoption=False)
+
+
+def _bridge_checks(rows, contexts, *, rounded=False):
+    checks = {}
+    for period, context in contexts.items():
+        amounts = [Decimal(row['values'][period]) for row in rows]
+        total, stated = sum(amounts[:-1], Decimal(0)), amounts[-1]
+        benchmark = monetary_cell(context['raw_token'])
+        # Each independently printed number can differ from its unrounded value
+        # by half of its last displayed place, including the printed total.
+        tolerance = Decimal(0)
+        if rounded:
+            places = (Decimal(1).scaleb(value.as_tuple().exponent) for value in amounts)
+            tolerance = sum(places, Decimal(0)) / 2
+        residual = total - stated
+        checks[period] = dict(adjustment_sum=str(total), disclosed_cash_flow=str(stated),
+            statement_cash_flow=str(benchmark), rounding_residual=str(residual), rounding_bound=str(tolerance),
+            matches=stated == benchmark and abs(residual) <= tolerance)
+    return checks
+
+
+def _relative_cash_bridge(record, contexts, periods):
+    """Bind a continued note's 本期/上期 columns to its own consolidated statement."""
+    parts = record['snapshot']['material']['parts']
+    tables = [part for part in parts if part.get('pdf_table')]
+    header = '补充资料\t本期金额\t上期金额'
+    starts = [part for part in tables if part['text'].splitlines()[:1] == [header]
+              and BRIDGE_START in compact(part['text'])]
+    if not starts:
+        return None
+    if len(starts) != 1:
+        raise FinancialDataUnavailable('现金流调节表起点不唯一')
+    first = starts[0]
+    year = re.search(r'(\d{4})\s*年\s*半年度报告', record['directory']['title'])
+    title = year[1]+'年半年度报告' if year else None
+    if not title or not any(title in compact(part['text']) for part in _physical(record)[:3]):
+        raise FinancialDataUnavailable('现金流调节表缺少与目录一致的半年度原件标题')
+    columns = [year[1]+'0630', str(int(year[1])-1)+'0630']
+    if not set(columns).issubset(contexts) or not set(columns).issubset(periods):
+        raise FinancialDataUnavailable('本期、上期未匹配同版合并现金流量表的两个半年度')
+    by_locator = {part['locator']: part for part in parts}
+    page = by_locator['第'+str(first['pdf_table']['page'])+'页']
+    declaration = re.findall(r'^\s*(单位\s*[:：]\s*(百万元|千元|万元|亿元|元))[^\S\n]*\n[^\S\n]*补充资料\s+本期金额\s+上期金额[^\S\n]*$',
+        page['text'], flags=re.MULTILINE)
+    if len(declaration) != 1 or any(context['unit'] != declaration[0][1] for context in contexts.values()):
+        raise FinancialDataUnavailable('现金流调节表未标明与合并现金流量表一致的单位')
+    quote, unit = declaration[0]
+    group = first['pdf_table']['group']
+    linked = sorted((part for part in tables if part['pdf_table']['group'] == group),
+                    key=lambda part: (part['pdf_table']['page'], part['pdf_table']['bbox'][1]))
+    if linked[0] is not first or len({part['pdf_table']['page'] for part in linked}) != len(linked):
+        raise FinancialDataUnavailable('现金流调节表页序不唯一')
+    rows = []
+    for index, part in enumerate(linked):
+        if part['pdf_table']['page'] != first['pdf_table']['page'] + index:
+            raise FinancialDataUnavailable('现金流调节表缺少连续页')
+        for row_index, line in enumerate(part['text'].splitlines()):
+            cells = line.split('\t')
+            label = compact(cells[0])
+            if not rows and label != '净利润':
+                continue
+            if row_index in part['pdf_table'].get('ambiguous_rows', ()):
+                raise FinancialDataUnavailable('现金流调节表存在列位置歧义')
+            if len(cells) != 3:
+                raise FinancialDataUnavailable('现金流调节表中的金额列不完整')
+            tokens = dict(zip(columns, cells[1:]))
+            rows.append(dict(label=label, values={period: str(monetary_cell(raw)) for period, raw in tokens.items()},
+                             raw_tokens=tokens, citation=_citation(record, part, line)))
+            if label == BRIDGE_TOTAL:
+                break
+        if rows and rows[-1]['label'] == BRIDGE_TOTAL:
+            break
+    if len(rows) < 3 or rows[-1]['label'] != BRIDGE_TOTAL:
+        raise FinancialDataUnavailable('现金流调节表不完整')
+    period_basis = {period: contexts[period]['statement_context']['bases']['period'] for period in columns}
+    checks = _bridge_checks(rows, contexts, rounded=True)
+    return dict(status='decoded', unit=unit, rows=rows, checks=checks, missing_periods=[],
+        unit_basis=dict(unit_part=page['locator'], unit_quote=quote),
+        period_citations=[_citation(record, first, header)], period_basis=period_basis,
+        statement_basis=_citation(record, by_locator[contexts[columns[0]]['record_locator']['part']],
+                                  contexts[columns[0]]['statement_context']['bases']['metric']['quote']),
+        data_checks_passed=all(check['matches'] for check in checks.values()), financial_adoption=False)
 
 
 def cash_reconciliation(task, record, periods):
     contexts = _cfo_contexts(task, record, periods)
     if not contexts:
         raise FinancialDataUnavailable('现金流调节缺少同版合并现金流基准')
+    relative = _relative_cash_bridge(record, contexts, periods)
+    if relative is not None:
+        return relative
     missing = [period for period in periods if period not in contexts]
     proofs = [context['record_locator'].get('financial_unit_scope') for context in contexts.values()]
     if (any(not proof or '财务报表及附注' not in compact(proof.get('unit_quote', '')) for proof in proofs)
@@ -238,7 +337,7 @@ def cash_reconciliation(task, record, periods):
     found = []
     pattern = re.compile(r'(?P<label>.+?)\s+(?P<left>'+NUMBER+r')\s+(?P<right>'+NUMBER+r')\s*$')
     for part in _physical(record):
-        text = part['text']; start = text.find('将净利润调节为经营活动现金流量')
+        text = part['text']; start = text.find(BRIDGE_START)
         end = text.find('不涉及现金的重大投资和筹资活动', start + 1)
         if start < 0 or end < 0:
             continue
@@ -265,18 +364,11 @@ def cash_reconciliation(task, record, periods):
                 for period, key in zip(columns, ('left', 'right')) if period in contexts},
                 raw_tokens={period: match[key] for period, key in zip(columns, ('left', 'right')) if period in contexts},
                 citation=_citation(record, part, line)))
-            if compact(label) == '经营活动产生的现金流量净额':
+            if compact(label) == BRIDGE_TOTAL:
                 break
-        if len(rows) < 2 or compact(rows[-1]['label']) != '经营活动产生的现金流量净额':
+        if len(rows) < 2 or compact(rows[-1]['label']) != BRIDGE_TOTAL:
             raise FinancialDataUnavailable('现金流调节表不完整')
-        checks = {}
-        for period in periods:
-            if period not in contexts:
-                continue
-            total = sum((Decimal(row['values'][period]) for row in rows[:-1]), Decimal(0))
-            stated = Decimal(rows[-1]['values'][period]); benchmark = Decimal(str(contexts[period]['value']))
-            checks[period] = dict(adjustment_sum=str(total), disclosed_cash_flow=str(stated),
-                statement_cash_flow=str(benchmark), matches=total == stated == benchmark)
+        checks = _bridge_checks(rows, contexts)
         found.append(dict(status='partial' if missing else 'decoded', unit=unit, rows=rows, checks=checks,
             missing_periods=missing,
             unit_basis=copy.deepcopy(proofs[0]),
@@ -285,6 +377,144 @@ def cash_reconciliation(task, record, periods):
     if len(found) != 1:
         raise FinancialDataUnavailable('现金流调节完整区块缺失或不唯一')
     return found[0]
+
+
+def stated_cash_bridge_scope(task):
+    """Select a cash reconciliation for a requested operating cash-flow judgment."""
+    from .draft_sources import _unquoted_local_scope
+    from .financial_sources import stated_financial_requests
+    from .subject_scope import scope_question
+
+    if (task.get(CASH_BRIDGE_POLICY) != 1 or task.get('research_mode') != 'current'
+            or task.get('intent') != '综合研究'):
+        return None
+    question = _unquoted_local_scope(scope_question(task))
+    clauses = re.split(r'[，,。；;！？!?\n]', question)
+    if not any(re.search(r'现金(?:流|回收|转化|含量)|利润兑现|盈利质量', clause) and
+               re.search(r'支撑|匹配|兑现|转化|含金量|为何|原因|拆解|驱动|归因', clause) for clause in clauses):
+        return None
+    requests = stated_financial_requests(task)
+    codes = {row['codes'] for row in requests}
+    if len(codes) != 1:
+        return None
+    selected = [row for row in requests if row['statement_type'] == '1'
+                and 'ths_ncf_from_oa_stock' in row['indicators']]
+    periods = sorted({row['report_period'] for row in selected})
+    if (len(periods) != 2 or not all(period.endswith('0630') for period in periods)
+            or int(periods[1][:4]) - int(periods[0][:4]) != 1):
+        return None
+    return dict(code=next(iter(codes)), periods=periods,
+                question_ids=list(dict.fromkeys(question for row in selected for question in row['question_ids'])))
+
+
+def half_year_filing_title(value, period):
+    """Reject summaries, translations and dual candidates at selection time."""
+    return isinstance(value, str) and bool(re.search(
+        rf'(?:^|[:：])[^:：]{{0,60}}?{period[:4]}\s*年?\s*半年度报告(?:全文)?(?:\s*[（(]A\s*股[）)])?$', value.strip()))
+
+
+def retained_cash_bridge(task, scope, *, records=None):
+    """Return a reconciled same-period filing, if the actual original is available."""
+    if not scope:
+        return None
+    current, prior = scope['periods'][1], scope['periods'][0]
+    records = task.get('source_records', ()) if records is None else records
+    filings = [row for row in records if row.get('kind') == 'filing'
+               and row.get('directory', {}).get('issuer') == scope['code']
+               and half_year_filing_title(row['directory'].get('title'), current)]
+    if len(filings) != 1:
+        return None
+    record, = filings
+    try:
+        _verify_disclosure(task, record)
+        result = cash_reconciliation(task, record, [current, prior])
+    except (ContractError, KeyError, TypeError, ValueError):
+        return None
+    if result['status'] != 'decoded' or not result['data_checks_passed']:
+        return None
+    return record, result
+
+
+def cash_bridge_observation_cells(record, bridge):
+    """Replay only reviewed columns, keeping exact source units and locations."""
+    unit = bridge['unit']
+    by_part = {part['locator']: part for part in record['snapshot']['material']['parts']}
+    for field, (prefix, label) in CASH_BRIDGE_FIELDS.items():
+        rows = [row for row in bridge['rows'] if compact(row['label']).startswith(prefix)]
+        if len(rows) != 1:
+            continue
+        row, = rows
+        for period, value in row['values'].items():
+            basis = bridge.get('period_basis', {}).get(period)
+            if basis is None:
+                basis = next(ref for ref in bridge['period_citations']
+                             if (match := DURATION.fullmatch(ref['quote'])) and match[1]+'0630' == period)
+            unit_basis = {'part': bridge['unit_basis']['unit_part'], 'quote': bridge['unit_basis']['unit_quote']}
+            locator = dict(kind='cash_bridge_cell', part=row['citation']['part'], quote=row['citation']['quote'],
+                           period_basis=dict(part=basis['part'], quote=basis['quote']), unit_basis=unit_basis,
+                           token=row['raw_tokens'][period], raw_amount=value)
+            # Keep the original displayed units for the detailed workpaper and
+            # prove the exact period and unit still locate in the same original.
+            for proof in (locator, unit_basis, locator['period_basis']):
+                _citation(record, by_part[proof['part']], proof['quote'])
+            yield dict(code=record['directory']['issuer'], field=field, label=label,
+                period=period[:4]+'-06-30', raw=value, unit=unit, locator=locator,
+                name=record['directory'].get('security_name') or '', period_basis='公告原文报告期间',
+                basis=dict(artifact_id=record['id'], field=field),
+                unit_reference=dict(kind='literal_source', artifact_id=record['id'],
+                                    snapshot_hash=record['hash'], locator=unit_basis))
+
+
+def cash_bridge_reported_comparisons(record):
+    """Read the issuer's published two-period comparisons with their own units."""
+    header = ('项目', '本报告期', '上年同期', '本报告期比上年同期增减')
+    fields = {}
+    for part in record['snapshot']['material']['parts']:
+        shape = part.get('pdf_table')
+        if not shape:
+            continue
+        lines = part['text'].splitlines()
+        if not lines or tuple(map(compact, lines[0].split('\t'))) != header:
+            continue
+        for index, line in enumerate(lines[1:], 1):
+            cells = line.split('\t')
+            if cells[0] == '项目':
+                break
+            title = re.fullmatch(r'(.+)[（(](?:人民币)?(百万元|千元|万元|亿元|元)[）)]', compact(cells[0]))
+            if not title or title[1] not in _SUMMARY_FIELDS or len(cells) != 4 or index in shape.get('ambiguous_rows', ()):
+                continue
+            field = _SUMMARY_FIELDS[title[1]]
+            if field in fields:
+                return {}
+            try:
+                before, after = monetary_cell(cells[2]), monetary_cell(cells[1])
+                shown = monetary_cell(cells[3].strip().removesuffix('%'))
+                if before <= 0 or not cells[3].strip().endswith('%'):
+                    continue
+                precision = Decimal(1).scaleb(shown.as_tuple().exponent)
+                growth = (after-before)/before*100
+                if growth.quantize(precision, rounding=ROUND_HALF_UP) != shown:
+                    continue
+            except (FinancialDataUnavailable, InvalidOperation):
+                continue
+            factor = UNIT_FACTORS[title[2]]
+            fields[field] = dict(_citation(record, part, line), rmb=[str(value*factor) for value in (before, after)])
+    return fields
+
+
+def matched_summary_comparison(prior, current, records):
+    """Use the official comparison for the two exact iFinD inputs only."""
+    basis = current.get('filing_comparison')
+    if not basis or prior.get('filing_comparison') != basis:
+        return False
+    record = records.get(basis.get('artifact_id'))
+    if (record is None or record.get('kind') != 'filing' or record.get('hash') != basis.get('snapshot_hash')
+            or record.get('directory', {}).get('issuer') != current.get('code')
+            or not half_year_filing_title(record['directory'].get('title'), current['period'][:4]+'0630')
+            or cash_bridge_reported_comparisons(record).get(current.get('field')) != basis):
+        return False
+    return [str(Decimal(str(row['raw_value'])).normalize()) for row in (prior, current)] == [
+        str(Decimal(value).normalize()) for value in basis['rmb']]
 
 
 def _report_period(record):
@@ -537,9 +767,9 @@ def _statement_detail_label(text):
 
 def _statement_detail_values(record, *, point, labels, periods=None):
     """Read verified coordinate columns, not whitespace/note-number guesses."""
-    from .pdf_material import EXTRACT_VERSION,TEXT_TABLE_VERSION
+    from .pdf_material import STATEMENT_DETAIL_EXTRACT_VERSIONS,TEXT_TABLE_VERSION
     material=record['snapshot']['material']
-    if material.get('extract_version')!=EXTRACT_VERSION:
+    if material.get('extract_version') not in STATEMENT_DETAIL_EXTRACT_VERSIONS:
         raise FinancialDataUnavailable('该明细需要新解析版本，旧原件不自动改写')
     context=disclosure_context(record)
     if context['status']!='decoded':
@@ -657,8 +887,9 @@ def original_amount_cells(task, record):
     """Exact supplemental cells, before reading and applicability decisions."""
     if not product_selection_enabled(task) or record.get('kind') != 'filing':
         return []
-    if record not in proven_disclosures(task, record.get('directory', {}).get('issuer')):
+    if record not in task.get('source_records', []):
         raise FinancialDataUnavailable('财务数据产品缺少本任务实际原件')
+    _verify_disclosure(task, record)
     result = []
     periods = list(_cfo_contexts(task, record))
     def scoped_unit(proof):
@@ -682,10 +913,13 @@ def original_amount_cells(task, record):
         if bridge and bridge['data_checks_passed']:
             for index, row in enumerate(bridge['rows']):
                 for period, value in row['values'].items():
-                    basis = next(item for item in bridge['period_citations']
-                                 if DURATION.fullmatch(item['quote'])[1]+'0630' == period)
+                    relative_basis = bridge.get('period_basis', {}).get(period)
+                    basis = relative_basis or next(item for item in bridge['period_citations']
+                        if (match := DURATION.fullmatch(item['quote'])) and match[1]+'0630' == period)
                     append('cash_reconciliation', period, index, value, row['raw_tokens'][period],
-                           bridge['unit'], row['citation'], scoped_unit(bridge['unit_basis']), basis)
+                           bridge['unit'], row['citation'], scoped_unit(bridge['unit_basis']), basis,
+                           period_literal=period[:4]+'年半年度' if relative_basis else None,
+                           statement_basis=bridge.get('statement_basis'))
     try:
         nonrecurring = nonrecurring_items(record)
     except FinancialDataUnavailable:
