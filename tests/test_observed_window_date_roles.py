@@ -1,13 +1,16 @@
 """Query coverage and actual endpoint dates are distinct, versioned roles.
 
-Closed live study is only an immutable unit input. No resume, provider call,
-saved answer or report approval occurs in these isolated projections.
+The synthetic response has a month start with no observation. The role
+tests can run after historical delivery files are removed.
 """
 import copy
+from datetime import date, timedelta
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from tests import ROOT
+from tests.test_long_series_reasoning_payload import synthetic_price_task
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import (ContractError, METHOD_REGISTRY, calculation_context_contract,
     calculation_dependency_hash, methods_for_task, validate_calculation_context)
@@ -20,12 +23,32 @@ from researchhelper.reports import compose
 
 POLICY = 'observed_window_date_roles_version'
 METHOD = 'observed_price_return_v1'
-SOURCE = ROOT / 'result/acceptance/one-sentence-research-sevkq2c0/task.json'
 
 
 class ObservedWindowDateRoleTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        month_start = date(2026, 8, 1)
+        month_days = [month_start + timedelta(days=i) for i in range(31)]
+        days = [day.isoformat() for day in month_days if day.weekday() < 5]
+        window = month_start.isoformat(), month_days[-1].isoformat()
+        with tempfile.TemporaryDirectory() as folder, patch(
+                'socket.socket.connect', side_effect=AssertionError('Offline fixture')):
+            agent = ResearchAgent(ResearchArchive(folder), ROOT, offline=True)
+            try:
+                task = synthetic_price_task(agent, days=days, query_window=window)
+            finally:
+                agent.close_runtime()
+        task.pop(POLICY, None)
+        task['status'] = '部分完成'
+        ResearchAgent._gap(task, '合成样例仅验证区间计算，未生成研究回答。', category='question_coverage')
+        task['calculation_specs'] = [dict(
+            id='window_return', method=METHOD, question_ids=['q2'],
+            inputs=dict(start_price=task['evidence'][0]['id'], end_price=task['evidence'][-1]['id']),
+            parameters=dict(METHOD_REGISTRY[METHOD]['parameters'], start_date=days[0], end_date=days[-1]))]
+        cls.original = json.dumps(task, ensure_ascii=False)
+
     def setUp(self):
-        self.original = SOURCE.read_bytes()
         self.task = json.loads(self.original)
         self.task[POLICY] = 1
         self.spec = copy.deepcopy(self.task['calculation_specs'][0])
@@ -34,14 +57,11 @@ class ObservedWindowDateRoleTests(unittest.TestCase):
         self.parameters = self.spec['parameters']
         self.contract = calculation_context_contract(self.task, METHOD)
 
-    def tearDown(self):
-        self.assertEqual(SOURCE.read_bytes(), self.original)
-
     def validate(self, bindings=None, parameters=None):
         validate_calculation_context(METHOD, bindings or self.bindings, parameters or self.parameters,
             context_contract=self.contract)
 
-    def test_actual_month_query_accepts_its_real_endpoints_without_rewriting_evidence(self):
+    def test_month_query_accepts_its_observed_endpoints_without_rewriting_evidence(self):
         before = copy.deepcopy(self.bindings)
         self.assertEqual(self.parameters['start_date'], '2026-08-03')
         self.assertEqual(self.bindings['start_price']['calculation_context']['window_start'], '2026-08-01')
@@ -113,7 +133,7 @@ class ObservedWindowDateRoleTests(unittest.TestCase):
         fields = descriptor[self.spec['inputs']['start_price']]['required_context_fields']
         self.assertIn('window_start', fields); self.assertIn('observation_date', fields)
 
-    def test_unbound_price_roles_offer_real_close_candidates_before_analysis(self):
+    def test_unbound_price_roles_offer_all_returned_close_candidates_before_analysis(self):
         self.task['calculation_specs'] = []
         schema = deferred_calculation_output_schema(self.task)
         self.assertIsNotNone(schema)
