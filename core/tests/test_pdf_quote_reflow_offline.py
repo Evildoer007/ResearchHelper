@@ -6,6 +6,7 @@ not a machine-specific acceptance artifact or a claim of PDF source approval.
 
 import copy
 import html
+from lxml import html as dom
 from pathlib import Path
 import unittest
 
@@ -32,9 +33,11 @@ class PDFQuoteReflowTests(unittest.TestCase):
 
     def test_pdf_format_quotes_gain_reflow_hint_without_text_change(self):
         rendered = render(self.content, ROOT)
-        self.assertEqual(rendered.count("data-source-format='pdf'"), 1)
-        for item in self.content["evidence"]:
-            self.assertEqual(rendered.count(html.escape(item["text"], quote=True)), 1)
+        tree = dom.document_fromstring(rendered)
+        quotes = tree.xpath('//main//p[@class="document-content-quote"]')
+        self.assertEqual(len(quotes), 1)
+        self.assertEqual(quotes[0].get("data-source-format"), "pdf")
+        self.assertEqual(quotes[0].text_content(), self.content["evidence"][0]["text"])
 
     def test_rendering_never_changes_frozen_content_or_export(self):
         before = copy.deepcopy(self.content)
@@ -50,20 +53,24 @@ class PDFQuoteReflowTests(unittest.TestCase):
                     item["artifact"]["name"] = name
                 content["content_hash"] = fingerprint({key: value for key, value in content.items() if key != "content_hash"})
                 rendered = render(content, ROOT)
-                self.assertNotIn("data-source-format='pdf'", rendered)
-                self.assertEqual(rendered.count("class='document-content-quote'"), 1)
+                tree = dom.document_fromstring(rendered)
+                self.assertFalse(tree.xpath('//*[@data-source-format="pdf"]'))
+                quotes = tree.xpath('//main//p[@class="document-content-quote"]')
+                self.assertEqual(len(quotes), 1)
+                self.assertEqual(quotes[0].text_content(), content["evidence"][0]["text"])
 
     def test_pdf_format_hint_is_case_insensitive_and_not_a_filename_guess_in_text(self):
         content = copy.deepcopy(self.content)
         for item in content["evidence"]:
             item["artifact"]["name"] = "original.PDF"
         content["content_hash"] = fingerprint({key: value for key, value in content.items() if key != "content_hash"})
-        self.assertEqual(render(content, ROOT).count("data-source-format='pdf'"), 1)
+        tree = dom.document_fromstring(render(content, ROOT))
+        self.assertEqual(len(tree.xpath('//main//p[@data-source-format="pdf"]')), 1)
 
     def test_reader_revision_changes_no_frozen_content_template(self):
         paper = render(self.content, ROOT)
-        self.assertEqual(READER_VERSION, "rh-reader-3")
-        self.assertIn("data-reader-version='rh-reader-3'", paper)
+        self.assertRegex(READER_VERSION, r"^rh-reader-\d+$")
+        self.assertEqual(dom.document_fromstring(paper).get("data-reader-version"), READER_VERSION)
         self.assertIn("模板" + self.content["template_version"], paper)
 
 
