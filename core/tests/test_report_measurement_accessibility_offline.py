@@ -1,30 +1,40 @@
 """Names and header relationships for the actual sparse tables and fee chart."""
 import copy
-from html.parser import HTMLParser
+import json
 import unittest
+from lxml import html
 
 from researchhelper.reports import render, research_figures
 from tests import test_report_visual_selection_offline as fixtures
 
 
-class MeasurementTables(HTMLParser):
+def chart_data(source):
+    """Read this report's input, excluding the bundled library's capabilities."""
+    tree=html.document_fromstring(source)
+    scripts=[node.text for node in tree.xpath('//script[not(@src)]')
+             if node.text and 'const figures=' in node.text]
+    if len(scripts)!=1:
+        raise AssertionError('Expected one report-specific chart input')
+    result,_=json.JSONDecoder().raw_decode(scripts[0].split('const figures=',1)[1])
+    return result
+
+
+class MeasurementTables:
+    """Follow each measurement to its inline or referenced original table."""
     def __init__(self, source):
-        super().__init__()
-        self.active, self.tables, self.headers = False, [], []
-        self.feed(source)
-
-    def handle_starttag(self, tag, attrs):
-        values = dict(attrs)
-        if tag == 'figure' and 'data-calculation-ref' in values:
-            self.active = True
-        if self.active and tag == 'table':
-            self.tables.append(values)
-        if self.active and tag == 'th':
-            self.headers.append(values)
-
-    def handle_endtag(self, tag):
-        if tag == 'figure':
-            self.active = False
+        self.tables,self.headers=[],[]
+        tree=html.document_fromstring(source)
+        for figure in tree.xpath('//main//figure[@data-calculation-ref]'):
+            tables=figure.xpath('.//table')
+            if not tables:
+                for ident in dict.fromkeys(figure.xpath('.//*[@aria-details]/@aria-details')):
+                    targets=tree.xpath('//*[@id=$ident]',ident=ident)
+                    if len(targets)!=1:
+                        raise AssertionError('Measurement has no unique data target: '+ident)
+                    tables.extend(targets[0].xpath('.//table'))
+            for table in tables:
+                self.tables.append(dict(table.attrib))
+                self.headers.extend(dict(node.attrib) for node in table.xpath('./thead//th'))
 
 
 class ReportMeasurementAccessibilityTests(unittest.TestCase):
@@ -32,7 +42,7 @@ class ReportMeasurementAccessibilityTests(unittest.TestCase):
         self.fixture = fixtures.ReportVisualSelectionTests()
         self.addCleanup(self.fixture.doCleanups)
 
-    def test_sparse_tables_have_actual_names_and_column_headers_without_new_copy(self):
+    def test_measurements_have_named_original_tables_and_column_headers(self):
         for method in ('observed_price_return_v1', 'etf_nav_premium_v1', 'gross_margin_v1'):
             with self.subTest(method=method):
                 content = self.fixture.method(method)
@@ -47,14 +57,20 @@ class ReportMeasurementAccessibilityTests(unittest.TestCase):
                     self.assertIn(descriptor['result_label'], table['aria-label'])
                 self.assertTrue(parsed.headers)
                 self.assertTrue(all(header['scope'] == 'col' for header in parsed.headers))
-                self.assertNotIn("class='chart", paper)
+                tree=html.document_fromstring(paper)
+                measurements=tree.xpath('//main//figure[@data-calculation-ref]')
+                self.assertEqual(len(measurements),len(descriptors))
+                self.assertEqual([node.get('data-presentation') for node in measurements],
+                                 [descriptor['presentation'] for descriptor in descriptors])
                 self.assertEqual(content, before)
 
-    def test_real_frozen_content_and_original_export_remain_unchanged(self):
-        content = self.fixture.real()
+    def test_frozen_two_price_content_and_original_export_remain_unchanged(self):
+        saved = self.fixture.saved_price_report()
+        content = saved['content']
         before = copy.deepcopy(content)
         paper = render(content, fixtures.ROOT)
         self.assertEqual(content, before)
+        self.assertEqual(paper, saved['html'])
         table = MeasurementTables(paper).tables[0]
         self.assertIn('未复权收盘价起终点', table['aria-label'])
         self.assertIn('4.416元', paper)
@@ -69,6 +85,9 @@ class ReportMeasurementAccessibilityTests(unittest.TestCase):
         paper = render(content, fixtures.ROOT)
         table = MeasurementTables(paper).tables[0]
         self.assertIn('管理费与托管费分项对比', table['aria-label'])
-        self.assertIn("aria-label='"+table['aria-label']+"'", paper)
-        self.assertIn("class='chart chart-grouped'", paper)
+        tree=html.document_fromstring(paper)
+        charts=tree.xpath('//main//figure[@data-calculation-ref]//*[@role="img" and @aria-details]')
+        self.assertEqual(len(charts),1)
+        self.assertEqual(charts[0].get('aria-label'),table['aria-label'])
+        self.assertEqual(chart_data(paper)[0]['auto_visual']['scheme'],'grouped_bar')
         self.assertEqual(fixture.agent.export(done['id'])['content'], content)
