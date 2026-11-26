@@ -51,15 +51,22 @@ class EvidenceInterfaces(unittest.TestCase):
                                           "questions": [{"id": "q1", "question": "生效日期", "kind": "fact"}]})
 
     def test_authenticated_original_import_and_source_checks(self):
-        task = self.create()
+        task = self.post("/api/tasks", {"question": "逐字核对政策生效条款", "intent": "原件内容核对",
+                                      "questions": [{"id": "q1", "question": "生效日期", "kind": "fact"}]})
         body = "政策自2026年7月19日起生效。"
-        imported = self.post(f"/api/tasks/{task['id']}/material", {"name": "original.txt", "base64": base64.b64encode(body.encode()).decode()})
-        record = imported["materials"][-1]
+        route = f"/api/tasks/{task['id']}/material"
+        encoded = base64.b64encode(body.encode()).decode()
+        imported = self.post(route, {"name": "original.txt", "base64": encoded})
+        alias = self.post(route, {"name": "renamed.txt", "base64": encoded})
+        self.assertEqual(alias["materials"], imported["materials"])
+        record = imported["materials"][0]
         spec = {"id": "original", "artifact_id": record["id"], "object": "政策", "record_locator": {"part": "段落1"}, "text": body,
-                "period": "2026年7月", "nature": "合同政策条款", "unit": "不适用", "published_at": "2026-07-19",
-                "publication": {"at": "2026-07-19", "basis": "离线验收材料公开日期", "timezone": "Asia/Shanghai", "precision": "日", "certainty": "已确认"},
+                "period": "原件条款", "nature": "合同政策条款", "unit": "不适用", "published_at": None,
+                "usage_scope": "document_content",
+                "publication": {"at": None, "basis": "首次公开时间未核验", "basis_ref": None,
+                                "timezone": "未知", "precision": "未知", "certainty": "未知"},
                 "question_ids": ["q1"], "review": {"question_ids": ["q1"], "allowed_natures": ["合同政策条款"], "conditions": ["仅核查该政策原文"], "reason": "生效条款与原问题相符"}}
-        self.post(f"/api/tasks/{task['id']}/start", {"host_result": {"evidence_specs": [spec], "answers": {"q1": {"answer": "2026年7月19日生效", "refs": ["original"]}}}})
+        self.post(f"/api/tasks/{task['id']}/start", {"host_result": {"evidence_specs": [spec]}})
         self.server.agent.workers[task["id"]].join(5)
         final = self.server.agent.archive.get(task["id"])
         self.assertEqual(final["status"], "已完成", final.get("error"))
@@ -95,15 +102,19 @@ spec = importlib.util.spec_from_file_location('isolated_source_skill', entry)
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 session = module.Session({str(project)!r})
-task = session.create('核验费用原文', cutoff='2026-07-20T18:00:00+08:00', questions=[{{'id':'q1','question':'年度费率','kind':'fact'}}])
+task = session.create('核验费用原文', intent='原件内容核对', cutoff='2026-07-20T18:00:00+08:00',
+    questions=[{{'id':'q1','question':'年度费率','kind':'fact'}}])
 body = '管理费为0.15%/年。'
 record = session.material(task['id'], 'fee.txt', body.encode())
+alias = session.material(task['id'], 'fee-copy.txt', body.encode())
+assert record == alias
+assert len(session.status(task['id'])['materials']) == 1
 evidence = {{'id':'fee','artifact_id':record['id'],'object':'离线ETF材料','record_locator':{{'part':'段落1'}},'text':body,
- 'period':'2026年度','nature':'合同政策条款','published_at':'2026-07-19',
- 'publication':{{'at':'2026-07-19','basis':'离线原件公开日期','timezone':'Asia/Shanghai','precision':'日','certainty':'已确认'}},
+ 'period':'原件条款','nature':'合同政策条款','published_at':None,'usage_scope':'document_content',
+ 'publication':{{'at':None,'basis':'首次公开时间未核验','basis_ref':None,'timezone':'未知','precision':'未知','certainty':'未知'}},
  'raw_token':'0.15','raw_value':.15,'value':.15,'raw_unit':'%/年','unit':'%/年','conversion_factor':1,'question_ids':['q1'],
  'review':{{'question_ids':['q1'],'allowed_natures':['合同政策条款'],'conditions':['仅核查管理费，不是持有收益'],'reason':'原文条款口径符合问题'}}}}
-final = session.run(task['id'], evidence_specs=[evidence], answers={{'q1':{{'answer':'年度管理费0.15%','refs':['fee']}}}})
+final = session.run(task['id'], evidence_specs=[evidence])
 assert final['status'] == '已完成', final.get('error')
 assert final['evidence'][0]['artifact']['snapshot']['original_base64']
 assert final['evidence'][0]['source_receipt']['component'] == 'EvidenceCollector'
@@ -111,7 +122,8 @@ assert final['evidence'][0]['applicability_receipt']['component'] == 'ResearchAn
 assert final['ledger']['used']['model_calls'] == final['ledger']['used']['data_requests'] == 0
 target = session.export(task['id'])
 assert target.is_file() and target.with_suffix('.json').is_file()
-assert '原始值：0.15%/年' in target.read_text()
+assert final['evidence'][0]['value'] == .15
+assert body in target.read_text()
 assert session.archive.root == Path({str(project / 'data/researchhelper')!r})
 """
         result = subprocess.run([PYTHON, "-I", "-B", "-c", script], cwd=self.directory, capture_output=True, text=True, timeout=20)
