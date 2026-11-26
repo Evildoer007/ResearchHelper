@@ -1,13 +1,13 @@
 """Writing scopes preserve actual retrieval and never approve completeness."""
 import copy
-import json
 import unittest
 from unittest.mock import patch
 
-from tests import ROOT
-from researchhelper.argument_support import review_request
-from researchhelper.catalog_metadata import scope_basis
-from researchhelper.contracts import ContractError,canonical
+from tests.fee_disclosure_fixture import fee_task
+from tests.test_argument_support_workflow import assessed
+from researchhelper.argument_support import make_record, review_request
+from researchhelper.catalog_metadata import POLICY as METADATA_POLICY, QUERY_POLICY, scope_basis
+from researchhelper.contracts import ContractError, canonical, fingerprint
 from researchhelper.planning import input_fingerprint
 from researchhelper.reasoning import analysis_contract
 
@@ -17,11 +17,15 @@ POLICY='catalog_scoped_writing_version'
 class CatalogScopedWritingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.path=ROOT/'result/acceptance/one-sentence-research-xgb7jjty/task.json'
-        cls.raw=cls.path.read_bytes();cls.retained=json.loads(cls.raw)
+        cls.retained = fee_task(multiple_catalogue_rows=True)
+        cls.retained.update({METADATA_POLICY:1, QUERY_POLICY:1})
+        cls.retained.pop(POLICY, None)
+        cls.retained['input_hash'] = input_fingerprint(cls.retained)
+        cls.original_digest = fingerprint(cls.retained)
 
     @classmethod
-    def tearDownClass(cls):assert cls.path.read_bytes()==cls.raw
+    def tearDownClass(cls):
+        assert fingerprint(cls.retained) == cls.original_digest
 
     def setUp(self):
         self.task=copy.deepcopy(self.retained)
@@ -73,10 +77,19 @@ class CatalogScopedWritingTests(unittest.TestCase):
         task['input_hash']=input_fingerprint(task)
         self.assertNotIn('catalog_scope',analysis_contract(task)['client_writing'])
 
-    def test_stale_binding_rejected_and_closed_failure_not_upgraded(self):
+    def test_stale_binding_rejected_and_incomplete_review_not_upgraded(self):
+        qid = self.task['questions'][0]['id']
+        proposal = dict(answers={qid:dict(answer='已取得两家基金全部公告。', refs=[], calculation_refs=[])},
+                        theses=[])
+        request = review_request(self.task, proposal)
+        targets = [target['id'] for target in request['targets']]
+        _, result = assessed(self.task, proposal, rejected=targets, completion={qid:'requires_evidence'})
+        record = make_record(self.task, proposal, result, actor='host')
+        self.task['argument_support_reviews'] = [record]
+        original = fingerprint(record)
         task=copy.deepcopy(self.task);task[POLICY]=2
         with self.assertRaises(ContractError):analysis_contract(task)
-        self.assertEqual(self.retained['status'],'部分完成')
-        result=self.retained['argument_support_reviews'][-1]['result']
+        self.assertIn('catalog_scope', analysis_contract(self.task)['client_writing'])
         self.assertFalse(result['supported']);self.assertFalse(result['answer_complete'])
         self.assertEqual(result['question_assessments'][0]['status'],'requires_evidence')
+        self.assertEqual(fingerprint(self.task['argument_support_reviews'][0]), original)
