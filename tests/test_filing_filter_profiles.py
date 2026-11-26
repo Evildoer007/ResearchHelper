@@ -24,7 +24,7 @@ class FilingFilterProfileTests(unittest.TestCase):
 
     def shape(self, params, task=None):
         request=dict(id='r1',source='ifind',operation='report_query',parameters=params,
-            question_ids=[self.task['questions'][0]['id']],selection_reason='定位报告原件')
+            question_ids=[self.task['questions'][0]['id']],selection_reason='定位报告原件',catalogue_alternative_ref=None)
         return any(_matches(request,schema) for schema in _planned_request_schemas(task or self.task))
 
     def test_profiles_are_scoped_by_code_not_the_whole_task_entry(self):
@@ -62,6 +62,18 @@ class FilingFilterProfileTests(unittest.TestCase):
             params=dict(self.params,**changes)
             self.assertFalse(self.shape(params))
             with self.assertRaises(ContractError):validate_ifind_report_request(self.task,params)
+
+    def test_legacy_filter_contract_remains_usable_without_rewriting_current_task(self):
+        original=copy.deepcopy(self.task);legacy=copy.deepcopy(self.task)
+        legacy.pop('filing_filter_profile_version');legacy['input_hash']=input_fingerprint(legacy)
+        before=copy.deepcopy(legacy)
+        for filtering in ({},{'reportType':'901'},{'keyWord':'报告'},{'reportType':'901','keyWord':'报告'}):
+            params=dict(self.params,functionpara=filtering)
+            self.assertTrue(self.shape(params,legacy))
+            self.assertEqual(validate_ifind_report_request(legacy,params),[params['beginrDate'],params['endrDate']])
+        self.assertEqual(legacy,before);self.assertEqual(self.task,original)
+        self.assertEqual(legacy['ledger']['used']['data_requests'],0)
+        self.assertEqual(legacy['ledger']['used']['model_calls'],0)
 
     def test_old_policy_keeps_both_filters_and_closed_failure_is_not_reclassified(self):
         legacy=copy.deepcopy(self.task);legacy.pop('filing_filter_profile_version')
