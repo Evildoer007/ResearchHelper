@@ -1,15 +1,11 @@
-/* Preserve the byte-identical OH guide CSS. Isolate RH domain-dialog resets,
- * browser-preview zoom and mobile targets from the incumbent shared component. */
-.user-guide{box-sizing:border-box;max-width:none;max-height:none;overflow:hidden;width:min(1060px,calc(100vw - 48px));height:min(820px,calc(100dvh - 48px));border-radius:12px}
-.user-guide .user-guide__header{position:static;flex:none;background:var(--color-paper);gap:16px}
-.user-guide .user-guide__header button{flex:none;width:44px;min-height:44px;padding:0;border:0;background:transparent;font-size:26px}
-.user-guide .user-guide__header button:hover{background:var(--color-surface)}
-.user-guide .user-guide__sidebar input{min-height:44px}
-.user-guide .user-guide__sidebar label{margin:0 0 8px}
+/* Use the shared Help layout and adapt its viewport and touch controls. */
 .user-guide .user-guide__example-label{font-size:13px}
 .user-guide .user-guide__body{overflow-wrap:anywhere}
 .user-guide :is(button,input,a,.user-guide__body):focus-visible{outline:2px solid var(--color-ink);outline-offset:2px}
-html[data-browser-scale] .user-guide{width:min(1060px,calc(var(--rh-viewport-width) - 48px));height:min(820px,calc(var(--rh-viewport-height) - 48px))}
+html[data-browser-scale] .user-guide{width:min(1180px,calc(var(--rh-viewport-width) - 48px));height:min(820px,calc(var(--rh-viewport-height) - 48px))}
+@media(max-width:700px),(pointer:coarse){
+  .user-guide .user-guide__sidebar input{min-height:44px}
+}
 @media(max-width:700px){
   .user-guide{width:calc(100vw - 16px);height:calc(100dvh - 16px)}
   html[data-browser-scale] .user-guide{width:calc(var(--rh-viewport-width) - 16px);height:calc(var(--rh-viewport-height) - 16px)}
