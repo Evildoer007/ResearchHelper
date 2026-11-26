@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from researchhelper.contracts import fingerprint
 from researchhelper.visual import render
+from researchhelper.reports import READER_VERSION
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -68,7 +69,8 @@ class ReportStatusPresentationTests(unittest.TestCase):
             self.assertIn(item['id'], self.markup)
 
     def test_reader_does_not_change_frozen_content_or_financial_verdict(self):
-        self.assertIn('data-reader-version=\'rh-reader-16\'', self.markup)
+        from lxml import html as dom
+        self.assertEqual(dom.document_fromstring(self.markup).get('data-reader-version'), READER_VERSION)
         self.assertEqual(fingerprint(self.content), self.original_fingerprint)
         self.assertEqual(len(self.content['calculations']), 1)
         self.assertEqual(len(self.content['theses']), 1)
