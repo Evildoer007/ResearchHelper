@@ -1,5 +1,6 @@
 """Report versions are durable deliveries, never mutable recovery checkpoints."""
 import copy
+from datetime import timedelta
 import http.client
 import json
 from pathlib import Path
@@ -10,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from researchhelper.archive import ResearchArchive
+from researchhelper.contracts import timepoint
 from researchhelper.engine import ResearchAgent
 from researchhelper.service import make_server
 
@@ -93,10 +95,12 @@ class ReportDeliveryVersionTests(unittest.TestCase):
         cookies = {}
         token = ''
 
-        def request(route, body=None, account='admin'):
+        def request(route, body=None, account='admin', *, view=None):
             nonlocal token
             connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
             headers = {'Origin': 'http://127.0.0.1:' + str(server.server_port)}
+            if view:
+                headers['X-ResearchHelper-View'] = view
             if cookies.get(account):
                 headers['Cookie'] = cookies[account]
             if body is not None:
@@ -132,6 +136,29 @@ class ReportDeliveryVersionTests(unittest.TestCase):
         self.assertEqual(server.agent.archive.get(task['id']), before)
         self.assertEqual(saved['ledger']['used']['data_requests'], 0)
         self.assertEqual(saved['ledger']['used']['model_calls'], 0)
+
+    def test_workspace_previous_delivery_is_read_only_and_requires_the_update_digest(self):
+        server, request = self.http_service()
+        _, task = request('/api/cases', {'id':'etf'})
+        saved = server.agent.start(task['id'])
+        archive = server.agent.archive
+        archive.correction(task['id'], 1, '版本1原有更正。')
+        cutoff = (timepoint(saved['cutoff']) + timedelta(seconds=1)).isoformat()
+        pending = server.agent.prepare_update(task['id'], cutoff)
+        route = '/api/tasks/'+task['id']
+        expected, = archive.delivery_history(task['id'], version=1)
+        status, view = request(route, view='workspace-v1')
+        self.assertEqual(status, 200)
+        self.assertIsNone(view['delivery'])
+        self.assertEqual(view['previous_delivery'], expected)
+        self.assertNotIn('previous_delivery', request(route)[1])
+        self.assertEqual(request('/api/bootstrap', view='workspace-v2')[1]['saved_report_versions'], {task['id']:1})
+        self.assertEqual(request('/api/bootstrap', account='sales', view='workspace-v2')[1]['saved_report_versions'], {})
+        self.assertEqual(archive.get(task['id']), pending)
+        pending['update_from']['digest'] = '0'*64
+        archive.save(pending)
+        self.assertNotIn('previous_delivery', request(route, view='workspace-v1')[1])
+        self.assertEqual(archive.delivery_history(task['id'], version=2), [])
 
     def test_actual_endpoint_still_requires_same_owner(self):
         server, request = self.http_service()
