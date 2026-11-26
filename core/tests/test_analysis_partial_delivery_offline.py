@@ -68,11 +68,15 @@ class AnalysisPartialDeliveryTests(unittest.TestCase):
         fixture = numeric.NumericCompositionCacheTests(); fixture.setUp()
         self.addCleanup(fixture.doCleanups)
         task = fixture.execution_task(); used = copy.deepcopy(task['ledger']['used'])
-        with patch.object(fixture.fixture.agent, '_reasoning_available', return_value=True), \
-                patch.object(fixture.fixture.agent, '_save_model_checkpoint'), \
-                patch.object(fixture.fixture.agent, '_reason_on_verified_material', side_effect=QueryReferenceFormatError('invalid')) as model:
-            done = fixture.fixture.agent._step(task, 'answer_q1', {})
-            fixture.fixture.agent._step(done, 'answer_q1', {})
+        agent = fixture.fixture.agent
+        run = (task['id'], task['version'], task['batch'])
+        agent._begin_run_control(*run)
+        self.addCleanup(agent._finish_run_control, *run)
+        with patch.object(agent, '_reasoning_available', return_value=True), \
+                patch.object(agent, '_save_model_checkpoint'), \
+                patch.object(agent, '_reason_on_verified_material', side_effect=QueryReferenceFormatError('invalid')) as model:
+            done = agent._step(task, 'answer_q1', {})
+            agent._step(done, 'answer_q1', {})
         self.assertEqual(model.call_count, 1)
         self.assertEqual(done['ledger']['used'], used)
         self.assertFalse(done['reasoning_state']['analysis']['numeric_review']['accepted'])
@@ -94,10 +98,14 @@ class AnalysisPartialDeliveryTests(unittest.TestCase):
         task['host_result'] = copy.deepcopy(prior)
         task['supplement_history'] = [{'status': '执行中', 'round': 1, 'affected_questions': ['q1'],
             'before': {'evidence': [], 'calculations': []}}]
-        with patch.object(fixture.fixture.agent, '_reasoning_available', return_value=True), \
-                patch.object(fixture.fixture.agent, '_save_model_checkpoint'), \
-                patch.object(fixture.fixture.agent, '_reason_on_verified_material', side_effect=QueryReferenceFormatError('invalid')):
-            done = fixture.fixture.agent._step(task, 'answer_q1', {})
+        agent = fixture.fixture.agent
+        run = (task['id'], task['version'], task['batch'])
+        agent._begin_run_control(*run)
+        self.addCleanup(agent._finish_run_control, *run)
+        with patch.object(agent, '_reasoning_available', return_value=True), \
+                patch.object(agent, '_save_model_checkpoint'), \
+                patch.object(agent, '_reason_on_verified_material', side_effect=QueryReferenceFormatError('invalid')):
+            done = agent._step(task, 'answer_q1', {})
         self.assertNotIn('q1', done['host_result']['answers'])
         self.assertEqual(done['questions'][0]['status'], '未回答')
         self.assertFalse(done['reasoning_state']['analysis']['numeric_review']['accepted'])
