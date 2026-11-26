@@ -1,10 +1,10 @@
-"""Role-specific date validation; old studies are immutable unit inputs only."""
+"""Validate separate price and NAV dates on an adopted offline evidence pair."""
 import copy
-import json
 import tempfile
 import unittest
 
 from tests import ROOT
+from tests.test_sse_nav_delivery_chain import SSENavDeliveryChainTests
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import (ContractError, METHOD_REGISTRY, fingerprint,
     calculation_dependency_hash, calculation_context_contract, validate_calculation_context)
@@ -14,27 +14,37 @@ from researchhelper.output_schema import deferred_calculation_output_schema
 from researchhelper.planning import input_fingerprint
 from researchhelper.reasoning import calculation_input_requirements
 from researchhelper.reports import compose
+from researchhelper.source_reader import validate_read_specs
 from researchhelper.visual import research_figures
 
 
 METHOD = 'etf_daily_nav_premium_v1'
 POLICY = 'daily_nav_date_roles_version'
+OBSERVATION_DATE = '2026-10-21'
 
 
 class DailyNavDateRoleTests(unittest.TestCase):
-    def setUp(self):
-        self.path = ROOT / 'result/acceptance/one-sentence-research-ey167o8n/task.json'
-        self.original = self.path.read_bytes()
-        self.task = json.loads(self.original)
-        self.task[POLICY] = 1
-        self.contract = calculation_context_contract(self.task, METHOD)
-        self.bindings = {
-            'price': next(item for item in self.task['evidence'] if item.get('calculation_context', {}).get('price_kind') == 'close'),
-            'nav': next(item for item in self.task['evidence'] if item.get('calculation_context', {}).get('nav_kind') == 'official')}
-        self.parameters = dict(METHOD_REGISTRY[METHOD]['parameters'], valuation_date='2026-06-30')
+    @classmethod
+    def setUpClass(cls):
+        fixture = SSENavDeliveryChainTests()
+        try:
+            fixture.setUp()
+            proposal = fixture.proposal()
+            validate_read_specs(fixture.task, proposal['evidence_specs'], fixture.reading_bundle())
+            cls.initial = fixture.agent.start(fixture.task['id'], proposal, defer_delivery=True)
+            if not cls.initial.get('host_checkpoint') or len(cls.initial['evidence']) != 2:
+                raise AssertionError(cls.initial['gaps'])
+            cls.spec = proposal['calculations'][0]
+        finally:
+            fixture.doCleanups()
 
-    def tearDown(self):
-        self.assertEqual(self.path.read_bytes(), self.original)
+    def setUp(self):
+        self.task = copy.deepcopy(self.initial)
+        self.task['calculations'] = []
+        self.contract = calculation_context_contract(self.task, METHOD)
+        evidence = {item['id']: item for item in self.task['evidence']}
+        self.bindings = {role: evidence[reference] for role, reference in self.spec['inputs'].items()}
+        self.parameters = copy.deepcopy(self.spec['parameters'])
 
     def validate(self, bindings=None, contract=None):
         validate_calculation_context(METHOD, bindings or self.bindings, self.parameters,
@@ -47,7 +57,7 @@ class DailyNavDateRoleTests(unittest.TestCase):
         self.assertNotIn('valuation_date', self.bindings['price']['calculation_context'])
         self.assertEqual(self.contract['version'], 2)
 
-    def test_legacy_method_still_rejects_the_closed_study_inputs(self):
+    def test_legacy_method_requires_the_same_valuation_field_for_both_inputs(self):
         with self.assertRaisesRegex(ContractError, 'valuation_date'):
             validate_calculation_context(METHOD, self.bindings, self.parameters)
         legacy = copy.deepcopy(self.task); legacy.pop(POLICY)
@@ -55,15 +65,15 @@ class DailyNavDateRoleTests(unittest.TestCase):
 
     def test_each_role_requires_its_own_date_and_matching_period(self):
         for role, field in (('price', 'observation_date'), ('nav', 'valuation_date')):
-            for value in ('2026-06-29', '', None, '2026-06-30T15:00:00+08:00'):
+            for value in ('2026-10-20', '', None, OBSERVATION_DATE + 'T15:00:00+08:00'):
                 records = copy.deepcopy(self.bindings); records[role]['calculation_context'][field] = value
                 with self.subTest(role=role, value=value), self.assertRaises(ContractError): self.validate(records)
-            records = copy.deepcopy(self.bindings); records[role]['period'] = '2026-06-29'
+            records = copy.deepcopy(self.bindings); records[role]['period'] = '2026-10-20'
             with self.assertRaises(ContractError): self.validate(records)
 
     def test_wrong_price_observation_is_not_hidden_by_an_extra_valuation_date(self):
         records = copy.deepcopy(self.bindings)
-        records['price']['calculation_context'].update(observation_date='2026-06-29', valuation_date='2026-06-30')
+        records['price']['calculation_context'].update(observation_date='2026-10-20', valuation_date=OBSERVATION_DATE)
         with self.assertRaises(ContractError): self.validate(records)
 
     def test_share_currency_and_close_nav_definition_gates_are_unchanged(self):
@@ -77,7 +87,7 @@ class DailyNavDateRoleTests(unittest.TestCase):
         with self.assertRaises(ContractError): self.validate(contract=changed)
         with self.assertRaises(ContractError):
             validate_calculation_context('etf_nav_premium_v1', self.bindings,
-                dict(METHOD_REGISTRY['etf_nav_premium_v1']['parameters'], valuation_time='2026-06-30T15:00:00+08:00'),
+                dict(METHOD_REGISTRY['etf_nav_premium_v1']['parameters'], valuation_time=OBSERVATION_DATE + 'T15:00:00+08:00'),
                 context_contract=self.contract)
 
     def test_input_descriptors_are_per_role_not_one_shared_date_field(self):
@@ -121,13 +131,9 @@ class DailyNavDateRoleTests(unittest.TestCase):
         self.assertNotEqual(calculation_dependency_hash(item), old)
 
     def calculated_projection(self):
-        # Isolated lower-level unit copy only. Never save, resume or mark the
-        # closed study complete; its original source receipts stay untouched.
         agent = ResearchAgent.__new__(ResearchAgent)
         agent.knowledge = ResearchKnowledge()
-        spec = dict(id='date_role_unit_projection', method=METHOD,
-            inputs={key:item['id'] for key,item in self.bindings.items()}, parameters=self.parameters, question_ids=['q1'])
-        agent._calculate_spec(self.task, spec)
+        agent._calculate_spec(self.task, copy.deepcopy(self.spec))
         self.assertEqual(len(self.task['calculations']), 1)
         return self.task['calculations'][0]
 
@@ -138,9 +144,9 @@ class DailyNavDateRoleTests(unittest.TestCase):
         content = compose(self.task)
         self.assertEqual(content[POLICY], 1)
         figure = research_figures(content)[item['id']]
-        self.assertIn('2026-06-30', figure['basis'])
+        self.assertIn(OBSERVATION_DATE, figure['basis'])
         self.assertNotIn('valuation_date', self.bindings['price']['calculation_context'])
-        self.assertEqual(self.task['status'], '部分完成')
+        self.assertEqual(self.task['status'], self.initial['status'])
 
     def test_report_refuses_removed_or_changed_context_contract(self):
         item = self.calculated_projection()
