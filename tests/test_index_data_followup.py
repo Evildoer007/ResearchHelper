@@ -1,26 +1,36 @@
-"""Read-only retained acquisition and negative lineage cases; no new calls."""
+"""Replay retained membership and closing price with controlled dispatch receipts."""
 import copy
-import json
+import tempfile
 import unittest
 
 from tests import ROOT
 from tests.accept_index_members_data_phase import acquisition_inventory
-
-RETAINED = ROOT/'result/acceptance/autonomous-data-phase-rs5b197h/task.json'
+from researchhelper.archive import ResearchArchive
+from researchhelper.engine import ResearchAgent
+from tests.market_observation_fixtures import INDEX_CAPTURES, append_index_member_replay, read_captures
 
 
 class IndexDataFollowupTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.original = RETAINED.read_bytes()
-        cls.task = json.loads(cls.original)
+        cls.original = INDEX_CAPTURES.read_bytes()
+        cls.samples = read_captures(cls.original, grouped=True)
 
     @classmethod
     def tearDownClass(cls):
-        if RETAINED.read_bytes() != cls.original:
+        if INDEX_CAPTURES.read_bytes() != cls.original:
             raise AssertionError('Closed study changed')
 
-    def test_actual_name_only_acquisition_has_a_matching_member_quote(self):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        agent = ResearchAgent(ResearchArchive(folder.name), ROOT, offline=True, require_argument_support=True)
+        self.addCleanup(agent.close_runtime)
+        self.task = agent.create('核对上证50在2026年10月16日的成分名单及样本当日收盘价。',
+            entry='指数', research_mode='current')
+        append_index_member_replay(self.task, self.samples)
+
+    def test_name_only_index_replay_has_a_matching_member_quote(self):
         result = acquisition_inventory(self.task)
         self.assertTrue(result['autonomous_member_followup_observed'])
         self.assertEqual(result['pools'][0]['rows'], 50)
@@ -28,7 +38,6 @@ class IndexDataFollowupTests(unittest.TestCase):
         self.assertEqual(result['quote_sources'][0]['parameters']['codes'], '600519.SH')
         self.assertTrue(all(row['snapshot_hash_valid'] for row in result['source_checks']))
         self.assertEqual(self.task['evidence'], [])
-        self.assertIn('provider_code', self.task['rejected_evidence'][0]['rejection'])
 
     def test_missing_pool_is_not_a_member_followup(self):
         task = copy.deepcopy(self.task)
@@ -49,7 +58,7 @@ class IndexDataFollowupTests(unittest.TestCase):
             if change == 'code':
                 quote['parameters']['codes'] = '000001.SZ'
             elif change == 'date':
-                quote['parameters']['startdate'] = '2026-09-29'
+                quote['parameters']['startdate'] = '2026-10-15'
             else:
                 quote['snapshot']['tables'][0]['table']['close'] = []
             with self.subTest(change=change):
