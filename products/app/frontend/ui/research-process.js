@@ -1,9 +1,7 @@
-/* OH process disclosure and orb, bound only to RH's actual research state.
+/* OH thinking orb and live status, bound only to RH's actual research state.
  * Presentation never starts, cancels, resumes or changes a research task. */
 (function () {
 "use strict";
-const labels=Object.freeze({'待开始':'研究待开始','运行中':'研究正在运行','已完成':'研究已完成',
-  '部分完成':'研究部分完成','失败':'研究未完成','已取消':'研究已取消'});
 const modelPhases=Object.freeze({plan:'正在规划研究',acquire:'正在查找研究资料',read:'正在选择材料',extract:'正在提取材料',
   bind_calculations:'正在核对计算输入',analyze:'正在分析证据',supplement:'正在规划补证'});
 const modelStages=Object.freeze({'连接服务':'正在连接模型服务','读取响应':'正在等待模型响应'});
@@ -19,73 +17,45 @@ function pendingModel(task){
   }
   return null;
 }
-function html(task,{progress='',actions=''}={}) {
+function html(task) {
   const nodes=Array.isArray(task.nodes)?task.nodes:[],running=task.status==='运行中';
   const current=running?nodes.find(node=>node.status==='运行中'):null;
   const model=pendingModel(task);
+  const presentation=window.RHResearchData.taskStatus(task);
+  const blocked=task.batch_settling!==true?task.recovery_block?.reason:null;
   const panel=document.createElement('article');
   panel.className='message message--assistant message--process rh-process';
   panel.dataset.runtimeProcess='true';panel.dataset.terminal=String(!running);
-  panel.dataset.hasDetails=String(nodes.length>0);panel.dataset.outcome=task.status==='失败'?'failed':running?'running':'terminal';
-  const details=document.createElement('details');details.className='chat-progress';
-  const summary=document.createElement('summary');
+  panel.dataset.outcome=task.status==='失败'?'failed':running?'running':'terminal';
+  const summary=document.createElement('div');
+  summary.className='rh-process__summary';
   if(running){const slot=document.createElement('span');slot.dataset.processOrb='true';slot.setAttribute('aria-hidden','true');summary.append(slot)}
   const label=document.createElement('span');label.className='runtime-state-label';
   label.setAttribute('role','status');label.setAttribute('aria-live','polite');label.setAttribute('aria-atomic','true');
-  label.textContent=model?.label||current?.title||labels[task.status]||String(task.status||'研究状态待确认');
-  if(model?.title)label.title=model.title;
+  label.textContent=model?.label||current?.title||(blocked&&task.status==='待开始'?'研究已暂停':presentation.processLabel);
+  if(model?.title||presentation.title)label.title=model?.title||presentation.title;
   summary.append(label);
-  details.append(summary);
-  if(nodes.length){
-    const state=document.createElement('p');state.className='process-state';state.textContent=progress;details.append(state);
-    const events=document.createElement('ol');events.className='process-events';events.dataset.processTimeline='true';
-    for(const node of nodes){
-      const row=document.createElement('li');row.dataset.status=node.status==='失败'?'failed':node.status==='已取消'?'cancelled':'normal';
-      const title=document.createElement('span');title.textContent=String(node.title||node.id||'研究步骤');
-      const status=document.createElement('span');status.textContent=String(node.status||'状态待确认');
-      row.append(title,document.createTextNode('：'),status);events.append(row);
-    }
-    details.append(events);
-  }
-  const view=document.createElement('button');view.className='button-secondary';view.type='button';view.dataset.stage='1';view.textContent='查看执行与证据';
-  details.append(view);panel.append(details);
-  if(task.status==='失败'&&task.error){
-    const error=document.createElement('p');error.className='process-failure';error.setAttribute('role','alert');error.textContent=String(task.error);panel.append(error);
-  }
-  if(actions&&['待开始','运行中','失败','已取消'].includes(task.status)){
-    const recovery=document.createElement('div');recovery.className='rh-process__recovery';
-    // Only the existing local actions(task) renderer supplies these controls,
-    // never model text, error text or a provider response.
-    recovery.innerHTML=actions;panel.append(recovery);
+  panel.append(summary);
+  const reason=blocked||(task.status==='失败'?task.error:null);
+  if(reason){
+    const error=document.createElement('p');error.className='process-failure';error.setAttribute('role','alert');error.textContent=String(reason);panel.append(error);
   }
   return panel.outerHTML;
 }
 function reconcile(previous,next){
-  // Like OH's retained reasoning disclosure, update the live content without
-  // detaching its summary, status region or unchanged evidence control.
-  const details=previous.querySelector('.chat-progress'),incoming=next.querySelector('.chat-progress');
-  const summary=details?.querySelector('summary'),label=summary?.querySelector('.runtime-state-label');
-  if(!details||!incoming||!summary||!label)return next;
+  // Keep the live region and orb attached while polling updates the phase.
   Object.assign(previous.dataset,next.dataset);
-  const nextLabel=incoming.querySelector('.runtime-state-label');
+  const summary=previous.firstElementChild,nextSummary=next.firstElementChild;
+  const label=summary.querySelector('.runtime-state-label'),nextLabel=nextSummary.querySelector('.runtime-state-label');
   if(label.textContent!==nextLabel.textContent)label.textContent=nextLabel.textContent;
   if(nextLabel.hasAttribute('title'))label.title=nextLabel.title;else label.removeAttribute('title');
-  const slot=summary.querySelector('[data-process-orb]'),nextSlot=incoming.querySelector('[data-process-orb]');
+  const slot=summary.querySelector('[data-process-orb]'),nextSlot=nextSummary.querySelector('[data-process-orb]');
   if(nextSlot&&!slot)summary.insertBefore(nextSlot,label);
   else if(!nextSlot&&slot)slot.remove();
-  const view=details.querySelector('[data-stage="1"]');
-  for(const selector of ['.process-state','.process-events']){
-    const existing=details.querySelector(selector),fresh=incoming.querySelector(selector);
-    if(!fresh){existing?.remove();continue}
-    if(existing){if(existing.outerHTML!==fresh.outerHTML)existing.replaceWith(fresh)}
-    else details.insertBefore(fresh,selector==='.process-state'?(details.querySelector('.process-events')||view):view);
-  }
-  for(const selector of ['.process-failure','.rh-process__recovery']){
-    const existing=previous.querySelector(selector),fresh=next.querySelector(selector);
-    if(!fresh){existing?.remove();continue}
-    if(existing){if(existing.outerHTML!==fresh.outerHTML)existing.replaceWith(fresh)}
-    else previous.insertBefore(fresh,selector==='.process-failure'?previous.querySelector('.rh-process__recovery'):null);
-  }
+  const existing=previous.querySelector('.process-failure'),fresh=next.querySelector('.process-failure');
+  if(!fresh)existing?.remove();
+  else if(!existing)previous.append(fresh);
+  else if(existing.textContent!==fresh.textContent)existing.textContent=fresh.textContent;
   return previous;
 }
 function create(){
