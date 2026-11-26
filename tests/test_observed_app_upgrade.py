@@ -20,7 +20,8 @@ class ObservedAppUpgradeTests(unittest.TestCase):
     def create(self,path,value):
         (path/'Contents').mkdir(parents=True)
         (path/'Contents/Info.plist').write_bytes(plistlib.dumps(dict(CFBundleIdentifier='io.researchhelper.app',
-            CFBundleName='ResearchHelper',CFBundleExecutable='ResearchHelper',CFBundleShortVersionString='0.0.0')))
+            CFBundleName='ResearchHelper',CFBundleExecutable='ResearchHelper',
+            CFBundleShortVersionString='0.0.0',CFBundleVersion='0.0.0')))
         (path/'Contents/value').write_text(value)
 
     def observe(self):
