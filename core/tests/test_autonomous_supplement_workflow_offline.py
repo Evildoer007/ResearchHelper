@@ -7,8 +7,8 @@ import unittest
 from unittest.mock import patch
 from urllib.error import URLError
 
-import test_method_dependency_workflow_offline as workflow
-import test_autonomous_reasoning_offline as autonomous
+from tests import test_method_dependency_workflow_offline as workflow
+from tests import test_autonomous_reasoning_offline as autonomous
 from researchhelper.contracts import ContractError, charge, fingerprint
 from researchhelper.model import ModelService, ModelSettings
 from researchhelper.planning import question_specs
@@ -47,8 +47,15 @@ class AutonomousSupplementWorkflowTests(unittest.TestCase):
         final = {"answers": host["answers"], "theses": []}
         return task, [plan, extraction, first, proposal, final]
 
+    @staticmethod
+    def model_fixture(outputs):
+        # These scenarios exercise a supplement after the first calculation
+        # binding produced no result. Account for that first-phase call.
+        binding = {"calculations": [], "reason": "首轮未登记合成毛利率计算绑定"}
+        return autonomous.FabricatedModel([*outputs[:2], binding, *outputs[2:]])
+
     def run_model(self, task, outputs):
-        harness = autonomous.FabricatedModel(outputs)
+        harness = self.model_fixture(outputs)
         with patch("researchhelper.model.urllib.request.urlopen", side_effect=harness.respond):
             result = self.agent.start(task["id"])
         return result, harness
@@ -67,7 +74,7 @@ class AutonomousSupplementWorkflowTests(unittest.TestCase):
             result, harness = self.run_model(task, outputs)
         self.assertEqual(result["status"], "已完成", result.get("error") or result["gaps"])
         self.assertEqual(result["ledger"]["supplements"], 1)
-        self.assertEqual(len(harness.requests), 5)
+        self.assertEqual(len(harness.requests), 6)
         self.assertEqual(calls.count("answer_independent"), 1)
         self.assertEqual(calls.count("evidence"), 1)
         self.assertEqual(next(q for q in result["questions"] if q["id"] == "q2"), snapshots["question"])
@@ -84,7 +91,7 @@ class AutonomousSupplementWorkflowTests(unittest.TestCase):
         result, harness = self.run_model(task, outputs[:4])
         self.assertEqual(result["status"], "部分完成", result.get("error"))
         self.assertEqual(result["ledger"]["supplements"], 0)
-        self.assertEqual(len(harness.requests), 4)
+        self.assertEqual(len(harness.requests), 5)
         self.assertIn("无新增", result["supplement_stop_reason"])
 
     def test_invalid_proposal_never_counts_round_or_creates_calculation(self):
@@ -94,7 +101,7 @@ class AutonomousSupplementWorkflowTests(unittest.TestCase):
         self.assertEqual(result["status"], "部分完成", result.get("error"))
         self.assertEqual(result["ledger"]["supplements"], 0)
         self.assertEqual(result["calculations"], [])
-        self.assertEqual(len(harness.requests), 4)
+        self.assertEqual(len(harness.requests), 5)
 
     def test_host_checkpoint_supplements_and_final_delivery_share_version_budget(self):
         task, outputs = self.prepare()
@@ -119,12 +126,12 @@ class AutonomousSupplementWorkflowTests(unittest.TestCase):
         original = self.agent._step
         cancelled = []
         def interrupt(current, node, host):
-            if node == "calculation" and not cancelled:
+            if node == "calculation" and self.agent._active_supplement(current) and not cancelled:
                 cancelled.append(True)
                 self.agent.cancel(current["id"])
                 raise ContractError("测试取消已登记轮")
             return original(current, node, host)
-        harness = autonomous.FabricatedModel(outputs)
+        harness = self.model_fixture(outputs)
         with patch("researchhelper.model.urllib.request.urlopen", side_effect=harness.respond):
             with patch.object(self.agent, "_step", side_effect=interrupt):
                 stopped = self.agent.start(task["id"])
@@ -133,8 +140,8 @@ class AutonomousSupplementWorkflowTests(unittest.TestCase):
             resumed = self.agent.start(task["id"])
         self.assertEqual(resumed["status"], "已完成", resumed.get("error") or resumed["gaps"])
         self.assertEqual(resumed["ledger"]["supplements"], 1)
-        self.assertEqual(len(harness.requests), 5)
-        self.assertEqual(resumed["ledger"]["used"]["model_calls"], 5)
+        self.assertEqual(len(harness.requests), 6)
+        self.assertEqual(resumed["ledger"]["used"]["model_calls"], 6)
 
     def test_cancelled_planner_output_is_discarded_and_not_planned_again(self):
         task, outputs = self.prepare()
@@ -150,7 +157,7 @@ class AutonomousSupplementWorkflowTests(unittest.TestCase):
         with patch("researchhelper.model.urllib.request.urlopen", side_effect=AssertionError("No uncertain-plan replay")):
             resumed = self.agent.start(task["id"])
         self.assertEqual(resumed["status"], "部分完成", resumed.get("error"))
-        self.assertEqual(resumed["ledger"]["used"]["model_calls"], 4)
+        self.assertEqual(resumed["ledger"]["used"]["model_calls"], 5)
 
     def test_material_change_during_planning_rejects_late_proposal(self):
         task, outputs = self.prepare()
@@ -195,23 +202,23 @@ class AutonomousSupplementWorkflowTests(unittest.TestCase):
 
     def test_budget_exhaustion_closes_without_supplement_model_dispatch(self):
         task, outputs = self.prepare()
-        task["ledger"]["limits"]["model_calls"] = 4
+        task["ledger"]["limits"]["model_calls"] = 5
         self.agent.archive.save(task)
         result, harness = self.run_model(task, outputs[:3])
         self.assertEqual(result["status"], "部分完成", result.get("error"))
-        self.assertEqual(len(harness.requests), 3)
-        self.assertEqual(result["ledger"]["used"]["model_calls"], 3)
+        self.assertEqual(len(harness.requests), 4)
+        self.assertEqual(result["ledger"]["used"]["model_calls"], 4)
         self.assertEqual(result["ledger"]["supplements"], 0)
         self.assertIn("交付预留", result["supplement_stop_reason"])
 
     def test_last_research_call_is_not_spent_on_an_incomplete_round(self):
         task, outputs = self.prepare()
-        task["ledger"]["limits"]["model_calls"] = 5
+        task["ledger"]["limits"]["model_calls"] = 6
         self.agent.archive.save(task)
         result, harness = self.run_model(task, outputs[:3])
         self.assertEqual(result["status"], "部分完成", result.get("error"))
-        self.assertEqual(len(harness.requests), 3)
-        self.assertEqual(result["ledger"]["used"]["model_calls"], 3)
+        self.assertEqual(len(harness.requests), 4)
+        self.assertEqual(result["ledger"]["used"]["model_calls"], 4)
         self.assertEqual(result["ledger"]["reserve"]["model_calls"], 1)
         self.assertEqual(result["ledger"]["used"]["data_requests"], 0)
         self.assertEqual(result["ledger"]["supplements"], 0)
@@ -219,12 +226,12 @@ class AutonomousSupplementWorkflowTests(unittest.TestCase):
 
     def test_costlier_proposal_is_rejected_after_planning_before_registration(self):
         task, outputs = self.prepare()
-        task["ledger"]["limits"]["model_calls"] = 6
+        task["ledger"]["limits"]["model_calls"] = 7
         self.agent.archive.save(task)
         outputs[3]["artifact_ids"] = [task["materials"][0]["id"]]
         result, harness = self.run_model(task, outputs[:4])
         self.assertEqual(result["status"], "部分完成", result.get("error"))
-        self.assertEqual(len(harness.requests), 4)
+        self.assertEqual(len(harness.requests), 5)
         self.assertEqual(result["ledger"]["supplements"], 0)
         self.assertEqual(result["ledger"]["used"]["data_requests"], 0)
         self.assertEqual(result["calculations"], [])
@@ -236,7 +243,7 @@ class AutonomousSupplementWorkflowTests(unittest.TestCase):
         result, harness = self.run_model(task, outputs[:4])
         self.assertEqual(result["status"], "部分完成", result.get("error"))
         self.assertEqual(result["ledger"]["supplements"], 1)
-        self.assertEqual(len(harness.requests), 4)
+        self.assertEqual(len(harness.requests), 5)
         self.assertIn("未增加", result["supplement_stop_reason"])
         self.assertEqual(result["supplement_history"][0]["results"]["calculations_added"], [])
 
