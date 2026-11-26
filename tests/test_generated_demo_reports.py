@@ -5,6 +5,7 @@ import socket
 import sys
 import tempfile
 import unittest
+from lxml import html
 from unittest.mock import patch
 
 from tests import ROOT
@@ -26,7 +27,11 @@ class GeneratedDemoReportTests(unittest.TestCase):
                 self.assertTrue(task['synthetic'])
                 self.assertTrue(task['delivery']['digest'])
                 self.assertIn('<!doctype html>', task['report_html'])
-                self.assertIn("id='main'", task['report_html'])
+                tree=html.document_fromstring(task['report_html'])
+                self.assertEqual(len(tree.xpath('//main')),1)
+                documents=tree.xpath('//script[@id="rh-publication-document"]')
+                self.assertEqual(len(documents),1)
+                self.assertEqual(json.loads(documents[0].text)['profile'],'standard')
                 self.assertNotIn('pending_content', task)
                 self.assertNotIn('pending_html', task)
 
