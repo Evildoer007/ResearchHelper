@@ -110,7 +110,7 @@ def run(refresh_token):
         client = PrivateAppClient(app.backend_url())
         app.press('~请优先使用iFinD研究510300.SH')
         app.observe('research-ready')
-        app.press('开始研究')
+        app.press('发送研究问题')
         record['research_started_from_native_ui'] = True
         app.control('hide')
         if app.previous_pid:
