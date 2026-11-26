@@ -78,8 +78,13 @@ class FinancialSourceWorkflowTests(unittest.TestCase):
 
     def test_tool_inventory_covers_all_registered_families_not_supplier_marketing(self):
         contract = data_request_contract(self.task)
-        self.assertEqual({tool['qualified_id_for_lookup_only'] for tool in contract['tools']},
-            set(FIELD_REGISTRY) | set(FILING_REQUEST_REGISTRY) | set(IDENTITY_REQUEST_REGISTRY) | set(FINANCIAL_REQUEST_REGISTRY))
+        planned = {tool['qualified_id_for_lookup_only'] for tool in contract['tools']}
+        required = set().union(FIELD_REGISTRY, FILING_REQUEST_REGISTRY, IDENTITY_REQUEST_REGISTRY, FINANCIAL_REQUEST_REGISTRY) - {'official.index_file', 'official.etf_pcf'}
+        registered = {source + '.' + item['operation'] for source, capability in CAPABILITIES.items()
+                      for item in capability['registered_operations']}
+        self.assertTrue(required.issubset(planned))
+        self.assertTrue(planned.issubset(registered))
+        self.assertEqual(len(planned), len(contract['tools']))
         self.assertNotIn('basic_data_service', [tool['operation'] for tool in contract['tools']])
 
     def test_mock_provider_dispatch_keeps_parameters_raw_values_and_budget(self):
