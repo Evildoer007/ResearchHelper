@@ -9,7 +9,8 @@ from pathlib import Path
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, fingerprint
 from researchhelper.engine import ResearchAgent
-from researchhelper.reports import build_version_changes, compose, validate_version_changes
+from researchhelper.reasoning import phase_output_example
+from researchhelper.reports import build_version_changes, compose, render, validate_version_changes
 from tests import test_research_coverage_offline as fixtures
 from tests import test_tracking_contract_offline as tracking_fixture
 
@@ -109,9 +110,18 @@ class VersionReviewTests(unittest.TestCase):
     def test_failed_third_update_does_not_show_second_updates_diff(self):
         second = self.update(self.complete())
         old = self.agent.archive.report(second["id"], 2)
-        result = self.agent.update(second["id"], cutoff="2026-09-20T18:00:00+08:00",
-                                   host_result={"evidence_specs": "invalid"})
+        step = self.agent._step
+
+        def interrupted(task, node, host_result):
+            if node == 'evidence':
+                raise ContractError('模拟新版取证中断')
+            return step(task, node, host_result)
+
+        with patch.object(self.agent, '_step', side_effect=interrupted):
+            result = self.agent.update(second["id"], cutoff="2026-09-20T18:00:00+08:00",
+                                       host_result=self.host_result(second))
         self.assertEqual(result["status"], "失败")
+        self.assertEqual(result['error'], '模拟新版取证中断')
         self.assertNotIn("changes", result)
         self.assertEqual(result["update_from"]["version"], 2)
         self.assertEqual(self.agent.archive.report(second["id"], 2), old)
@@ -152,8 +162,9 @@ class VersionReviewTests(unittest.TestCase):
     def test_report_has_named_versions_full_original_rule_and_toc(self):
         before = self.complete(dict(RULE, benchmark="<原条件>"))
         after = self.update(before)
-        paper = self.agent.export(after["id"])["html"]
-        for text in ("版本1判断", "版本2判断", "原版适用资格解释", "本版适用资格解释", "下一次主动更新", "&lt;原条件&gt;", "href='#changes'"):
+        content = self.agent.export(after["id"])["content"]
+        paper = render(content, ROOT, report_profile="detailed")
+        for text in ("版本1判断", "版本2判断", "原版适用资格解释", "本版适用资格解释", "下一次主动更新", "&lt;原条件&gt;", 'href="#changes"'):
             self.assertIn(text, paper)
         self.assertEqual(fingerprint(self.agent.archive.report(after["id"], 2)["content"]), after["delivery"]["digest"])
 
@@ -175,7 +186,7 @@ class VersionReviewTests(unittest.TestCase):
 
     def test_app_analysis_receives_same_frozen_context_without_old_evidence(self):
         done = self.update(self.complete())
-        with patch("researchhelper.engine.model_object", return_value=({"answers": {}, "theses": []}, {})) as model:
+        with patch("researchhelper.engine.model_object", return_value=(phase_output_example('analyze', done), {})) as model:
             self.agent._reason_on_verified_material(done)
         payload = model.call_args.args[3]
         self.assertEqual(payload["version_review"], self.agent.review_baseline(done))
