@@ -10,7 +10,7 @@ from core.session import Session
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError,canonical,fingerprint
 from researchhelper.engine import ResearchAgent
-from researchhelper.knowledge import ResearchKnowledge,CATALOGUE_POLICY,GENERAL_DEFINITION_SCOPE
+from researchhelper.knowledge import ResearchKnowledge,CATALOGUE_POLICY,CATALOGUE_REVISION,GENERAL_DEFINITION_SCOPE
 from researchhelper.draft_workflow import _write
 
 NEW_IDS={'rh_k_cpi_reading','rh_k_inflation_transmission'}
@@ -66,10 +66,10 @@ class InflationKnowledgeTests(unittest.TestCase):
             self.assertTrue(e['source_reference']['url'].startswith(('https://www.stats.gov.cn/','https://www.ecb.europa.eu/')))
             self.assertNotIn('2026年9月CPI为',e['content']);self.assertNotIn('2%',e['content'])
 
-    def test_new_task_pins_three_and_resuming_two_does_not_migrate(self):
+    def test_new_task_pins_current_catalogue_and_resuming_two_does_not_migrate(self):
         with TemporaryDirectory() as folder:
             engine=self.agent(folder);fresh=engine.create(QUESTION,entry='宏观',research_mode='current')
-            self.assertEqual(fresh[CATALOGUE_POLICY],3);engine._adopt_method_knowledge(fresh)
+            self.assertEqual(fresh[CATALOGUE_POLICY],CATALOGUE_REVISION);engine._adopt_method_knowledge(fresh)
             self.assertTrue(NEW_IDS <= fresh['knowledge']['index'].keys())
             old=engine.create(QUESTION,entry='宏观',research_mode='current');old[CATALOGUE_POLICY]=2
             old['knowledge']=self.package(2);before=deepcopy(old['knowledge']['entries'])
