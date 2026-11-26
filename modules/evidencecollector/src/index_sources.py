@@ -1,4 +1,4 @@
-"""Registered index member retrieval; no weights or historical-vintage approval."""
+"""Registered index constituents, current weights, and source-backed industry samples."""
 from __future__ import annotations
 
 import copy
@@ -14,7 +14,8 @@ import time
 import urllib.error
 from urllib.parse import urlsplit
 
-from .contracts import ContractError, fingerprint, market_date
+from .contracts import ContractError, DuplicateJSONField, fingerprint, market_date, unique_json_object
+from .subject_scope import scope_question, subject_allowed
 
 DOCUMENTATION = 'https://quantapi.51ifind.com/gwstatic/static/ds_web/quantapi-web/example.html'
 LIMITATION = ('成分行仅供同任务后续取数定位，不是已核验金融证据。日期是当前取得版本的名单观测日，'
@@ -33,14 +34,41 @@ CSI_ROOT='https://www.csindex.com.cn'
 CSI_FILES='https://oss-ch.csindex.com.cn'
 CSI_PREFIX='/static/html/csindex/public/uploads/file/autofile/'
 CSI_MAX_BYTES=5*1024*1024
+INDUSTRY_SAMPLE_POLICY = 'draft_industry_sample_version'
+INDUSTRY_SAMPLE_VERSION = 2
+BROKER_READING_POLICY = 'draft_broker_reading_version'
+_CSI_FACTSHEETS = CSI_FILES+'/static/html/csindex/public/uploads/indices/detail/files/zh_CN/'
+_INDUSTRY_PROFILES = {
+    '399975.SZ': dict(code='399975', name='中证全指证券公司指数', aliases=['中证全指证券公司指数'],
+        expected_rows=47, topic='券商', topic_pattern=r'A股券商|券商(?:行业|板块|样本)|证券(?:公司)?(?:行业|板块)|中证全指证券公司指数',
+        index_documentation=_CSI_FACTSHEETS+'399975factsheet.pdf'),
+    '399986.SZ': dict(code='399986', name='中证银行指数', aliases=['中证银行指数'],
+        expected_rows=42, topic='银行', topic_pattern=r'银行(?:行业|板块|业(?!绩))|中证银行|A股银行|上市银行',
+        index_documentation=_CSI_FACTSHEETS+'399986factsheet.pdf'),
+    '399997.SZ': dict(code='399997', name='中证白酒指数', aliases=['中证白酒指数', '中证白酒'],
+        expected_rows=17, topic='白酒', topic_pattern=r'白酒(?:行业|板块|样本)|中证白酒|A股白酒',
+        index_documentation=_CSI_FACTSHEETS+'399997factsheet.pdf', operating_drivers=True),
+    'H30184.SH': dict(code='H30184', name='中证全指半导体产品与设备指数',
+        aliases=['中证全指半导体产品与设备指数'], expected_rows=87, topic='半导体',
+        topic_pattern=r'半导体(?:行业|板块|样本|产品与设备)|A股半导体',
+        index_documentation=_CSI_FACTSHEETS+'H30184factsheet.pdf', operating_drivers=True),
+}
 CSI_PROFILES={
     '000300.SH':dict(code='000300',name='沪深300',aliases=['沪深300','CSI 300'],expected_rows=300),
     '000905.SH':dict(code='000905',name='中证500',aliases=['中证500','中证小盘500','CSI 500'],expected_rows=500,
         index_documentation=CSI_FILES+'/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000905factsheet.pdf'),
     '000852.SH':dict(code='000852',name='中证1000',aliases=['中证1000','CSI 1000'],expected_rows=1000,
-        index_documentation=CSI_FILES+'/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000852factsheet.pdf')}
+        index_documentation=CSI_FILES+'/static/html/csindex/public/uploads/indices/detail/files/zh_CN/000852factsheet.pdf'),
+    **_INDUSTRY_PROFILES}
 CSI_LEGACY_CODES=frozenset(('000300.SH',))
 PROFILE_POLICY='official_index_profile_catalogue_version'
+DRAFT_WEIGHT_POLICY = 'draft_index_weight_scope_version'
+DRAFT_WEIGHT_REFRESH_VERSION = 3
+COMPOUND_WEIGHT_VERSION = 4
+DRAFT_WEIGHT_VERSION = COMPOUND_WEIGHT_VERSION
+DRAFT_LATEST_WEIGHT_VERSIONS = (2, DRAFT_WEIGHT_REFRESH_VERSION, DRAFT_WEIGHT_VERSION)
+_WEIGHT_RANK = re.compile(r'前\s*([0-9]+|[一二三四五六七八九十百千两]+)\s*(?:大|只|个|名|位)?\s*(?:成[分份](?:股|券)?|权重股?)')
+
 CSI_HEADERS=['日期Date','指数代码 Index Code','指数名称 Index Name','指数英文名称Index Name(Eng)',
     '成份券代码Constituent Code','成份券名称Constituent Name','成份券英文名称Constituent Name(Eng)',
     '交易所Exchange','交易所英文名称Exchange(Eng)']
@@ -57,15 +85,29 @@ def enabled(task):
     return type(task.get('index_constituent_source_version')) is int and task['index_constituent_source_version'] == 1
 
 
+def _index_allowed(task, code, profile):
+    return subject_allowed(task, code) and all(subject_allowed(task, value)
+        for alias in profile['aliases'] for value in (alias, alias + '指数'))
+
+
+def registered_market_index_names(task):
+    """Use the registered index identities without checking source permissions."""
+    profiles = PROFILES | CSI_PROFILES
+    return {alias: (code, profile['name'])
+            for code, profile in profiles.items() if _index_allowed(task, code, profile)
+            for alias in profile['aliases']}
+
+
 def available_profiles(task):
     if not enabled(task):
         return {}
     from .evidence import declared_security_codes, identity_resolutions
     codes = set(declared_security_codes(task)) | {code for item in identity_resolutions(task)
         if item['status'] == '代码映射已核验' for code in item['codes']}
-    texts = [task.get('question',''),*task.get('objects',[])]
+    texts = [scope_question(task), *task.get('objects', [])]
     return {code:copy.deepcopy(profile) for code,profile in PROFILES.items()
-        if code in codes or any(alias in text for alias in profile['aliases'] for text in texts if isinstance(text,str))}
+        if _index_allowed(task, code, profile) and
+        (code in codes or any(alias in text for alias in profile['aliases'] for text in texts))}
 
 
 def validate_index_request(task, params, *, require_identity=True):
@@ -109,11 +151,15 @@ def official_index_profiles(task):
     if type(task.get('official_index_sources_version')) is not int or task['official_index_sources_version']!=1:
         return {}
     from .evidence import declared_security_codes
-    codes=set(declared_security_codes(task));texts=[task.get('question',''),*task.get('objects',[])]
+    codes = set(declared_security_codes(task))
+    texts = [scope_question(task), *task.get('objects', [])]
     extended=extended_profiles_enabled(task)
+    industry_scope = industry_operating_scope(task)
+    if industry_scope:
+        codes.add(industry_scope['index_code'])
     return {code:copy.deepcopy(profile) for code,profile in CSI_PROFILES.items()
-        if (extended or code in CSI_LEGACY_CODES) and (code in codes
-            or any(alias in text for alias in profile['aliases'] for text in texts if isinstance(text,str)))}
+        if (extended or code in CSI_LEGACY_CODES) and _index_allowed(task, code, profile) and (code in codes
+            or any(alias in text for alias in profile['aliases'] for text in texts))}
 
 
 def extended_profiles_enabled(task):
@@ -137,7 +183,7 @@ def validate_csi_url(url,index_code,role):
     if (parsed.scheme!='https' or parsed.netloc!='oss-ch.csindex.com.cn' or parsed.fragment
             or parsed.username is not None or parsed.port is not None):
         raise ContractError('指数原件只使用登记官方主机，不接受跳转、凭据或端口')
-    pattern=(re.escape(CSI_PREFIX)+r'closeweightlintiao/\d{8}/'+code+r'closeweight\.xls' if role=='weights'
+    pattern=(re.escape(CSI_PREFIX)+r'(?:closeweight|closeweightlintiao/\d{8})/'+code+r'closeweight\.xls' if role=='weights'
         else re.escape(CSI_PREFIX)+'cons/'+code+r'cons\.xls' if role=='members' else None)
     if pattern is None or not re.fullmatch(pattern,parsed.path) or parsed.query and not re.fullmatch(r'\d{14}',parsed.query):
         raise ContractError('指数原件须使用实际目录提供的完整XLS地址，不构造历史路径或其他文件')
@@ -150,8 +196,12 @@ def csi_catalogue_contents(payload,index_code):
     A missing/ambiguous/unsafe file cannot invalidate the other valid role.
     """
     if index_code not in CSI_PROFILES:raise ContractError('官方指数未登记，不猜指数代码')
-    try:data=json.loads(payload.decode('utf-8-sig'))
-    except (ValueError,UnicodeError,AttributeError):raise ContractError('官方指数目录不是有效UTF-8 JSON') from None
+    try:
+        data = json.loads(payload.decode('utf-8-sig'), object_pairs_hook=unique_json_object)
+    except DuplicateJSONField:
+        raise
+    except (ValueError, UnicodeError, AttributeError):
+        raise ContractError('官方指数目录不是有效UTF-8 JSON') from None
     if (not isinstance(data,dict) or data.get('code')!='200' or data.get('success') is not True
             or not isinstance(data.get('data'),dict)):
         raise ContractError('官方指数目录未返回明确成功，不能当作空目录')
@@ -296,6 +346,165 @@ def _verified_index_file(task,record,role):
     return parsed
 
 
+def weight_readout_enabled(task):
+    version = task.get(DRAFT_WEIGHT_POLICY)
+    return type(version) is int and version in (1, *DRAFT_LATEST_WEIGHT_VERSIONS) and task.get('research_mode') == 'current'
+
+
+def _weight_scope(task, *, clause=None):
+    """Keep a specified day, or use the newest verified sheet for a simple readout."""
+    if not weight_readout_enabled(task):
+        return None
+    text = scope_question(task) if clause is None else clause
+    if '权重' not in text or not re.search(r'成[分份]|集中度|权重股', text):
+        return None
+    profiles = official_index_profiles(task)
+    if clause is not None:
+        from .evidence import security_code_mentions
+
+        codes = set(security_code_mentions(clause, encoding=task.get('security_declaration_encoding', 1)))
+        profiles = {code: profile for code, profile in profiles.items() if code in codes
+                    or not codes and any(alias in clause for alias in profile['aliases'])}
+    if len(profiles) != 1:
+        return None
+    from .numeric_integrity import _number, draft_day_points, draft_day_intervals
+
+    ranges = draft_day_intervals(text)
+    days = {day.isoformat() for _, _, day in draft_day_points(text, ranges)}
+    if ranges or len(days) > 1:
+        return None
+    (code, profile), = profiles.items()
+    if not days and (task[DRAFT_WEIGHT_POLICY] not in DRAFT_LATEST_WEIGHT_VERSIONS
+                     or not _only_weight_question(task, code, text)):
+        return None
+    rank = _WEIGHT_RANK.search(text)
+    count = int(_number(rank[1])) if rank else None
+    if count is not None and count < 1:
+        return None
+    return dict(code=code, name=profile['name'], day=next(iter(days), None), count=count,
+                expected_rows=profile['expected_rows'], total=bool(re.search(r'合计|总计|总和|总权重', text)
+                or count is not None and '集中度' in text))
+
+
+def stated_weight_scopes(task):
+    """Project explicit index lookups without using dates from other clauses."""
+    text = scope_question(task)
+    if not weight_readout_enabled(task) or '权重' not in text:
+        return []
+    if task[DRAFT_WEIGHT_POLICY] == COMPOUND_WEIGHT_VERSION:
+        from .draft_sources import _unquoted_local_scope
+        from .market_series import _latest_clauses
+
+        clauses = _latest_clauses(_unquoted_local_scope(text), valuation=True)
+        if len(clauses) > 1:
+            scopes = []
+            for clause in clauses:
+                scope = direct_weight_scope(task, clause=clause)
+                if scope is not None and scope not in scopes:
+                    scopes.append(scope)
+            # Other clauses can contain unrelated dates and index codes.
+            # An unrecognized weight clause must not inherit either.
+            return scopes
+    scope = _weight_scope(task)
+    return [scope] if scope is not None else []
+
+
+def stated_weight_scope(task):
+    scopes = stated_weight_scopes(task)
+    return scopes[0] if len(scopes) == 1 else None
+
+
+@lru_cache(maxsize=8)
+def _draft_weight_binary_parse(raw, code, version):
+    if version == 2:
+        return _weight_binary_parse(raw, code)
+    return parse_csi_workbook(raw, code, 'weights', version=version)
+
+
+def _refresh_latest_weight(task, scope):
+    return (task.get(DRAFT_WEIGHT_POLICY) in (DRAFT_WEIGHT_REFRESH_VERSION, DRAFT_WEIGHT_VERSION)
+            and scope['day'] is None and bool(task.get('update_from')))
+
+
+def stated_weight_sheet(task, scope=None):
+    """Reconcile the selected sheet with its immutable original bytes."""
+    scope = stated_weight_scope(task) if scope is None else scope
+    if scope is None:
+        return None
+    requested_day = scope['day']
+    result = dict(scope, requested_day=requested_day, source_ref=None, rows=[], complete=False, reason='missing')
+    cutoff = market_date(task['cutoff'])
+    if requested_day and requested_day > cutoff:
+        return result
+    if task.get(DRAFT_WEIGHT_POLICY) in DRAFT_LATEST_WEIGHT_VERSIONS:
+        from .draft_sources import validate_stated_source
+        try:
+            validate_stated_source(task, 'official')
+        except ContractError:
+            return dict(result, reason='source_restricted')
+    refresh = _refresh_latest_weight(task, scope)
+    candidates = {}
+    for record in task.get('source_records', ()):
+        if (record.get('source'), record.get('operation'), record.get('status')) != ('official', 'index_file', '成功待核验'):
+            continue
+        if (record.get('task_id'), record.get('research_version')) != (task['id'], task['version']):
+            continue
+        snapshot = record.get('snapshot') or {}
+        parsed = snapshot.get('parsed') or {}
+        observed = parsed.get('observation_date')
+        if ((snapshot.get('index_code'), snapshot.get('role')) != (scope['code'], 'weights')
+                or not isinstance(observed, str) or observed > cutoff or requested_day and observed != requested_day):
+            continue
+        try:
+            if record['hash'] != fingerprint(snapshot) or type(parsed.get('version')) is not int or parsed['version'] not in (1, 2):
+                continue
+            raw = base64.b64decode(snapshot['original_base64'], validate=True)
+            digest = hashlib.sha256(raw).hexdigest()
+            if digest != snapshot.get('original_sha256') or _draft_weight_binary_parse(raw, scope['code'], parsed['version']) != parsed:
+                continue
+        except (ContractError, KeyError, TypeError, ValueError):
+            continue
+        files = candidates.setdefault(observed, {})
+        previous = files.get(digest)
+        retained = record.get('retained_from_version')
+        # Prefer this version's receipt for the same original bytes. Different
+        # files with the same observation date still require reconciliation.
+        if previous is None or (refresh and retained is None and previous[2] is not None):
+            files[digest] = record['id'], parsed, retained
+    if not candidates:
+        return result
+    observed = max(candidates)
+    result['day'] = observed
+    latest = candidates[observed]
+    if len(latest) > 1:
+        return dict(result, reason='versions')
+    (source_ref, parsed, retained), = latest.values()
+    if refresh and retained is not None:
+        result['retained_from_version'] = retained
+    rows = [(index, member) for index, member in enumerate(parsed['members']) if member.get('weight') is not None]
+    complete = len(rows) == len(parsed['members']) == scope['expected_rows']
+    count = scope['count']
+    result.update(source_ref=source_ref, complete=complete, available=len(rows), reason='' if complete else 'incomplete')
+    if count is not None and (count > len(rows) or not complete):
+        return dict(result, reason='rank')
+    if count is not None:
+        rows = sorted(rows, key=lambda pair: (-Decimal(str(pair[1]['weight'])), pair[1]['code']))[:count]
+    return dict(result, rows=rows)
+
+
+def stated_weight_sheets(task):
+    return [stated_weight_sheet(task, scope) for scope in stated_weight_scopes(task)]
+
+
+def selected_weight_rows(sheets, source_ref):
+    """A reused workbook contributes each requested original row once."""
+    return dict(pair for sheet in sheets if sheet['source_ref'] == source_ref for pair in sheet['rows'])
+
+
+def weight_total_label(count):
+    return (f'前{count}大成分' if count is not None else '原表成分')+'权重合计'
+
+
 def retained_official_member_sources(task):
     """Current original codes authorize lookups, not issuer identity or membership claims."""
     if not extended_profiles_enabled(task) or task.get('research_mode')!='current':return []
@@ -310,6 +519,212 @@ def retained_official_member_sources(task):
         except (ContractError,KeyError,TypeError,ValueError):continue
         results.append(dict(artifact_id=record['id'],members=parsed['members']))
     return results
+
+
+_HALF_YEAR = re.compile(r'(20\d{2})\s*年?\s*(?:上半年|中报|半年度报告|半年报|H1)', re.I)
+_OTHER_PERIOD = re.compile(r'一季报|三季报|季度|下半年|(?<!半)年报|全年|近[几三四五六七八九十\d]+年|多年度|TTM', re.I)
+_SAMPLE_COUNT = re.compile(r'(?:前|选|取|挑|比较|对比)\s*([0-9]+|[一二两三四五六七八九十])\s*(?:大|只|家|名)')
+_INDUSTRY_ACTION = re.compile(r'经营|财务|业绩|盈利|营收|收入|利润|基本面|半年报|中报')
+_BRIEF_INDUSTRY_ASK = re.compile(
+    r'\s*(?:(?:请|帮我|想|看看|看一下|看下|了解|研究(?:一下)?|分析(?:一下)?)\s*)*'
+    r'(?:A股)?(?P<topic>券商(?:行业|板块)?|证券行业|银行(?:业|行业|板块)?)'
+    r'(?:(?:[，,。\s]*)(?:写|给我|做|生成)?(?:一份)?(?:投研|研究)?报告)?[。！？\s]*')
+_ADDITIONAL_RESEARCH = re.compile(r'买入|卖出|目标价|市盈率|估值|股价|推荐|涨跌|资金流|风险溢价|政策影响|景气前瞻|盈利预测')
+_MIXED_INDUSTRY = re.compile(r'(?:券商|银行)(?:行业|板块|业)?\s*(?:和|及|与|、|对比)\s*(?:A股)?(?:券商|银行)')
+_OPERATING_REPORT_ASK = re.compile(
+    r'\s*(?:请\s*)?(?:帮我\s*)?(?:研究|分析|看看|看一下)?\s*'
+    r'(?:20\d{2}\s*年?\s*上半年\s*)?(?:A股\s*)?'
+    r'(?:券商(?:行业|板块)?|证券行业|银行(?:业|行业|板块)?)'
+    r'(?:\s*20\d{2}\s*年?\s*上半年)?\s*(?:的)?'
+    r'(?:经营|盈利|业绩|财务|基本面)?(?:分化|表现|情况|差异)?'
+    r'(?:[，,。\s]+(?:写|生成|做|给我)(?:一份)?(?:投研|研究)?报告)?[。！？\s]*')
+_OPERATING_SUBJECT = (r'(?:券商(?:行业|板块)?|证券行业|银行(?:业|行业|板块)?|'
+                      r'白酒(?:行业|板块)?|半导体(?:行业|板块)?|中证白酒指数|中证全指半导体产品与设备指数)')
+_OPERATING_MIXED = re.compile(rf'{_OPERATING_SUBJECT}\s*(?:以及|或是|和|及|与|、|对比|跟)\s*(?:A股\s*)?{_OPERATING_SUBJECT}')
+_OPERATING_PERIOD = r'(?:(?:20\d{2}\s*年?\s*|今年|去年)?上半年)'
+_OPERATING_METRIC = r'(?:营业收入|营收|毛利(?:额|率)?|归母净利润|经营现金流(?:净额)?|现金回流)'
+_OPERATING_STUDY_ASK = re.compile(
+    rf'\s*(?:(?:请|帮我|想)\s*)*(?:研究(?:一下)?|分析(?:一下)?|比较|对比|看看|看一下|看下|了解)?\s*'
+    rf'(?:{_OPERATING_PERIOD}\s*)?(?:A股\s*)?(?P<topic>{_OPERATING_SUBJECT})'
+    rf'(?:\s*{_OPERATING_PERIOD})?\s*(?:的)?'
+    r'(?:经营|盈利|业绩|财务|基本面)?(?:分化|表现|情况|差异)?(?:怎么样|如何)?'
+    rf'(?P<metrics>[，,。？?\s]+(?:重点看|比较|关注)\s*{_OPERATING_METRIC}'
+    rf'(?:[、，,或及和与\s]+{_OPERATING_METRIC}){{0,5}})?'
+    r'(?:[，,。？?\s]+(?:写|生成|做|给我)(?:一份)?(?:投研|研究)?报告)?[。！？?\s]*')
+
+
+_BROKER_OPENING = re.compile(
+    rf'(?:(?:请|帮我|想|看看|研究|分析)\s*)*(?:{_OPERATING_PERIOD}\s*)?'
+    rf'(?:A股\s*)?(?:券商(?:行业|板块)?|证券行业)(?:{_OPERATING_PERIOD}\s*)?(?:的)?'
+    r'(?:经营|盈利|业绩|财务)(?:表现|分化|情况)?(?:怎么样|如何)?')
+_BROKER_REVENUE_ASK = re.compile(
+    r'(?:营业收入|营收|收入)(?:增长|变化|变动)?(?:主要)?'
+    r'(?:(?:来自|靠|受)什么(?:驱动)?|从哪来|'
+    r'(?:靠|来自)(?:(?:净利息|利息|手续费|佣金|收费|投资收益|自营|公允价值|浮盈)(?:和|及|还是|、|与)?){1,5})')
+_BROKER_PROFIT_ASK = re.compile(r'(?:归母)?(?:净)?利润(?:(?:有没有|能不能)跟上|跟上了吗|怎么样|如何)')
+_BROKER_DELIVERY_ASK = re.compile(r'(?:给我|写|给我写|做|生成)(?:一份)?(?:投研|研究)?报告')
+
+
+def broker_reading_enabled(task):
+    return type(task.get(BROKER_READING_POLICY)) is int and task[BROKER_READING_POLICY] == 1
+
+
+def _spoken_broker_study(task, text):
+    if not broker_reading_enabled(task):
+        return False
+    clauses = [clause.strip() for clause in re.split(r'[，,。？?；;！!]', text) if clause.strip()]
+    if len(clauses) < 2 or not _BROKER_OPENING.fullmatch(clauses[0]):
+        return False
+    return (any(_BROKER_REVENUE_ASK.fullmatch(clause) for clause in clauses[1:])
+            and all(any(pattern.fullmatch(clause) for pattern in
+                        (_BROKER_REVENUE_ASK, _BROKER_PROFIT_ASK, _BROKER_DELIVERY_ASK))
+                    for clause in clauses[1:]))
+
+
+def operating_report_question(task):
+    """Recognize a standalone operating study for completion, independently of routing."""
+    if task.get('question_origin') != 'default':
+        return False
+    if task.get(INDUSTRY_SAMPLE_POLICY) != INDUSTRY_SAMPLE_VERSION:
+        return bool(_OPERATING_REPORT_ASK.fullmatch(task['question']))
+    if _spoken_broker_study(task, task['question']):
+        return True
+    match = _OPERATING_STUDY_ASK.fullmatch(task['question'])
+    return bool(match and (not match['metrics'] or any(profile['topic'] in match['topic'] and profile.get('operating_drivers')
+        for profile in _INDUSTRY_PROFILES.values())))
+
+
+def industry_operating_scope(task, *, direct=False):
+    """Resolve one industry and a comparable statement period before taking a sample."""
+    from .draft_sources import (_NO_PDF, _unquoted_local_scope, local_sources_only, stated_access_restricted,
+                                validate_stated_source)
+    from .evidence import declared_security_codes
+    from .numeric_integrity import _number
+
+    version = task.get(INDUSTRY_SAMPLE_POLICY)
+    if (type(version) is not int or version not in (1, INDUSTRY_SAMPLE_VERSION)
+            or task.get('research_mode') != 'current' or task.get('plan_version', 1) != 1
+            or task.get('intent') not in ('综合研究', '解释变化', '比较对象')
+            or len(task.get('questions', ())) != 1 or local_sources_only(task)):
+        return None
+    question, = task['questions']
+    if question.get('answer_scope') or question.get('question') != task['question']:
+        return None
+    text = _unquoted_local_scope(_NO_PDF.sub('', scope_question(task)))
+    mixed = _OPERATING_MIXED if version == INDUSTRY_SAMPLE_VERSION else _MIXED_INDUSTRY
+    if (stated_access_restricted(task, text) or _OTHER_PERIOD.search(text) or mixed.search(text)
+            or re.search(r'全量|逐家|全覆盖|(?:全部|所有)(?:上市公司|样本|成分|券商|银行)|'
+                         r'不(?:要|用)?(?:选样|比较|对比)|(?:不|不要|仅|只)(?:查|核对)?(?:指数)?权重|'
+                         r'香港|港股|美股|海外|假设|假如', text)):
+        return None
+    try:
+        validate_stated_source(task, 'official')
+    except ContractError:
+        return None
+    brief = (_OPERATING_STUDY_ASK if version == INDUSTRY_SAMPLE_VERSION else _BRIEF_INDUSTRY_ASK).fullmatch(text)
+    spoken = version == INDUSTRY_SAMPLE_VERSION and _spoken_broker_study(task, text)
+    matched = [(code, profile) for code, profile in _INDUSTRY_PROFILES.items()
+               if (version == INDUSTRY_SAMPLE_VERSION or not profile.get('operating_drivers'))
+               and _index_allowed(task, code, profile) and subject_allowed(task, profile['topic'])
+               and (re.search(profile['topic_pattern'], text) or spoken and profile['topic'] == '券商'
+                    or brief and (profile['topic'] in brief['topic']
+                                  or profile['topic'] == '券商' and brief['topic'] == '证券行业'))]
+    if len(matched) != 1:
+        return None
+    index_code, profile = matched[0]
+    explicit = set(declared_security_codes(task)) - {index_code}
+    if explicit or (not _INDUSTRY_ACTION.search(text) and not brief and not spoken):
+        return None
+    if direct and (_ADDITIONAL_RESEARCH.search(text) or task.get('materials') or task.get('pending_materials')
+                   or task.get('calculation_specs') or task.get('update_from')):
+        return None
+    if direct and profile.get('operating_drivers') and not brief:
+        return None
+    if (direct and version == INDUSTRY_SAMPLE_VERSION and brief and brief['metrics']
+            and not profile.get('operating_drivers')):
+        return None
+    cutoff = market_date(task['cutoff'])
+    dates = {int(year) for year in _HALF_YEAR.findall(text)}
+    if version == INDUSTRY_SAMPLE_VERSION:
+        dates.update(int(cutoff[:4]) - (period == '去年') for period in re.findall(r'(今年|去年)上半年', text))
+    if len(dates) > 1 or not dates and re.search(r'20\d{2}\s*年', text):
+        return None
+    latest_comparable = int(cutoff[:4]) - int(cutoff[5:] < '09-01')
+    year = next(iter(dates), latest_comparable)
+    if (year < 2001 or str(year)+'-06-30' > cutoff
+            or year < latest_comparable and not re.search(r'现有(?:成分|样本)|当前(?:成分|样本)|最新(?:成分|样本)', text)):
+        return None
+    width = _SAMPLE_COUNT.search(text)
+    count = int(_number(width[1])) if width else 3
+    if not 2 <= count <= 5:
+        return None
+    scope = dict(index_code=index_code, index_name=profile['name'], industry=profile['topic'], count=count,
+                 periods=[str(year-1)+'0630', str(year)+'0630'], question_ids=[question['id']],
+                 revenue_bridge=profile['topic'] == '券商')
+    if profile.get('operating_drivers'):
+        scope['operating_drivers'] = True
+    return scope
+
+
+def selected_industry_sample(task, scope=None):
+    """Rank one actual publisher weight table without authorizing its whole universe."""
+    scope = industry_operating_scope(task) if scope is None else scope
+    if scope is None:
+        return None
+    sheets = {}
+    for record in task.get('source_records', ()):
+        if record.get('snapshot', {}).get('index_code') != scope['index_code']:
+            continue
+        try:
+            parsed = verified_weight_source(task, record)
+        except (ContractError, KeyError, TypeError, ValueError):
+            continue
+        dates = sheets.setdefault(parsed['observation_date'], {})
+        dates.setdefault(record['snapshot']['original_sha256'], (record, parsed))
+    if not sheets:
+        return None
+    day = max(sheets)
+    if len(sheets[day]) != 1:
+        return None
+    (record, parsed), = sheets[day].values()
+    members = parsed['members']
+    # A missing weight might outrank the last selected company.
+    if (not parsed['weight_sum_is_complete'] or len(members) < scope['count']
+            or abs(Decimal(parsed['weight_sum'])-100) > max(Decimal('0.05'), Decimal(len(members))*Decimal('0.0005'))):
+        return None
+    eligible = [member for member in members if subject_allowed(task, member['code'])
+                and subject_allowed(task, member['name']) and member['weight'] > 0]
+    selected = sorted(eligible, key=lambda member: (-Decimal(str(member['weight'])), member['code']))[:scope['count']]
+    if len(selected) < (scope['count'] if task.get(INDUSTRY_SAMPLE_POLICY) == INDUSTRY_SAMPLE_VERSION else 2):
+        return None
+    return dict(scope, source_ref=record['id'], workbook_date=day, index_size=len(members),
+                selected=[{key: member[key] for key in ('code', 'name', 'weight', 'excel_row')} for member in selected],
+                selected_weight=str(sum(Decimal(str(member['weight'])) for member in selected)))
+
+
+def industry_sample_requests(task, scope):
+    """Choose the provider's published weights via its current catalogue."""
+    from .evidence import current_query_reference
+
+    if selected_industry_sample(task, scope):
+        return []
+    code = scope['index_code']
+    choices = {row['entry_id']: row for tool in official_index_shapes(task)
+               for row in tool.get('official_index_file_choices', [])
+               if row['index_code'] == code and row['role'] == 'weights'}
+    if len(choices) == 1:
+        row, = choices.values()
+        operation = 'index_file'
+        parameters = dict(catalog_id=row['catalog_id'], entry_id=row['entry_id'], as_of=None)
+    elif not choices and not any(record.get('source') == 'official' and record.get('operation') == 'index_catalog'
+                                  and record.get('parameters', {}).get('index_code') == code
+                                  and current_query_reference(task, record) for record in task.get('source_records', ())):
+        operation = 'index_catalog'
+        parameters = dict(index_code=code)
+    else:
+        return []
+    return [dict(id='industry_sample_'+operation, source='official', operation=operation, parameters=parameters,
+                 question_ids=scope['question_ids'], selection_reason='以指数编制方公布的当前权重和证券名单确定行业研究样本。')]
 
 
 def weight_row_identity(parsed,member):
@@ -439,6 +854,72 @@ def official_index_shapes(task):
     return tools
 
 
+_DIRECT_WEIGHT_WORDS = re.compile(
+    r'请|帮我|只|仅|核对|查询|查一下|列出|查看|给出|生成报告|指数|官方|中证|原表|成[分份](?:股|券)?'
+    r'|权重|总计|合计|总和|总|以及|的|在|及|和|与|[，。,.；;、！？?!：:\s]')
+_CURRENT_WEIGHT_WORDS = re.compile(r'最新一期|最近一期|最新|当前')
+
+
+def _only_weight_question(task, code, text):
+    from .draft_sources import local_scope_text
+    from .market_series import _IFIND_ONLY
+    from .numeric_integrity import draft_day_points
+
+    if task.get(DRAFT_WEIGHT_POLICY) in DRAFT_LATEST_WEIGHT_VERSIONS:
+        text = local_scope_text(text)
+    for start, end, _ in reversed(list(draft_day_points(text, ()))):
+        text = text[:start]+text[end:]
+    if task.get(DRAFT_WEIGHT_POLICY) in DRAFT_LATEST_WEIGHT_VERSIONS:
+        text = _CURRENT_WEIGHT_WORDS.sub('', _IFIND_ONLY.sub('', text))
+    text = _WEIGHT_RANK.sub('', text)
+    for alias in sorted([code, *CSI_PROFILES[code]['aliases']], key=len, reverse=True):
+        text = text.replace(alias, '')
+    return not _DIRECT_WEIGHT_WORDS.sub('', text)
+
+
+def direct_weight_scope(task, *, clause=None):
+    """Only use direct acquisition when the complete question is a weight readout."""
+    if clause is not None and task.get(DRAFT_WEIGHT_POLICY) != COMPOUND_WEIGHT_VERSION:
+        return None
+    scope = _weight_scope(task, clause=clause)
+    text = scope_question(task) if clause is None else clause
+    return scope if scope and _only_weight_question(task, scope['code'], text) else None
+
+
+def stated_weight_requests(task, scope):
+    """Select the registered publisher file, keeping the user's observation date."""
+    from .evidence import current_query_reference
+
+    sheet = stated_weight_sheet(task, scope)
+    refresh = _refresh_latest_weight(task, scope)
+    if (scope['day'] and scope['day'] > market_date(task['cutoff'])
+            or sheet['reason'] == 'source_restricted' or not refresh and sheet['reason'] != 'missing'):
+        return []
+    code = scope['code']
+    if refresh and any(record.get('source') == 'official' and record.get('operation') == 'index_file'
+                       and record.get('snapshot', {}).get('index_code') == code
+                       and record['snapshot'].get('role') == 'weights' and current_query_reference(task, record)
+                       for record in task.get('source_records', ())):
+        return []
+    choices = {row['entry_id']:row for tool in official_index_shapes(task)
+               for row in tool.get('official_index_file_choices', [])
+               if row['index_code'] == code and row['role'] == 'weights'}
+    if len(choices) == 1:
+        row, = choices.values()
+        operation = 'index_file'
+        parameters = dict(catalog_id=row['catalog_id'],entry_id=row['entry_id'],as_of=scope['day'])
+    elif not choices and not any(record.get('source') == 'official' and record.get('operation') == 'index_catalog'
+                                  and record.get('parameters', {}).get('index_code') == code
+                                  and current_query_reference(task, record) for record in task.get('source_records', ())):
+        operation = 'index_catalog'
+        parameters = dict(index_code=code)
+    else:
+        return []
+    return [dict(id='stated_weight_'+fingerprint([operation,parameters])[:24], source='official',
+                 operation=operation, parameters=parameters, question_ids=[task['questions'][0]['id']],
+                 selection_reason='按原问题核对中证指数权重原表及实际日期。')]
+
+
 def download_csi_blob(url,index_code,role,timeout):
     """Fixed public GET with one deadline, TLS checking and a 5MB ceiling."""
     validate_csi_url(url,index_code,role)
@@ -549,6 +1030,14 @@ def callable_member_codes(task):
         except (ContractError,KeyError,TypeError,ValueError):
             continue
         codes.update(member['code'] for member in result['members'])
+    industry_scope = industry_operating_scope(task)
+    sample = selected_industry_sample(task, industry_scope) if industry_scope else None
+    industry_files = {row['id'] for row in task.get('source_records', ()) if industry_scope
+                      and row.get('snapshot', {}).get('index_code') == industry_scope['index_code']}
     for source in retained_official_member_sources(task):
+        if source['artifact_id'] in industry_files:
+            continue
         codes.update(member['code'] for member in source['members'])
+    if sample:
+        codes.update(member['code'] for member in sample['selected'])
     return sorted(codes)
