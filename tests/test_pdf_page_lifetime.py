@@ -28,8 +28,8 @@ class PDFPageLifetimeTests(unittest.TestCase):
         pages.extend(Page(index) for index in range(2))
         document = Document()
         document.pages = pages
-        plain = [SimpleNamespace(extract_text=lambda: '首个合成页面'),
-                 SimpleNamespace(extract_text=lambda: '第二个合成页面')]
+        plain = [SimpleNamespace(extract_text=lambda **_: '首个合成页面'),
+                 SimpleNamespace(extract_text=lambda **_: '第二个合成页面')]
         with patch('pypdf.PdfReader', return_value=SimpleNamespace(pages=plain)), \
                 patch('pdfplumber.open', return_value=document):
             parts = extract_parts(b'private fake input, not a financial document')
