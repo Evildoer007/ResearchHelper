@@ -1,26 +1,20 @@
 """Unique verified contexts reduce orchestration, never financial gates."""
 import copy
-import json
-from pathlib import Path
 import socket
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from tests.legacy_replay_fixtures import financial_task
 from researchhelper.argument_support import VERSION
 from researchhelper.contracts import ContractError, registered_financial_bindings
 from researchhelper.engine import ResearchAgent
 from researchhelper.knowledge import ResearchKnowledge
 from researchhelper.planning import input_fingerprint
 
-ROOT = Path(__file__).resolve().parents[1]
-RETAINED = ROOT/'result/acceptance/one-sentence-research-220kvryl/task.json'
-
-
 class RegisteredFinancialBindingTests(unittest.TestCase):
     def setUp(self):
-        self.original = RETAINED.read_bytes()
-        self.task = json.loads(self.original)
+        self.task = financial_task()
         self.expected = copy.deepcopy(self.task['calculations'])
         self.task['calculation_specs'] = []
         self.task['calculations'] = []
@@ -35,9 +29,6 @@ class RegisteredFinancialBindingTests(unittest.TestCase):
         self.agent._reasoning_available = Mock(return_value=False)
         guard = patch.object(socket.socket, 'connect', side_effect=AssertionError('No network'))
         guard.start(); self.addCleanup(guard.stop)
-
-    def tearDown(self):
-        self.assertEqual(RETAINED.read_bytes(), self.original)
 
     def bind(self):
         return registered_financial_bindings(self.task, self.ids)
@@ -77,7 +68,7 @@ class RegisteredFinancialBindingTests(unittest.TestCase):
         self.assertIsNone(self.bind())
 
     def test_different_units_are_not_silently_converted(self):
-        self.amount()['unit'] = '百万元'
+        self.amount()['unit'] = '元'
         self.assertIsNone(self.bind())
 
     def test_mismatched_verified_context_never_gets_a_proposal(self):
