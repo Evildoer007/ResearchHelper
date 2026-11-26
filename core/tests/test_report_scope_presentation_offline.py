@@ -2,6 +2,7 @@
 import copy
 import html
 import unittest
+from lxml import html as dom
 
 from researchhelper.contracts import fingerprint
 from researchhelper.reports import compose, render, report_heading, READER_VERSION
@@ -68,12 +69,18 @@ class ReportScopePresentationTests(unittest.TestCase):
 
     def test_empty_risk_section_and_success_filler_are_not_generated(self):
         content = self.content()
-        paper = render(content, documents.ROOT)
-        self.assertNotIn("<section id='risk'", paper)
-        self.assertNotIn('核心问题已按当前核验材料回答', paper)
-        self.assertEqual(paper.count(html.escape(content['tracking_reason'])), 1)
-        appendix = paper.index("<details class='research-appendix'>")
-        self.assertGreater(paper.index(html.escape(content['tracking_reason'])), appendix)
+        before = copy.deepcopy(content)
+        tree = dom.document_fromstring(render(content, documents.ROOT))
+        main = tree.find('.//main')
+        scope = tree.get_element_by_id('scope')
+        self.assertFalse(main.xpath('.//*[@id="risk"]'))
+        self.assertNotIn('核心问题已按当前核验材料回答', main.text_content())
+        self.assertNotIn(content['tracking_reason'], main.text_content())
+        self.assertEqual(scope.text_content().count(content['tracking_reason']), 1)
+        self.assertTrue(scope.xpath('ancestor::*[@id="report-records" and @hidden]'))
+        self.assertTrue(main.xpath('.//a[@href="#scope" and @aria-haspopup="dialog"]'))
+        self.assertFalse(main.xpath('.//details'))
+        self.assertEqual(content, before)
 
     def test_real_limits_and_tracking_remain_visible_without_generic_filler(self):
         content = self.content()
@@ -82,22 +89,33 @@ class ReportScopePresentationTests(unittest.TestCase):
         content['tracking'] = [{'indicator': '公开费率', 'source': '正式公告',
                                 'window': '新公告发布后', 'condition': '费率变更则重新比较',
                                 'benchmark': '原正式费率'}]
-        paper = render(self.freeze(content), documents.ROOT)
-        self.assertIn("<section id='risk'", paper)
+        content = self.freeze(content)
+        before = copy.deepcopy(content)
+        tree = dom.document_fromstring(render(content, documents.ROOT))
+        risk = tree.find('.//main').xpath('.//*[@id="risk"]')
+        self.assertEqual(len(risk), 1)
         for text in content['limitations'] + content['optional_findings']:
-            self.assertIn(html.escape(text), paper)
-        self.assertIn('费率变更则重新比较', paper)
-        self.assertIn('原正式费率', paper)
-        self.assertNotIn('核心问题已按当前核验材料回答', paper)
+            self.assertIn(text, risk[0].text_content())
+        for value in content['tracking'][0].values():
+            self.assertIn(value, risk[0].text_content())
+        self.assertNotIn('核心问题已按当前核验材料回答', risk[0].text_content())
+        self.assertEqual(content, before)
 
     def test_reading_coverage_stays_accessible_without_an_empty_risk_section(self):
         content = self.content()
         content['reading_coverage'] = [{'artifact_id': 'original', 'name': '原公告',
                                         'read_characters': 200, 'total_characters': 400}]
-        paper = render(self.freeze(content), documents.ROOT)
-        self.assertIn('查看原件读取范围', paper)
-        self.assertIn('200/400字', paper)
-        self.assertNotIn("<section id='risk'", paper)
+        content = self.freeze(content)
+        before = copy.deepcopy(content)
+        tree = dom.document_fromstring(render(content, documents.ROOT))
+        main = tree.find('.//main')
+        scope = tree.get_element_by_id('scope')
+        rows = scope.xpath('.//table/tbody/tr')
+        self.assertTrue(any(row.xpath('./td/text()') == ['原公告', '200/400字'] for row in rows))
+        self.assertIn('原件读取范围', scope.text_content())
+        self.assertTrue(main.xpath('.//a[@href="#scope" and @aria-haspopup="dialog"]'))
+        self.assertFalse(main.xpath('.//*[@id="risk"]'))
+        self.assertEqual(content, before)
 
     def test_presentation_does_not_mutate_frozen_content_or_old_delivery(self):
         task = self.agent.create_case('mechanism')
@@ -114,25 +132,10 @@ class ReportScopePresentationTests(unittest.TestCase):
 
 
 class CurrentScopeStrategyCharts(strategy.CurrentStrategyCharts):
-    def test_reader_identity_is_separate_from_frozen_content_template(self):
-        content, _ = self.real_content()
-        paper = render(content, documents.ROOT)
-        self.assertIn("data-reader-version='" + READER_VERSION + "'", paper)
-        self.assertEqual(READER_VERSION, 'rh-reader-7')
-        self.assertIn('模板' + content['template_version'], paper)
-        self.assertEqual(content['template_version'], 'rh-paper-3')
+    """Compatibility name; the canonical chart suite owns these assertions."""
+    __test__ = False
 
 
 class CurrentScopeReaderTests(reader.ReportReaderTests):
     def test_original_question_is_saved_even_when_fixture_has_a_short_title(self):
-        done = self.complete('etf')
-        content = compose(done)
-        self.assertNotEqual(content['title'], content['question'])
-        paper = render(content, documents.ROOT)
-        self.assertIn('原始问题：' + html.escape(done['question'], quote=True), paper)
-        # The paper intentionally has no explicit table of contents. Provenance
-        # navigation remains available beside each substantive statement.
-        self.assertNotIn("aria-label='报告目录'", paper)
-        self.assertIn("<details class='research-appendix'>", paper)
-        self.assertIn("href='#ev-", paper)
-        self.assertIn('revealReference', paper)
+        super().test_original_question_is_saved_even_when_fixture_has_a_short_title()
