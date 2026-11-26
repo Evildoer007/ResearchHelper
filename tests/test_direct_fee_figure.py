@@ -4,6 +4,7 @@ Presentation may chart those already adopted numbers. It must not invent an
 annualization, combined fee, missing component or approval.
 """
 import copy
+import gzip
 import hashlib
 import json
 from pathlib import Path
@@ -12,14 +13,17 @@ import unittest
 from unittest.mock import patch
 from researchhelper import visual
 
-SOURCE = Path(os.environ.get('RESEARCHHELPER_FEE_REPORT_INPUT', str(
-    Path(__file__).resolve().parents[1]/'result/acceptance/one-sentence-research-9eq092nf/report.json')))
+DEFAULT_SOURCE = Path(__file__).resolve().parents[1]/'result/acceptance/one-sentence-research-9eq092nf/report.json'
+SOURCE = Path(os.environ.get('RESEARCHHELPER_FEE_REPORT_INPUT',
+    DEFAULT_SOURCE if DEFAULT_SOURCE.is_file() else DEFAULT_SOURCE.with_suffix('.json.gz')))
 
 
 class DirectFeeFigureTests(unittest.TestCase):
     def setUp(self):
         self.digest = hashlib.sha256(SOURCE.read_bytes()).hexdigest()
-        self.content = json.loads(SOURCE.read_text())
+        opener = gzip.open if SOURCE.suffix == '.gz' else open
+        with opener(SOURCE, 'rt', encoding='utf-8') as incoming:
+            self.content = json.load(incoming)
         self.question = self.content['questions'][0]
         guard = patch('socket.socket.connect', side_effect=AssertionError('No new calls'))
         guard.start()
