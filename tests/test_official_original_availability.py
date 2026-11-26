@@ -31,7 +31,7 @@ class OfficialOriginalAvailabilityTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.agent = ResearchAgent(ResearchArchive(temporary.name), ROOT, offline=True)
         self.addCleanup(self.agent.close_runtime)
-        self.task = self.agent.create('核查合成样本指标', entry='宏观', research_mode='current', objects=['合成样本指标'])
+        self.task = self.create_task()
         self.collector = EvidenceCollector(offline=False)
         guard = patch('socket.socket.connect', side_effect=AssertionError('No external network'))
         guard.start(); self.addCleanup(guard.stop)
@@ -45,6 +45,22 @@ class OfficialOriginalAvailabilityTests(unittest.TestCase):
             self.original = self.collector.external(self.task, 'official', 'release_original',
                 {key:selected[key] for key in ('catalog_id','release_id')}, {})
             self.task['source_records'].append(self.original)
+
+    def create_task(self, **options):
+        return self.agent.create('核查合成样本指标', entry='宏观', research_mode='current',
+                                 objects=['合成样本指标'], **options)
+
+    def test_local_html_retry_preserves_the_existing_official_source_and_spending(self):
+        task = self.agent.archive.save(self.task)
+        original_id = self.agent.archive.retain_original(task, 'material', self.original['name'], BODY)
+        before = copy.deepcopy(task)
+        with patch('socket.socket.connect', side_effect=AssertionError('No external request')):
+            result = self.agent.retry_original(task['id'], original_id)
+        self.assertEqual(result, before)
+        self.assertEqual(result['ledger'], before['ledger'])
+        retained = next(row for row in result['source_records'] if row['id'] == self.original['id'])
+        self.assertEqual(current_original_reference(result, retained), current_original_reference(before, self.original))
+        self.assertEqual(result['materials'], [])
 
     def spec(self):
         parts = self.original['snapshot']['parts']
