@@ -17,12 +17,9 @@ from researchhelper.output_schema import planning_output_schema, planning_protoc
 from researchhelper.reasoning import model_object, planning_digest, source_views, RESEARCH_BRIEF_VERSION
 
 
-RETAINED = ROOT / 'result/acceptance/one-sentence-research-z90yx8ck/task.json'
-
 
 class PlanningDefinitionContractTests(unittest.TestCase):
     def setUp(self):
-        self.original = RETAINED.read_bytes()
         folder = tempfile.TemporaryDirectory(prefix='planning-definition-', dir=ROOT / 'result/acceptance')
         self.addCleanup(folder.cleanup)
         self.folder = Path(folder.name)
@@ -35,9 +32,6 @@ class PlanningDefinitionContractTests(unittest.TestCase):
         guard = patch.object(socket.socket, 'connect', side_effect=AssertionError('No networking'))
         guard.start(); self.addCleanup(guard.stop)
 
-    def tearDown(self):
-        self.assertEqual(RETAINED.read_bytes(), self.original)
-
     def wire(self):
         return dict(version=2, questions=[dict(id='q1', kind='fact', required=True, group='q1',
             question='ETF折溢价为什么不等于可实现套利', answer_scope='general_definition',
@@ -45,7 +39,13 @@ class PlanningDefinitionContractTests(unittest.TestCase):
 
     def test_new_tasks_enable_scope_without_reopening_old_or_fixture_tasks(self):
         self.assertEqual(self.task['planning_definition_scope_version'], 1)
-        self.assertNotIn('planning_definition_scope_version', json.loads(self.original))
+        legacy = self.agent.create('核对一项历史研究的定义范围', entry='ETF')
+        legacy.pop('planning_definition_scope_version')
+        self.agent.archive.save(legacy)
+        before = fingerprint(legacy)
+        reopened = self.agent.archive.get(legacy['id'])
+        self.assertEqual(fingerprint(reopened), before)
+        self.assertNotIn('planning_definition_scope_version', reopened)
         self.assertNotIn('planning_definition_scope_version', self.agent.create_case('mechanism'))
 
     def test_schema_and_candidate_catalogue_match_for_all_eight_entries(self):
