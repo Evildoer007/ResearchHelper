@@ -13,8 +13,8 @@ from decimal import Decimal, InvalidOperation
 import math
 import re
 
-from .contracts import (ContractError, FINANCIAL_PERIOD_METHODS, context,
-                        fingerprint, market_date, timepoint, now)
+from .contracts import (ContractError, DuplicateJSONField, FINANCIAL_PERIOD_METHODS, context,
+                        fingerprint, market_date, timepoint, now, unique_json_object)
 from .data_requirements import reported_duration_label
 
 
@@ -22,7 +22,7 @@ FINANCIAL_RECORD_KEYS = (
     "ts_code", "ann_date", "f_ann_date", "end_date", "report_type", "comp_type", "update_flag",
 )
 FINANCIAL_PARAMETERS = ("ts_code", "fields", "start_date", "end_date", "period", "report_type")
-FINANCIAL_METRIC_BINDING_VERSION = 3
+FINANCIAL_METRIC_BINDING_VERSION = 4
 FINANCIAL_VALUE_REFERENCE_VERSION = 1
 FINANCIAL_VALUE_REFERENCE_FIELD = "financial_value_reference"
 FINANCIAL_VALUE_FIELDS = frozenset({"text", "period", "raw_token", "raw_value",
@@ -32,6 +32,17 @@ FINANCIAL_METRIC_LABELS = {"revenue": "营业收入", "operating_cost": "营业�
     "net_profit": "净利润", "operating_cash_flow": "经营活动产生的现金流量净额"}
 FINANCIAL_QUERY_FIELDS = (*FINANCIAL_METRIC_LABELS.values(), "归属于母公司所有者的净利润")
 FINANCIAL_QUERY_PERIODS = {"一季报": "0331", "半年报": "0630", "三季报": "0930", "年报": "1231"}
+FINANCIAL_FIELD_NAMES = {
+    'ths_revenue_stock': ('营业收入', '营收'),
+    'ths_operating_cost_stock': ('营业成本',),
+    'ths_np_stock': ('报表净利润', '净利润'),
+    'ths_np_atoopc_stock': ('归母净利润', '归属于母公司所有者的净利润', '归属于母公司股东的净利润'),
+    'ths_ncf_from_oa_stock': ('经营活动现金流净额', '经营活动产生的现金流量净额',
+                              '经营活动现金流量净额', '经营活动现金流', '经营现金流净额', '经营现金流'),
+    'ths_account_receivable_stock': ('应收账款',),
+    'ths_inventory_stock': ('存货',),
+    'ths_accounts_payable_stock': ('应付账款',),
+}
 FINANCIAL_QUERY_DOCUMENTATION = "https://quantapi.51ifind.com/gwstatic/static/ds_web/quantapi-web/help-center/manual.html"
 FINANCIAL_QUERY_LIMITATION = (
     "语义查询仅返回当前取得的原始结构化记录，不证明单位、币种、合并范围、会计准则、首次公开时间或历史版本。"
@@ -42,7 +53,14 @@ IFIND_METADATA_POLICY = 'ifind_metadata_sources_version'
 PARTIAL_FINANCIAL_POLICY = 'partial_financial_response_version'
 STRUCTURED_SOURCE_POLICY = 'structured_source_priority_version'
 FIXED_FINANCIAL_POLICY = 'fixed_financial_catalog_version'
+STATED_FINANCIAL_POLICY = 'draft_stated_financial_version'
+STATED_FINANCIAL_BATCH_VERSION = 3
+STATED_FINANCIAL_CONSOLIDATION_VERSION = 4
+STATED_FINANCIAL_VERSION = 5
+STATED_FINANCIAL_VERSIONS = (1, 2, STATED_FINANCIAL_BATCH_VERSION, STATED_FINANCIAL_CONSOLIDATION_VERSION,
+                            STATED_FINANCIAL_VERSION)
 IFIND_METADATA_OPERATIONS = ('get_limit_policy', 'get_indicators', 'get_indicator_params', 'search_edb')
+IFIND_POLICY_DEPENDENT_OPERATIONS = frozenset({'get_indicators', 'get_indicator_params', 'search_edb', 'basic_data_service'})
 IFIND_METADATA_BASE = 'https://quantapi.51ifind.com/ds_service_basic/api/v1/'
 IFIND_METADATA_REGISTRY = {'ifind.'+operation: dict(version=1, raw_only=True, fields={},
     kind='iFinD字段与参数元数据' if operation != 'basic_data_service' else 'iFinD基础财务原始截面',
@@ -117,6 +135,31 @@ def _metadata_records(task, operation, before=None):
     return result
 
 
+def basic_financial_response_fields(params, payload):
+    """Verify the response-wide report period and statement type."""
+    code = payload.get('errorcode')
+    if type(code) not in (int, str) or code not in (0, '0'):
+        raise ContractError('iFinD基础财务取数未明确成功')
+    fields = {row['indicator']: row['indiparams'] for row in params['indipara']}
+    envelope = payload.get('inputParams')
+    reflected = envelope.get('params') if isinstance(envelope, dict) else None
+    if (not fields or len(fields) != len(params['indipara']) or not isinstance(reflected, list)
+            or len(reflected) != len(fields)
+            or any(not isinstance(row, dict) or not isinstance(row.get('function'), str) for row in reflected)
+            or {row['function'] for row in reflected} != set(fields)):
+        raise ContractError('基础财务指标回显与请求不一致')
+    for row in reflected:
+        values = row.get('params', [])
+        if (not isinstance(values, list)
+                or any(not isinstance(item, dict) or not isinstance(item.get('name'), str) for item in values)
+                or len({item['name'] for item in values}) != len(values)):
+            raise ContractError('基础财务参数回显缺失或重复')
+        actual = {item['name']: item.get('value') for item in values}
+        if [actual.get('FDREPORT'), actual.get('FL')] != fields[row['function']]:
+            raise ContractError('基础财务报告期或报表类型回显不一致')
+    return fields
+
+
 def metadata_response(operation, params, payload, *, allow_partial=False):
     """Validate the vendor's distinct original shapes without fabricating tables."""
     if type(allow_partial) is not bool:
@@ -154,7 +197,9 @@ def metadata_response(operation, params, payload, *, allow_partial=False):
         value = payload.get('data')
         if isinstance(value, str):
             try:
-                value = json.loads(value)
+                value = json.loads(value, object_pairs_hook=unique_json_object)
+            except DuplicateJSONField:
+                raise
             except ValueError:
                 raise ContractError('iFinD参数字典不是有效JSON') from None
         keys = {'name', 'describe', 'defaultValue', 'choice', 'type'}
@@ -169,20 +214,7 @@ def metadata_response(operation, params, payload, *, allow_partial=False):
             raise ContractError('iFinD有序参数定义不完整，不用空数组或默认值补造')
         return [{key: copy.deepcopy(row[key]) for key in keys} for row in value]
     if operation == 'basic_data_service':
-        if payload.get('errorcode') not in (0, '0'):
-            raise ContractError('iFinD基础财务取数未明确成功')
-        fields = {row['indicator']: row['indiparams'] for row in params['indipara']}
-        reflected = payload.get('inputParams', {}).get('params', [])
-        if not isinstance(reflected, list) or len(reflected) != len(fields) or {r.get('function') for r in reflected} != set(fields):
-            raise ContractError('基础财务指标回显与请求不一致')
-        for row in reflected:
-            values = row.get('params', [])
-            if (not isinstance(values, list) or any(not isinstance(p, dict) or not isinstance(p.get('name'), str) for p in values)
-                    or len({p['name'] for p in values}) != len(values)):
-                raise ContractError('基础财务参数回显缺失或重复')
-            actual = {p['name']: p.get('value') for p in values}
-            if [actual.get('FDREPORT'), actual.get('FL')] != fields[row['function']]:
-                raise ContractError('基础财务报告期或报表类型回显不一致')
+        fields = basic_financial_response_fields(params, payload)
         codes = params['codes'].split(',')
         tables = payload.get('tables')
         if (not isinstance(tables, list) or any(not isinstance(row, dict) for row in tables)
@@ -225,6 +257,52 @@ def metadata_response(operation, params, payload, *, allow_partial=False):
                 absence_proved=False, limitation='未返回仅指本次响应缺少对应代码或字段，不证明证券、报表或金额不存在；不补行、不填零，也不批准金融数值。')
         return result
     raise ContractError('iFinD元数据操作未登记')
+
+
+def draft_financial_response(task, params, payload):
+    """Validate an explicitly unapproved draft projection, not the whole response.
+
+    Parameter echoes still have to match the requested report period and
+    statement type. Only subject-bound, aligned cells can rescue a partial
+    response; the original response and its failed full-shape check remain.
+    """
+    from .draft_sources import _reader_at_least
+    if not _reader_at_least(task,10) or not partial_financial_enabled(task):
+        return None
+    if not isinstance(payload,dict) or not isinstance(payload.get('tables'),list):
+        raise ContractError('财务响应没有可定位的原始表')
+    from .draft_sources import _financial_projection, _financial_scope, CODE_FIELDS
+    record=dict(parameters=params,snapshot=payload)
+    scope=_financial_scope(task,record)
+    if scope.get('cell_bound'):
+        projected = _financial_projection(record, scope)
+        if not projected['tables']:
+            return None
+        parsed = metadata_response('basic_data_service', params, dict(payload, **projected), allow_partial=True)
+        return dict(version=2, projection='requested_financial_cells', projected_shape_validated=True,
+            whole_response_approved=False, numeric_evidence_approved=False,
+            excluded_cell_count=scope['rejected_cells'], excluded_table_count=scope['rejected_tables'], parsed=parsed)
+    requested={row['indicator'] for row in params['indipara']}
+    tables={}
+    for index,selection in scope['tables'].items():
+        original=payload['tables'][index];columns=original['table']
+        for row in sorted(selection['rows']):
+            codes=[(values[row] if isinstance(values,list) else values)
+                for field,values in columns.items() if field in CODE_FIELDS]
+            code=next((value for value in codes if isinstance(value,str) and value),
+                      original.get('thscode') or params['codes'])
+            output=tables.setdefault(code,dict(thscode=code,table={}))['table']
+            for field in requested.intersection(selection['fields']):
+                values=columns[field];value=values[row] if isinstance(values,list) else values
+                if field in output:
+                    raise ContractError('同一标的财务单元重复，不任取其中一份')
+                output[field]=[value]
+    projected=dict(payload,tables=list(tables.values()))
+    parsed=metadata_response('basic_data_service',params,projected,allow_partial=True)
+    return dict(version=1,projection='requested_subject_rows',
+        projected_shape_validated=True,whole_response_approved=False,
+        numeric_evidence_approved=False,excluded_cell_count=scope['rejected_cells'],
+        excluded_table_count=scope.get('rejected_tables',0),parsed=parsed)
 
 
 def metadata_indicator_choices(task, before=None):
@@ -272,6 +350,17 @@ def metadata_policy(task, before=None):
     return max(policies, key=lambda item: item['record']['acquisition']['dispatch_index'])['parsed']
 
 
+def has_account_policy(task):
+    return bool(_metadata_records(task, 'get_limit_policy'))
+
+
+def basic_financial_cell_limit(task, before=None):
+    rules = metadata_policy(task, before)['request_data_limit'].get('rules', [])
+    limits = [rule.get('max_per_request') for rule in rules
+              if isinstance(rule, dict) and 'basicData' in rule.get('data_types', [])]
+    return min(limits) if limits and all(type(limit) is int and limit > 0 for limit in limits) else 0
+
+
 def metadata_wait_seconds(task, operation):
     policies = _metadata_records(task, 'get_limit_policy')
     if not policies:
@@ -289,7 +378,7 @@ def metadata_wait_seconds(task, operation):
     return max(waits)
 
 
-def validate_metadata_request(task, operation, params, *, before=None, require_identity=True):
+def validate_metadata_request(task, operation, params, *, before=None, require_identity=True, defer_account_policy=False):
     if not metadata_enabled(task) or not isinstance(params, dict):
         raise ContractError('iFinD元数据只用于启用版本的当前研究')
     partial_financial_enabled(task)
@@ -297,7 +386,8 @@ def validate_metadata_request(task, operation, params, *, before=None, require_i
         if params:
             raise ContractError('iFinD策略查询不接受业务或认证参数')
         return
-    if not _metadata_records(task, 'get_limit_policy', before):
+    policy_ready = bool(_metadata_records(task, 'get_limit_policy', before))
+    if not policy_ready and not (defer_account_policy and operation in IFIND_POLICY_DEPENDENT_OPERATIONS):
         raise ContractError('先取得本任务实际账号策略，不推定无限额度')
     if operation == 'search_edb':
         from .economic_sources import discovery_enabled
@@ -347,9 +437,9 @@ def validate_metadata_request(task, operation, params, *, before=None, require_i
         periods.add(tuple(values))
     if len(periods) != 1:
         raise ContractError('同次财务截面须保持共同报告期与报表类型，比较不同期间请分别请求')
-    limits = [rule.get('max_per_request') for rule in metadata_policy(task, before)['request_data_limit'].get('rules', [])
-        if isinstance(rule, dict) and 'basicData' in rule.get('data_types', [])]
-    if not limits or any(type(limit) is not int or limit <= 0 for limit in limits) or len(codes)*len(fields) > min(limits):
+    if not policy_ready:
+        return  # Draft preflight validated parameters; dispatch must recheck the real limit.
+    if len(codes)*len(fields) > basic_financial_cell_limit(task, before):
         raise ContractError('基础财务单次单元格数量超过或缺少实际策略依据')
 
 
@@ -386,6 +476,423 @@ def financial_request_parameters(task, operation, params):
         indiparams=[params['report_period'],params['statement_type']]) for field in fields])
 
 
+_STATEMENT_BASIS = re.compile(
+    r'(?P<before>调整后|经调整的)?(?P<entity>合并|母公司)\s*'
+    r'(?:(?:财务)?(?:报表|口径|资产负债表|现金流量表|利润表|单体)'
+    r'(?P<after>\s*(?:[（(]\s*调整(?:后)?\s*[）)]|调整后))?'
+    r'|(?=营业收入|营收|营业成本|净利润|经营现金流|应收账款|存货|应付账款|[\u3400-\u9fff]{2,14}业务(?:营业)?收入))')
+_SHARED_STATEMENT = re.compile(
+    r'(?P<first>合并|母公司)\s*(?:以及|及|与|和|、)\s*(?:合并|母公司)\s*'
+    r'(?:财务)?(?:报表|口径|资产负债表|现金流量表|利润表)'
+    r'(?P<adjusted>\s*(?:[（(]\s*调整(?:后)?\s*[）)]|调整后))?')
+_ATTRIBUTED = re.compile(r'(?:归属\s*于?|属于)\s*$')
+
+
+def financial_statement_labels(text):
+    """Use the same literal statement names for acquisition and report copy."""
+    labels = {match['entity'] + '报表' + ('(调整)' if match['before'] or match['after'] else '')
+              for match in _STATEMENT_BASIS.finditer(text) if not _ATTRIBUTED.search(text[:match.start()])}
+    labels.update(match['first'] + '报表' + ('(调整)' if match['adjusted'] else '')
+                  for match in _SHARED_STATEMENT.finditer(text))
+    return labels
+
+
+_FIELD_BY_NAME = {label: field for field, names in FINANCIAL_FIELD_NAMES.items() for label in names}
+_FIELD_NAMES = '|'.join(map(re.escape, sorted(_FIELD_BY_NAME, key=len, reverse=True)))
+_STATED_FIELDS = re.compile(_FIELD_NAMES)
+_FINANCIAL_FIELD_PREFIX = re.compile(
+    r'(?:扣非|扣除非经常性损益后的?|扣除非经常性损益|调整前|重述前|主营业务|'
+    r'少数股东(?:损益|的)?|归属[于]?[^，、。；]{1,16}的?|'
+    r'预测|预告|调整后|重述后|来自[^，、。；]{1,16}的|'
+    r'(?:不要|不看|不需要|无需|排除|剔除)\s*(?:核对|计算|比较|获取|查(?:询|看)?|取)?|不含|除去)\s*$')
+_FINANCIAL_FIELD_SUFFIX = re.compile(r'^(?:率|周转|占比|构成|结构|明细|分部|分项)')
+_OTHER_FINANCIAL_BASIS = re.compile(
+    r'TTM|单季|当季|本季度|下半年|上年末|环比|上期|前一年|同比口径变更|调整前|重述前|首次披露|首发|'
+    r'预测|预计|预告|业绩快报|非合并|非母公司|(?:不要|不看|不需要|无需)\s*(?:查(?:询|看)?|核对|对比|取)?'
+    r'\s*(?:合并|母公司|营业收入|营收|营业成本|净利润|归母|现金流|经营现金流|应收账款|存货|应付账款|同比|上年同期|去年同期)', re.I)
+_FINANCIAL_PERIOD_LINK = r'\s*(?:以及|对比|对照|和|与|及|、|，|,)\s*'
+_SHARED_PERIOD_YEARS = re.compile(r'(?:(?<![\d.])(?:19|20)\d{2}年?\s*(?:和|与|及|、|，|,)\s*)+$')
+_FULL_FISCAL_YEARS = re.compile(
+    r'(?P<years>(?<![\d.])(?:19|20)\d{2}年?(?:\s*(?:和|与|及|、)\s*(?:19|20)\d{2}年?){0,4})'
+    r'\s*(?:的\s*)?(?:(?P<count>[1-5一二两三四五])\s*个\s*)?(?:完整的?\s*)?(?:会计年度|财年)')
+_PRIOR_FINANCIAL_PERIOD = re.compile(r'同比|上年同期|去年同期')
+_FINANCIAL_SUBJECT_LINK = re.compile(
+    r'\s*[）)]?\s*(?:[，,]\s*)?(?:以及|和|与|及|、)\s*'
+    r'(?!(?:并|再|另外|顺便|然后|接着|请|核对|查询|查看|对比|比较|看一下|计算|评估|分别|依次|仅|只|不|排除|剔除))'
+    r'(?:[\u3400-\u9fffA-Za-z][\u3400-\u9fffA-Za-z0-9·]{0,19}\s*)?[（(]?\s*')
+_SEPARATE_FINANCIAL_SCOPE = re.compile(r'分别\s*(?:在|于)|依次|前者|后者|一一对应|仅|只(?:查|看|取|比较|核对|要)')
+_FINANCIAL_CLAUSE_COMMA = re.compile(r'[，,][^，,]*$')
+_FINANCIAL_SUBJECT_NEGATION = re.compile(
+    r'(?:不|不再|不要|不用|不必|无需|不需要|不得|禁止)\s*'
+    r'(?:对照|比较|对比|核对|查看|查询|查|看|研究|分析|计算|取(?:得)?|使用|用|包含|纳入|考虑|提供)'
+    r'|(?:排除|不含|剔除|忽略|跳过|省略)')
+_DIRECT_CODE = r'\d{6}\.(?:SH|SZ)'
+_DIRECT_SUBJECT = (r'(?:[\u3400-\u9fffA-Za-z][\u3400-\u9fffA-Za-z0-9·&]{0,23}\s*)?'
+                   rf'(?:{_DIRECT_CODE}|[（(]\s*{_DIRECT_CODE}\s*[）)])')
+_DIRECT_FINANCIAL = re.compile(
+    rf'(?:请(?:帮我)?|帮我)?\s*(?P<action>核对|查询|查一下|查看|查|列出|对比|比较)\s*'
+    rf'(?P<subjects>{_DIRECT_SUBJECT}(?:\s*(?:以及|和|与|及|、)\s*{_DIRECT_SUBJECT})*)'
+    r'\s*[，,]?\s*(?:在|的)?\s*(?P<period_label>报告期\s*)?(?P<periods>[^；;。！？!?\n]+?)\s*(?:的)?\s*'
+    r'(?:(?:调整后|经调整的)?(?:合并|母公司)(?:财务)?(?:报表|口径|利润表|资产负债表|现金流量表)'
+    r'(?:\s*(?:[（(]调整(?:后)?[）)]|调整后))?)\s*(?:的)?\s*'
+    rf'(?P<fields>(?:{_FIELD_NAMES})(?:\s*(?:以及|和|与|及|、|，|,)\s*(?:{_FIELD_NAMES}))*)'
+    r'(?:\s*(?:分别)?(?:是多少及同比变化|是多少|有何变化|多少))?'
+    r'(?:\s*[，,。；;]?\s*(?:并)?\s*(?:对照|比较|对比)(?:上年同期|去年同期))?'
+    r'(?:\s*[，,。；;]?\s*(?:并|及|和|与)?\s*(?:列出|给出|计算)?\s*(?:原值(?:及|和|与))?同比(?:变化|增幅|增长率)?)?'
+    r'(?:\s*(?:[，,。；;]\s*(?:并\s*)?|并\s*)(?:生成|给出|整理成|出)(?:一份)?(?:简短|完整)?(?:研究)?报告)?')
+_FINANCIAL_ANALYSIS_DELIVERY = re.compile(
+    r'(?:[，,。；;]\s*(?:并|再|然后)?|并|然后)\s*'
+    r'(?:(?:分析|评估)(?:盈利质量|经营质量|财务表现)'
+    r'|(?:给出|形成|提炼|写出?)\s*(?:(?:\d{1,3}|[一二两三四五六七八九十]{1,3})\s*条\s*)?'
+    r'(?:有数据支撑的)?(?:策略|投资|研究)逻辑)'
+    r'(?:\s*[，,。；;]?\s*(?:并|再|然后)?\s*(?:生成|写|撰写|输出|出)(?:一份)?'
+    r'(?:完整|详细|深度)?的?(?:研究|投研)?报告)?$')
+_COMPANY_RESEARCH_ACTION = re.compile(
+    r'(?:^|[，,。；;！？?!\n]|并|再)\s*(?:请(?:帮我)?|帮我)?\s*(?:研究|判断|分析|评估|解释|检验)')
+_EXPLICIT_CONSOLIDATION_SCOPE = re.compile(
+    r'合并|母公司|母表|单体|本部|单独(?:入账|核算|披露)|个别(?:财务)?报表|调整后|重述|追溯')
+_PARENT_PROFIT_NAMES = re.compile('|'.join(map(re.escape, FINANCIAL_FIELD_NAMES['ths_np_atoopc_stock'])))
+
+
+def _financial_subject_fragments(text, matches, version):
+    """Split independent comma clauses while keeping a shared subject list."""
+    if version == 1 or len(matches) < 2:
+        yield text
+        return
+    start = 0
+    for left, right in zip(matches, matches[1:]):
+        bridge = text[left.end(1):right.start(1)]
+        if _FINANCIAL_SUBJECT_LINK.fullmatch(bridge):
+            continue
+        comma = _FINANCIAL_CLAUSE_COMMA.search(bridge)
+        if comma:
+            boundary = left.end(1) + comma.start()
+            yield text[start:boundary]
+            start = boundary + 1
+    yield text[start:]
+
+
+def _stated_report_periods(text, *, complete=False, labelled=False, previous=False, full_fiscal_years=False):
+    from .numeric_integrity import _draft_periods, _number
+
+    if full_fiscal_years:
+        def annual(match):
+            years = re.findall(r'\d{4}', match['years'])
+            if match['count'] and _number(match['count']) != len(years):
+                return match.group()
+            return '和'.join(year+'年' for year in years)+'全年'
+
+        text = _FULL_FISCAL_YEARS.sub(annual, text)
+    parsed = _draft_periods(text)
+    spans = []
+    periods = []
+    for begin, end, period in parsed:
+        if not period.end:
+            continue
+        filing = re.match(r'\s*(?:一季报|半年报|三季报|年报)', text[end:])
+        if (not period.year or period.end not in FINANCIAL_QUERY_PERIODS.values()
+                or period.start not in ('', period.year+'0101')
+                or period.statistic == 'end'
+                or not period.start and not (labelled or '报告期' in text or filing)):
+            return ()
+        if complete and not period.start and filing:
+            end += filing.end()
+        offset = spans[-1][1] if spans else 0
+        shared = _SHARED_PERIOD_YEARS.search(text[offset:begin])
+        group_begin = offset + shared.start() if shared else begin
+        if spans and re.fullmatch(_FINANCIAL_PERIOD_LINK, text[offset:group_begin]) is None:
+            return ()
+        if shared:
+            periods.extend(year+period.end for year in re.findall(r'\d{4}', shared.group()))
+        periods.append(period.year+period.end)
+        spans.append((group_begin, end))
+    if any(not any(start <= begin < stop for start, stop in spans) for begin, _, _ in parsed):
+        return ()
+    if complete and (not spans or text[:spans[0][0]].strip() or text[spans[-1][1]:].strip()):
+        return ()
+    if len(periods) == 1 and (previous or _PRIOR_FINANCIAL_PERIOD.search(text)):
+        (period,) = periods
+        periods.insert(0, str(int(period[:4])-1)+period[4:])
+    return tuple(dict.fromkeys(periods))
+
+
+def named_financial_fields(text):
+    """Recognize registered amount names without matching a different measure."""
+    previous_end = 0
+    for match in _STATED_FIELDS.finditer(text):
+        if (_FINANCIAL_FIELD_PREFIX.search(text[previous_end:match.start()])
+                or _FINANCIAL_FIELD_SUFFIX.match(text[match.end():])):
+            continue
+        previous_end = match.end()
+        yield _FIELD_BY_NAME[match.group()]
+
+
+def stated_financial_requests(task, *, clause=None):
+    """Read scoped current A-share financial fields and their report periods."""
+    from .draft_sources import _unquoted_local_scope
+    from .evidence import declared_security_codes, security_code_matches
+    from .ifind_financial_catalog import parameter_template
+    from .market_series import series_family
+    from .subject_scope import scope_question
+
+    version = task.get(STATED_FINANCIAL_POLICY)
+    if (type(version) is not int or version not in STATED_FINANCIAL_VERSIONS
+            or version >= 2 and task.get('research_mode') != 'current'
+            or not source_request_fields_enabled(task)):
+        return []
+    if clause is None:
+        from .index_sources import selected_industry_sample
+        from .stock_quality import named_financial_inputs, study_scope
+
+        sample = selected_industry_sample(task)
+        if sample:
+            fields = PEER_FINANCIAL_FIELDS + (PEER_OPERATING_FIELDS if sample.get('operating_drivers') else ())
+            return [dict(codes=member['code'], report_period=day, statement_type='1',
+                         indicators=list(fields), question_ids=sample['question_ids'])
+                    for member in sample['selected'] for day in sample['periods']]
+        if (scope := study_scope(task)) and (named := named_financial_inputs(task, scope)):
+            return named
+    declared = set(declared_security_codes(task))
+    if not declared:
+        return []
+    text = scope_question(task) if clause is None else clause
+    default_consolidated = False
+    if version >= STATED_FINANCIAL_CONSOLIDATION_VERSION:
+        text = _unquoted_local_scope(text)
+        question_text = _unquoted_local_scope(scope_question(task))
+        # Parent-shareholder profit is a metric, while parent-only accounts
+        # are a distinct reporting basis.
+        basis_text = _PARENT_PROFIT_NAMES.sub('', question_text)
+        default_consolidated = (bool(_COMPANY_RESEARCH_ACTION.search(question_text))
+                                and not _EXPLICIT_CONSOLIDATION_SCOPE.search(basis_text))
+    encoding = task.get('security_declaration_encoding', 1)
+    questions = [row['id'] for row in task.get('questions', [])
+                 if row.get('required', True) and row.get('answer_scope') != 'general_definition'
+                 and row['question'] == task['question']]
+    if not questions:
+        return []
+    cutoff = market_date(task['cutoff']).replace('-', '')
+    groups = {}
+    sentences = re.split(r'[。；;！？?!\n]', text)
+    fragments = (fragment for sentence in sentences for fragment in
+                 _financial_subject_fragments(sentence, list(security_code_matches(sentence, encoding=encoding)), version))
+    for clause in fragments:
+        if _OTHER_FINANCIAL_BASIS.search(clause):
+            continue
+        matches = list(security_code_matches(clause, encoding=encoding))
+        codes = list(dict.fromkeys(match[1] for match in matches))
+        if not set(codes) <= declared:
+            continue
+        if (version >= 2 and matches
+                and _FINANCIAL_SUBJECT_NEGATION.search(clause[:matches[0].start(1)])):
+            continue
+        if len(codes) > 1:
+            if (version == 1 or len(matches) != len(codes)
+                    or _SEPARATE_FINANCIAL_SCOPE.search(clause[matches[0].end(1):])
+                    or not all(_FINANCIAL_SUBJECT_LINK.fullmatch(clause[left.end(1):right.start(1)])
+                               for left, right in zip(matches, matches[1:]))):
+                continue
+        elif not codes and len(declared) == 1:
+            codes = sorted(declared)
+        if not codes or any(series_family(code) != '个股' for code in codes):
+            continue
+        for match in reversed(matches):
+            start, end = match.span(1)
+            clause = clause[:start] + ' ' * (end - start) + clause[end:]
+        labels = financial_statement_labels(clause)
+        if len(labels) == 1:
+            label, = labels
+        elif not labels and default_consolidated:
+            label = '合并报表'
+        else:
+            continue
+        periods = _stated_report_periods(clause, full_fiscal_years=version >= STATED_FINANCIAL_VERSION)
+        if not periods:
+            continue
+        for field in named_financial_fields(clause):
+            template = parameter_template(field)
+            binding = template[1]['choice'].get(label) if template else None
+            if binding is not None:
+                for period in periods:
+                    if period <= cutoff:
+                        for code in codes:
+                            groups.setdefault((code, period, binding), {}).setdefault(field, None)
+    return [dict(codes=code, report_period=period, statement_type=binding,
+                 indicators=list(fields), question_ids=questions)
+            for (code, period, binding), fields in groups.items()]
+
+
+def direct_financial_scope(task, *, clause=None):
+    """Match a whole standalone request or an explicitly isolated query clause."""
+    from .draft_sources import _NO_PDF, stated_access_restricted
+    from .market_series import _IFIND_ONLY
+
+    version = task.get(STATED_FINANCIAL_POLICY)
+    if (type(version) is not int or version not in STATED_FINANCIAL_VERSIONS[2:]
+            or task.get('draft_first_version') != 1 or task.get('plan_version', 1) != 1
+            or task.get('intent') not in ('综合研究', '比较对象') or task.get('parent') or task.get('update_from')
+            or task.get('materials') or task.get('pending_materials') or task.get('calculation_specs')
+            or task.get('subject_scope')):
+        return None
+    questions = task['questions']
+    if len(questions) != 1:
+        return None
+    question, = questions
+    if (not question.get('required', True) or question['question'] != task['question'] or question.get('answer_scope')
+            or question.get('evidence_needs') or question.get('method_needs')
+            or (question.get('kind') not in ('fact', 'comparison') and task.get('question_origin') != 'default')):
+        return None
+    question_text = task['question'] if clause is None else clause
+    text = _IFIND_ONLY.sub('', _NO_PDF.sub('', question_text)).strip(' ，,。；;！？!?\n')
+    if len(text) > 512 or stated_access_restricted(task, text):
+        return None
+    # A writing deliverable over these same observations leaves the registered
+    # data scope intact. Other questions still go through research planning.
+    analysis = _FINANCIAL_ANALYSIS_DELIVERY.search(text) if clause is None else None
+    if analysis:
+        text = text[:analysis.start()].rstrip()
+    match = _DIRECT_FINANCIAL.fullmatch(text)
+    if match is None:
+        return None
+    previous = bool(_PRIOR_FINANCIAL_PERIOD.search(text))
+    periods = _stated_report_periods(match['periods'], complete=True, labelled=bool(match['period_label']), previous=previous,
+                                     full_fiscal_years=version >= STATED_FINANCIAL_VERSION)
+    scopes = stated_financial_requests(task, clause=clause)
+    subjects = set(re.findall(_DIRECT_CODE, match['subjects']))
+    fields = set(named_financial_fields(match['fields']))
+    if (not periods or not fields or len({row['statement_type'] for row in scopes}) != 1
+            or {(row['codes'], row['report_period']) for row in scopes} != {(code, period) for code in subjects for period in periods}
+            or any(set(row['indicators']) != fields for row in scopes)
+            or ('ths_np_atoopc_stock' in fields and any(row['statement_type'] in ('2', '4') for row in scopes))):
+        return None
+    if previous:
+        ordered = sorted(periods)
+        if len(ordered) != 2 or ordered[0][4:] != ordered[1][4:] or int(ordered[0][:4])+1 != int(ordered[1][:4]):
+            return None
+    comparison = match['action'] in ('比较', '对比') or len(subjects) > 1 or len(periods) > 1
+    label = next(iter(subjects)) if len(subjects) == 1 else '多标的'
+    cells = {(row['codes'], field, row['report_period'], row['statement_type'])
+             for row in scopes for field in row['indicators']}
+    kind = 'research' if analysis else 'comparison' if comparison else 'fact'
+    title = {'research':'财务研究','comparison':'财务对照','fact':'财务核对'}[kind]
+    return dict(kind=kind, title=label+title,
+                cells=cells, question_ids=scopes[0]['question_ids'])
+
+
+PEER_FINANCIAL_POLICY = 'draft_peer_financial_version'
+PEER_FINANCIAL_FIELDS = ('ths_revenue_stock', 'ths_np_atoopc_stock')
+PEER_OPERATING_FIELDS = ('ths_operating_cost_stock', 'ths_ncf_from_oa_stock')
+PEER_PROFIT_POLICY = 'draft_peer_profit_bridge_version'
+PEER_PROFIT_DETAIL_VERSION = 2
+PEER_PROFIT_COMPONENTS = {
+    'filing.peer_tax_surcharge': ('税金及附加', -1),
+    'filing.peer_selling_expense': ('销售费用', -1),
+    'filing.peer_administrative_expense': ('管理费用', -1),
+    'filing.peer_research_expense': ('研发费用', -1),
+    'filing.peer_financial_expense': ('财务费用', -1),
+    'filing.peer_other_income': ('其他收益', 1),
+    'filing.peer_profit_investment_income': ('投资收益', 1),
+    'filing.peer_profit_fair_value': ('公允价值变动收益', 1),
+    'filing.peer_credit_impairment': ('信用减值损失', 1),
+    'filing.peer_asset_impairment': ('资产减值损失', 1),
+    'filing.peer_asset_disposal': ('资产处置收益', 1),
+    'filing.peer_non_operating_income': ('营业外收入', 1),
+    'filing.peer_non_operating_expense': ('营业外支出', -1),
+    'filing.peer_income_tax_expense': ('所得税费用', -1),
+    'filing.peer_minority_profit': ('少数股东损益', -1),
+}
+PEER_SALES_RECEIPTS = 'filing.peer_sales_receipts'
+PEER_PURCHASE_PAYMENTS = 'filing.peer_purchase_payments'
+PEER_CASH_COMPONENTS = {
+    '销售商品、提供劳务收到的现金': PEER_SALES_RECEIPTS,
+    '购买商品、接受劳务支付的现金': PEER_PURCHASE_PAYMENTS,
+}
+PEER_ADJUSTED_PROFIT = 'filing.peer_adjusted_profit'
+BANK_INTEREST_INCOME = 'filing.bank_net_interest_income'
+BANK_CREDIT_IMPAIRMENT = 'filing.bank_credit_impairment'
+BANK_PROFIT_COMPONENTS = {BANK_INTEREST_INCOME: '净利息收入', BANK_CREDIT_IMPAIRMENT: '信用减值损失'}
+PEER_REVENUE_COMPONENTS = {
+    'filing.peer_fee_income': '手续费及佣金净收入',
+    'filing.peer_net_interest': '利息净收入',
+    'filing.peer_investment_income': '投资收益',
+    'filing.peer_fair_value_income': '公允价值变动收益',
+}
+_PEER_REVENUE_BRIDGE = re.compile(r'(?:拆解|分解|归因|解释)(?:各家|各公司|样本公司|其)?(?:营业收入|营收|收入)(?:的)?(?:增量|变动|变化)')
+
+
+def stated_peer_financial_scope(task):
+    """Use an explicitly named, same-period cohort with common financial fields."""
+    from .draft_sources import _unquoted_local_scope
+    from .evidence import declared_security_codes
+    from .subject_scope import scope_question
+
+    policy = task.get(PEER_FINANCIAL_POLICY)
+    if (type(policy) is not int or policy not in (1, 2) or task.get('research_mode') != 'current'
+            or task.get('intent') not in ('综合研究', '比较对象') or task.get('plan_version', 1) != 1):
+        return None
+    text = _unquoted_local_scope(scope_question(task))
+    if not re.search(r'比较|对比|对照|差异|分化', text) or not _PRIOR_FINANCIAL_PERIOD.search(text):
+        return None
+    if re.search(r'(?:不|别|无需|不要)(?:作|做|进行)?(?:同业|样本|公司间)(?:比较|对比|排序)|只列原值', text):
+        return None
+    requests = stated_financial_requests(task)
+    codes = declared_security_codes(task)
+    periods = sorted({row['report_period'] for row in requests})
+    if (not 2 <= len(codes) <= 8 or len(periods) != 2 or any(not period.endswith('0630') for period in periods)
+            or int(periods[1][:4]) - int(periods[0][:4]) != 1
+            or {(row['codes'], row['report_period']) for row in requests} != {(code, day) for code in codes for day in periods}
+            or any(row['statement_type'] != '1' or set(row['indicators']) != set(PEER_FINANCIAL_FIELDS) for row in requests)):
+        return None
+    result = dict(codes=codes, periods=periods, question_ids=requests[0]['question_ids'])
+    if policy == 2 and _PEER_REVENUE_BRIDGE.search(text):
+        result['revenue_bridge'] = True
+    return result
+
+
+def direct_peer_financial_scope(task):
+    """Leave additional research questions on the normal planning path."""
+    if task.get('materials') or task.get('pending_materials') or task.get('calculation_specs') or len(task['questions']) != 1:
+        return None
+    scope = stated_peer_financial_scope(task)
+    text = _PEER_REVENUE_BRIDGE.sub('', task['question']) if scope and scope.get('revenue_bridge') else task['question']
+    if re.search(r'估值|前景|推荐|买入|股价|市盈率|资金流|分部|市场份额|细分业务|盈利预测|驱动|归因|全行业|全部公司', text):
+        return None
+    return scope
+
+
+def peer_financial_scope(task):
+    """Use an explicit cohort or one selected from a verified publisher file."""
+    from .index_sources import selected_industry_sample
+
+    explicit = stated_peer_financial_scope(task)
+    if explicit:
+        return explicit
+    sample = selected_industry_sample(task)
+    if sample:
+        scope = dict(codes=[member['code'] for member in sample['selected']], periods=sample['periods'],
+                     question_ids=sample['question_ids'], revenue_bridge=sample['revenue_bridge'],
+                     bank_profit_bridge=sample['industry'] == '银行', industry_sample=sample)
+        if sample.get('operating_drivers'):
+            scope['operating_drivers'] = True
+        return scope
+    return None
+
+
+def direct_financial_quota_reason(task):
+    """A confirmed basic-data limit affects other cells in this research version."""
+    from .evidence import IFIND_QUOTA_ERRORS
+
+    for event in reversed(task.get('ledger', {}).get('dispatches', ())):
+        if ((event.get('source'), event.get('operation')) != ('ifind', 'basic_data_service')
+                or event.get('kind') != 'data_requests' or event.get('network_request_started') is not True
+                or event.get('supplier_rejection_category') != 'quota_exhausted'):
+            continue
+        code = str(event.get('business_code'))
+        if code in ('-4301', '-4317', '-4318'):
+            return 'iFinD'+IFIND_QUOTA_ERRORS[code]+'。'
+    return ''
+
+
 def source_capability_roadmap(task):
     """Describe registered downstream abilities, never permission or a request."""
     version = task.get('source_capability_roadmap_version')
@@ -414,7 +921,7 @@ def source_capability_roadmap(task):
                 guidance=guidance, grants_permission=False, financial_approval=False)
 
 
-def metadata_request_shapes(task):
+def metadata_request_shapes(task, *, first_report=False):
     if not metadata_enabled(task):
         return []
     partial_financial_enabled(task)
@@ -431,19 +938,23 @@ def metadata_request_shapes(task):
             '取得策略后可直接选择报告期、报表类型和所需字段批量取数，无须重新搜索指标或参数字典。'
             '目录不批准金融数值；实际单元还需核验，不默认下载PDF。')
         from .ifind_financial_catalog import evidence_definitions
+        from .draft_sources import _reader_at_least
         from .evidence import available_security_codes
         securities = set(available_security_codes(task))
         policy_shape['registered_financial_contexts'] = [dict(definition['claims'],
             definition_hash=fingerprint(definition), financial_approval=False,
             rule='这是限定主体、期间和报表类型的已核对口径，不是旧金额；重新取数后可进入数字提取与计算核验，无须为同一口径再次下载PDF。')
-            for definition in evidence_definitions().values()
+            for definition in evidence_definitions(2 if _reader_at_least(task,9) else 1).values()
             if securities.intersection(definition['claims']['applicable_codes'])]
     roadmap = source_capability_roadmap(task)
     if roadmap is not None:
         policy_shape['capability_roadmap'] = roadmap
         policy_shape['request_description'] = roadmap['guidance']
+    if first_report:
+        policy_shape['guidance'] += '首稿直接选择所需业务工具，依赖账号策略的操作由内核在派发前按需取得。'
     result = [policy_shape]
-    if not _metadata_records(task, 'get_limit_policy'):
+    policy_ready = has_account_policy(task)
+    if not policy_ready and not first_report:
         return result
     from .economic_sources import discovery_enabled
     if discovery_enabled(task):
@@ -455,7 +966,7 @@ def metadata_request_shapes(task):
         metadata_parameter_schema=dict(type='object', additionalProperties=False, required=['indicators', 'market'],
             properties=dict(indicators=dict(type='array', minItems=1, maxItems=3, items=dict(type='string', minLength=1, maxLength=30)),
                 market=dict(type='string', enum=list(IFIND_METADATA_MARKETS))))))
-    codes = metadata_indicator_choices(task)
+    codes = metadata_indicator_choices(task) if policy_ready else []
     if codes:
         result.append(dict(common, operation='get_indicator_params', parameter_keys=['indicator', 'func_name'],
             available_parameter_sets=[dict(indicator=code, func_name=mode) for code in codes for mode in ('基础函数', '日期序列')]))
@@ -497,6 +1008,9 @@ def metadata_request_shapes(task):
                                     items=dict(type='string',enum=list(definitions)))))
             tool['guidance'] += ('本任务按report_period、statement_type、indicators显式选择。'
                 '内核按已登记D/C顺序组装indipara，不提交indiparams数组；不同报告期分别请求。')
+    if not policy_ready:
+        for tool in result[1:]:
+            tool['account_policy_prerequisite'] = 'resolved_before_dispatch'
     return result
 
 
@@ -1190,8 +1704,9 @@ def financial_metric_binding_contract():
     return {"version": FINANCIAL_METRIC_BINDING_VERSION, "metric_labels": dict(FINANCIAL_METRIC_LABELS),
         "same_value_original_required": True, "signed_raw_token_required": True,
         "amount_units": list(_AMOUNT_UNITS), "implicit_unit_conversion": False,
-        "pdf_statement_scope": {"version": 1, "same_original_required": True,
+        "pdf_statement_scope": {"version": 2, "same_original_required": True,
             "basis": "accounting_scope定位金额所属物理表组起始页的对应报表标题；利润表与现金流量表分别核对。",
+            "inline_basis": "PDF正文可用同一原文行的明确报表名、所属期间、指标及带单位金额。引用完整原文行，不能借另一行表名、期间或单位。",
             "ambiguous_rule": "同页存在相反范围的同类标题且表内无独立标题时保留缺口，不借其他页或原件的合并、母公司字样。",
             "protocol_rule": "登记PDF表格不能退回普通文本列协议；版面关系不自动批准财务适用性。"},
         "rule": "金额须在当前数值原件及摘录内明确对应其指标标签，不能借同页其他数字或把百分比当金额。"
@@ -1203,7 +1718,8 @@ def financial_metric_binding_contract():
             "column_index": "从0开始，0为指标标签列；金额列须为1或以上整数",
             "source_rule": "同原件逐字定位表头和金额行，保留全部列及原始金额、符号、单位；期间须与该列的明确原文依据一致。"
                 "version1仅用于非PDF明示分列，version2为PDF物理边框，version3为pdf-tables-3文字坐标。"
-                "version3须有同页明确期间标题和对应年份列，不猜比较期；不得混用协议、借列、拼接或改写原文。"}}
+                "version3须有同页明确期间标题和对应年份列，不猜比较期；不得混用协议、借列、拼接或改写原文。"
+                "裸金额采用同一物理表头前的单位，跨页须有明确财务章节范围。"}}
 
 
 def _pdf_metric_label(value, label):
@@ -1341,11 +1857,12 @@ def _validate_financial_unit_header(item, record, *, task=None):
     """A bare number needs an explicit unit declaration, not a page substring."""
     material = record["snapshot"].get("material") if record["kind"] == "filing" else record["snapshot"]
     locator = item.get("record_locator", {})
+    column = locator.get('financial_column') or {}
     scoped = locator.get('financial_unit_scope')
     if scoped is not None:
         if not financial_statement_unit_scope_enabled(task):
             raise ContractError('本任务未登记跨页财务报表单位依据')
-        header = locator.get('financial_column', {}).get('header_part')
+        header = column.get('header_part')
         actual = financial_statement_unit_scope(record, header)
         if (actual is None or actual != scoped or actual['unit_part'] != locator.get('unit_part')
                 or actual['unit'] != item.get('raw_unit')):
@@ -1353,6 +1870,14 @@ def _validate_financial_unit_header(item, record, *, task=None):
         return
     unit_part = locator.get("unit_part", locator.get("part"))
     text = next((part["text"] for part in material["parts"] if part["locator"] == unit_part), "")
+    if column.get('version') in (2, 3):
+        heading = next(part for part in material['parts'] if part['locator'] == column['header_part'])
+        if unit_part != f"第{heading['pdf_table']['page']}页":
+            raise ContractError('财务金额单位须属于同一表头物理页，跨页需明确报表范围')
+        declaration = _financial_column_unit(heading, column['header_quote'], text)
+        if declaration is None or declaration['unit'] != item.get('raw_unit'):
+            raise ContractError('财务金额缺少该表头前的明确单位声明')
+        return
     from .pdf_material import ALIGNED_EXTRACT_VERSIONS
     units = _declared_amount_units(text, aligned=material.get('extract_version') in ALIGNED_EXTRACT_VERSIONS)
     if units != {item.get("raw_unit")}:
@@ -1404,13 +1929,60 @@ def _statement_titles(text, family):
             if (match := re.fullmatch(pattern, line.strip()))}
 
 
-def validate_financial_statement_scope(item, record, anchor):
-    """Bind a PDF amount to its own statement, not another caption in the file.
+_INLINE_FINANCIAL_AMOUNT = re.compile(
+    r'(?P<label>' + '|'.join(map(re.escape, FINANCIAL_METRIC_LABELS.values())) + r')\s*'
+    r'(?:(?:金额为|为|是)\s*)?[:：=]?\s*(?P<token>' + _AMOUNT_TOKEN + r')\s*'
+    r'(?P<unit>' + _AMOUNT_UNIT_PATTERN + r')')
 
-    Original-byte/parse verification is owned by the caller. Only the registered
-    physical-table representation is covered here; no textual scope, value,
-    missing caption or financial approval is filled automatically.
-    """
+
+def _validate_inline_financial_statement(item, record, material, anchor, expected, label):
+    """Read a complete prose line that explicitly labels its own period and amounts."""
+    location = item['record_locator']['part']
+    period = item['calculation_context'].get('period')
+    page = next((part for part in material['parts'] if part['locator'] == location
+                 and not part.get('pdf_table')), None)
+    if page is None or anchor.get('part') != location or period != item.get('period') or not reported_duration_label(period):
+        raise ContractError('PDF正文金额的报表范围须在同一原文页明确定位，并保留完整所属期间')
+    bases = item['calculation_context_basis']
+    for field in ('entity_id', 'period', 'currency', 'accounting_standard'):
+        basis = bases.get(field)
+        if field in bases and (not isinstance(basis, dict) or basis.get('artifact_id') != record['id']):
+            raise ContractError('PDF正文金额的主体、期间、币种和准则须来自同一原件')
+
+    period = re.sub(r'\s+', '', period)
+    captions = {f'{expected}({period})', f'{period}{expected}'}
+    excerpt_lines = {line.strip() for line in item.get('text', '').splitlines()}
+    matches = 0
+    for line in page['text'].splitlines():
+        line = line.strip()
+        if line not in excerpt_lines:
+            continue
+        fields = re.split(r'[:：]', line, maxsplit=1)
+        if len(fields) != 2:
+            continue
+        caption, amounts = fields
+        compact = re.sub(r'\s+', '', caption).replace('（', '(').replace('）', ')')
+        if compact not in captions or caption.strip() not in anchor.get('quote', ''):
+            continue
+        metric = []
+        for clause in re.split(r'[。；;]', amounts):
+            amount = _INLINE_FINANCIAL_AMOUNT.fullmatch(clause.strip())
+            if amount is None:
+                break  # Later prose may change the period, subject or scope.
+            if amount['label'] == label:
+                metric.append(amount)
+        if (len(metric) == 1 and metric[0]['token'] == item.get('raw_token')
+                and metric[0]['unit'] == item.get('raw_unit')):
+            currencies = re.findall(r'(?:币种|列报货币)\s*(?:[:：]|为)\s*([^。；;，,]+)', amounts)
+            if any(re.sub(r'\s+', '', currency) != '人民币' for currency in currencies):
+                raise ContractError('PDF正文的报表币种与本财务报表的人民币列报依据冲突')
+            matches += 1
+    if matches != 1:
+        raise ContractError('PDF正文金额须唯一对应同一原文行的报表名称、所属期间、指标及带单位金额')
+
+
+def validate_financial_statement_scope(item, record, anchor):
+    """Bind a PDF amount to its own statement through exact prose or registered geometry."""
     context = item.get('calculation_context', {})
     metric = context.get('metric')
     if metric not in FINANCIAL_METRIC_LABELS:
@@ -1422,7 +1994,15 @@ def validate_financial_statement_scope(item, record, anchor):
     source_id = item.get('artifact', {}).get('id', item.get('artifact_id'))
     if source_id != record['id']:
         raise ContractError('PDF报表范围须定位当前金额的同一原件，不能借用另一文件')
+    family = '现金流量表' if metric == 'operating_cash_flow' else '利润表'
+    scope = context.get('accounting_scope')
+    if scope not in ('parent', 'consolidated'):
+        raise ContractError('PDF报表范围须为已定位的合并或母公司范围')
+    expected = ('合并' if scope == 'consolidated' else '母公司')+family
     column = item.get('record_locator', {}).get('financial_column')
+    if column is None:
+        _validate_inline_financial_statement(item, record, material, anchor, expected, FINANCIAL_METRIC_LABELS[metric])
+        return
     if not isinstance(column, dict) or column.get('version') not in (2,3):
         raise ContractError('PDF报表范围须与登记的几何金额列共同核对')
     _validate_pdf_column_geometry(material, item['record_locator']['part'], column['header_part'],
@@ -1432,11 +2012,6 @@ def validate_financial_statement_scope(item, record, anchor):
     group = heading['pdf_table']['group']
     linked = [part for part in material['parts'] if part.get('pdf_table', {}).get('group') == group]
     first = min(linked, key=lambda part: (part['pdf_table']['page'], part['pdf_table']['bbox'][1]))
-    family = '现金流量表' if metric == 'operating_cash_flow' else '利润表'
-    scope = context.get('accounting_scope')
-    if scope not in ('parent', 'consolidated'):
-        raise ContractError('PDF报表范围须为已定位的合并或母公司范围')
-    expected = ('合并' if scope == 'consolidated' else '母公司')+family
     quote = anchor.get('quote', '')
     if expected not in quote:
         raise ContractError('PDF范围依据须明确对应金额所属报表类型，不能借其他报表标题')
@@ -1500,7 +2075,7 @@ def validate_financial_metric_number(item, record, anchor, *, task=None):
         raise ContractError("财务原值未与当前指标唯一对应；请定位明确指标及金额，不能借同页其他数字或猜表格列")
 
 
-def financial_table_candidates(task, record, view, maximum=16):
+def financial_table_candidates(task, record, view, maximum=16, *, selected_metrics=None):
     """Locate literal financial cells in the actual exposed PDF reading.
 
     The existing geometry, metric and unit validators decide which addresses
@@ -1512,10 +2087,14 @@ def financial_table_candidates(task, record, view, maximum=16):
     result = dict(version=FINANCIAL_VALUE_REFERENCE_VERSION, cells=[], maximum=maximum,
         scan_complete=True, scan_units=0, maximum_scan_units=8192,
         candidate_is_approval=False, absence_is_proof=False)
-    methods = {method for question in task.get('questions', []) for method in question.get('method_needs', [])}
-    methods.update(item.get('method') for item in task.get('calculation_specs', []))
-    if not methods.intersection(FINANCIAL_PERIOD_METHODS):
-        return result
+    if selected_metrics is None:
+        methods = {method for question in task.get('questions', []) for method in question.get('method_needs', [])}
+        methods.update(item.get('method') for item in task.get('calculation_specs', []))
+        if not methods.intersection(FINANCIAL_PERIOD_METHODS):
+            return result
+        selected_metrics = FINANCIAL_METRIC_LABELS.keys()
+    elif not set(selected_metrics).issubset(FINANCIAL_METRIC_LABELS):
+        raise ContractError('财务表格字段未登记')
     if not isinstance(record, dict) or not isinstance(view, dict):
         raise ContractError("财务表格位置须绑定留存原件及实际读取视图")
     if record.get('kind') not in ('filing', 'material'):
@@ -1561,18 +2140,32 @@ def financial_table_candidates(task, record, view, maximum=16):
             intervals.append((start,end))
         # Separate table pieces are not reconstructed into a new table.
         # Non-table fragments remain available for literal unit locations.
-    tables = [part for part in material['parts'] if part.get('pdf_table', {}).get('group')]
-    first_parts = {}
-    for part in tables:
-        shape = part['pdf_table']
-        key = shape['group']
-        if key not in first_parts or (shape['page'], shape['bbox'][1]) < (
-                first_parts[key]['pdf_table']['page'], first_parts[key]['pdf_table']['bbox'][1]):
-            first_parts[key] = part
     view_hash = fingerprint(view)
     seen = set()
     scoped_units = financial_statement_unit_scope_enabled(task)
     unit_scopes = {}
+    unit_locations = {}
+
+    def unit_location(heading, header):
+        page = f"第{heading['pdf_table']['page']}页"
+        if not fragments.get(page):
+            return None
+        text = parts[page]['text']
+        declaration = _financial_column_unit(heading, header, text)
+        if declaration is not None:
+            if any(declaration['quote'] in fragment['text'] for fragment in fragments[page]):
+                return declaration['unit'], page, None
+            return None
+        if not scoped_units or _declared_amount_units(text, aligned=material['extract_version'] in ALIGNED_EXTRACT_VERSIONS):
+            return None
+        header_part = heading['locator']
+        if header_part not in unit_scopes:
+            unit_scopes[header_part] = financial_statement_unit_scope(record, header_part)
+        scope = unit_scopes[header_part]
+        if scope and all(any(scope[quote] in fragment['text'] for fragment in fragments.get(scope[part], []))
+                         for part, quote in (('unit_part', 'unit_quote'), ('chapter_part', 'chapter_quote'))):
+            return scope['unit'], scope['unit_part'], scope
+        return None
 
     def scan():
         if result['scan_units'] >= result['maximum_scan_units']:
@@ -1586,29 +2179,6 @@ def financial_table_candidates(task, record, view, maximum=16):
         group = body.get('pdf_table', {}).get('group')
         if not group:
             continue
-        first = first_parts[group]
-        page = '第' + str(first['pdf_table']['page']) + '页'
-        unit_pages = fragments.get(page,[])
-        if not unit_pages:
-            continue
-        unit_matches = [_declared_amount_units(unit_page['text'],
-            aligned=material.get('extract_version') in ALIGNED_EXTRACT_VERSIONS) for unit_page in unit_pages]
-        units={value for values in unit_matches for value in values}
-        unit_scope = None
-        unit_part = page
-        if len(units) == 1:
-            unit = next(iter(units))
-        elif not units and scoped_units:
-            if group not in unit_scopes:
-                unit_scopes[group] = financial_statement_unit_scope(record, first['locator'])
-            unit_scope = unit_scopes[group]
-            if unit_scope is None or not all(any(quote in fragment['text'] for fragment in fragments.get(part, []))
-                    for part,quote in ((unit_scope['unit_part'],unit_scope['unit_quote']),
-                                       (unit_scope['chapter_part'],unit_scope['chapter_quote']))):
-                continue
-            unit,unit_part = unit_scope['unit'],unit_scope['unit_part']
-        else:
-            continue
         headers = [part for part in exposed.values()
                    if parts[part['locator']].get('pdf_table', {}).get('group') == group]
         for row in exposed_part['text'].splitlines():
@@ -1616,11 +2186,15 @@ def financial_table_candidates(task, record, view, maximum=16):
                 return result
             cells = row.split('\t')
             metrics = [metric for metric, label in FINANCIAL_METRIC_LABELS.items()
+                       if metric in selected_metrics
                        if _pdf_metric_label(cells[0], label)]
             if len(metrics) != 1:
                 continue
             metric = metrics[0]
             for heading in headers:
+                original_heading = parts[heading['locator']]
+                shape = original_heading['pdf_table']
+                aligned = shape.get('representation') == 'aligned_words'
                 for header in heading['text'].splitlines():
                     if not scan():
                         return result
@@ -1629,10 +2203,8 @@ def financial_table_candidates(task, record, view, maximum=16):
                             return result
                         # A literal fiscal-period column is required. Never use
                         # note numbers, a shared period-end date or relative MRQ.
-                        aligned = heading.get('pdf_table', {}).get('representation') == 'aligned_words'
                         if aligned:
-                            shape = heading['pdf_table']
-                            if header != heading['text'].splitlines()[shape['header_row']]:
+                            if header != original_heading['text'].splitlines()[shape['header_row']]:
                                 continue
                             period = shape.get('period_columns', {}).get(str(index))
                             if not period:
@@ -1641,6 +2213,13 @@ def financial_table_candidates(task, record, view, maximum=16):
                             continue
                         if index >= len(cells):
                             continue
+                        unit_key = (heading['locator'], header)
+                        if unit_key not in unit_locations:
+                            unit_locations[unit_key] = unit_location(original_heading, header)
+                        location = unit_locations[unit_key]
+                        if location is None:
+                            continue
+                        unit, unit_part, unit_scope = location
                         match = re.fullmatch(r'\s*(' + _AMOUNT_TOKEN + r')\s*(?:' + re.escape(unit) + r')?\s*', cells[index])
                         if match is None:
                             continue
@@ -1773,6 +2352,27 @@ def _financial_amount_unit(page_text, header):
     return dict(unit=selected[0][0], quote=selected[0][1])
 
 
+def _financial_column_unit(heading, header, page_text):
+    shape = heading['pdf_table']
+    if shape.get('representation') == 'aligned_words':
+        leading = heading['text'].splitlines()[:shape['header_row']]
+        captions = {re.sub(r'\s+', '', line) for line in leading
+                    if any(_statement_titles(line, family) for family in ('利润表', '现金流量表', '资产负债表'))}
+        if captions:
+            lines = page_text.splitlines()
+            positions = [index for index, line in enumerate(lines) if re.sub(r'\s+', '', line) in captions]
+            if len(positions) != 1:
+                return None
+            page_text = '\n'.join(lines[positions[0]+1:])
+    if shape.get('duration_columns'):
+        # Logical period columns join stacked words. The first year marker
+        # belongs to the leading physical line, even in column-order text.
+        cells = shape['word_cells'][str(shape['header_row'])]
+        column = min(map(int, shape['period_columns']))
+        header = cells[column][0]['text']
+    return _financial_amount_unit(page_text, header)
+
+
 def _financial_amount_row_is_monetary(label):
     # Explicit exceptions to a statement's amount header must not inherit it.
     # This is a rejection guard, not a positive financial classification.
@@ -1902,11 +2502,15 @@ def financial_amount_tables(task, record, view):
                 table['columns'].append(column)
         if table['columns']:
             result['tables'].append(table)
-    from .financial_data import product_selection_enabled, original_amount_tables
+    from .financial_data import FinancialDataUnavailable, original_amount_tables, product_selection_enabled
     if product_selection_enabled(task):
-        supplemental = original_amount_tables(task, record, view, offset=len(result['tables']))
-        result['tables'].extend(supplemental['tables'])
-        result['unread_supplement_cells'] = supplemental['unread_cells']
+        try:
+            supplemental = original_amount_tables(task, record, view, offset=len(result['tables']))
+        except FinancialDataUnavailable:
+            result['scan_complete'] = False
+        else:
+            result['tables'].extend(supplemental['tables'])
+            result['unread_supplement_cells'] = supplemental['unread_cells']
     return result
 
 
@@ -2053,14 +2657,14 @@ def validate_financial_standard_basis(item, record, anchor):
         raise ContractError('会计准则须由本财务报表编制声明证明，不能借用股份支付或其他业务的准则提及')
 
 
-def financial_context_cells(task,record,view):
+def financial_context_cells(task,record,view, *, maximum=16, selected_metrics=None):
     """Offer original cells with their literal header/unit/scope positions.
 
     These are selectable proposals, not approved facts. No entity, accounting
     standard, date or missing unit is inferred; all final gates still run.
     """
     from .evidence import MATERIAL_CONTEXT_TOKENS
-    cells=financial_table_candidates(task,record,view)['cells']
+    cells=financial_table_candidates(task,record,view,maximum=maximum,selected_metrics=selected_metrics)['cells']
     parts={}
     for part in view.get('parts',[]):parts.setdefault(part['locator'],[]).append(part['text'])
     view_hash=fingerprint(view);task_binding=context_binding(task)
