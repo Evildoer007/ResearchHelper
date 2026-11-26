@@ -1,7 +1,5 @@
 """Explicit codes attached to ETF labels are not name-to-code guesses."""
 import copy
-import hashlib
-import json
 import tempfile
 import unittest
 
@@ -12,6 +10,7 @@ from researchhelper.engine import ResearchAgent
 from researchhelper.evidence import (IFIND_REPORT_FIELDS, available_security_codes,
     declared_security_codes, direct_code_reference, validate_ifind_report_request)
 from researchhelper.planning import input_fingerprint
+from tests.market_observation_fixtures import ETF_CLOSES, etf_close_replay, read_captures
 
 
 class NaturalSecurityDeclarationTests(unittest.TestCase):
@@ -64,13 +63,9 @@ class NaturalSecurityDeclarationTests(unittest.TestCase):
             self.assertNotIn('security_declaration_encoding',agent.create('核对原文',intent='原件内容核对'))
 
     def test_original_input_still_bounds_direct_observation_not_model_added_objects(self):
-        path=ROOT/'result/acceptance/installed-natural-research-941_jdsj/task.json'
-        original=path.read_bytes();task=json.loads(original)
-        task['security_declaration_encoding']=2
-        task['question']=task['original_input']['question']='沪深300ETF510300.SH的收盘价'
-        task['objects']=task['original_input']['objects']=[]
-        task['input_hash']=input_fingerprint(task)
-        reference=direct_code_reference(task,task['source_records'][0])
+        original = ETF_CLOSES.read_bytes()
+        task, quote = etf_close_replay(read_captures(original, grouped=False))
+        reference = direct_code_reference(task, quote)
         self.assertIsNotNone(reference)
         self.assertEqual(reference['version'],2)
         self.assertEqual(reference['declaration_encoding'],2)
@@ -79,12 +74,23 @@ class NaturalSecurityDeclarationTests(unittest.TestCase):
         task['objects']=['510300.SH']
         task['input_hash']=input_fingerprint(task)
         self.assertIsNone(direct_code_reference(task,task['source_records'][0]))
-        self.assertEqual(hashlib.sha256(path.read_bytes()).digest(),hashlib.sha256(original).digest())
+        self.assertEqual(ETF_CLOSES.read_bytes(), original)
 
     def test_closed_etf_failure_remains_closed_and_keeps_its_old_grammar(self):
-        path=ROOT/'result/acceptance/autonomous-data-phase-z21sqtrv/task.json'
-        original=path.read_bytes();task=json.loads(original)
-        self.assertEqual(task['status'],'失败')
-        self.assertEqual(available_security_codes(task),[])
-        self.assertNotIn('security_declaration_encoding',task)
-        self.assertEqual(path.read_bytes(),original)
+        # A synthetic old task tests the legacy grammar and closed-state readback.
+        with tempfile.TemporaryDirectory() as folder:
+            archive = ResearchArchive(folder)
+            agent = ResearchAgent(archive, ROOT, offline=True, require_argument_support=True)
+            try:
+                task = agent.create('沪深300ETF510300.SH的收盘价', entry='ETF', research_mode='current')
+                task.pop('security_declaration_encoding')
+                task['input_hash'] = input_fingerprint(task)
+                task['status'] = '失败'
+                archive.save(task)
+                restored = archive.get(task['id'])
+                self.assertEqual(restored['status'], '失败')
+                self.assertEqual(available_security_codes(restored), [])
+                self.assertNotIn('security_declaration_encoding', restored)
+                self.assertEqual(archive.get(task['id']), restored)
+            finally:
+                agent.close_runtime()
