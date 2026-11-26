@@ -1,8 +1,8 @@
-"""Reader-five source-unit and immutable-content checks, independent of old tests."""
+"""Retain the original source-unit and freeze contracts across reader versions."""
 import copy
 import html
-import re
 import unittest
+from lxml import html as dom
 
 from researchhelper.reports import compose, render, research_figures, READER_VERSION, TEMPLATE_VERSION
 from tests import test_fee_source_units_offline as fees
@@ -28,9 +28,12 @@ class ReaderFiveUnitTests(unittest.TestCase):
             self.assertEqual(row['unit'], evidence[row['ref']]['unit'])
             self.assertEqual(row['value'], evidence[row['ref']]['value'])
         paper = render(content, pdf.ROOT)
-        markup = re.search(r"<figure class='research-figure'.*?</figure>", paper, re.S).group()
-        cells = re.findall(r"<td class='num'>(.*?)</td>", markup)
-        self.assertEqual(cells, [html.escape(str(row['value']) + row['unit']) for row in figure['rows']])
+        tree=dom.document_fromstring(paper)
+        charts=tree.xpath('//main//figure[@data-calculation-ref]//*[@role="img" and @aria-details]')
+        self.assertEqual(len(charts),1)
+        original=tree.get_element_by_id(charts[0].get('aria-details'))
+        cells=original.xpath('.//table/tbody/tr/td[@data-raw-value]/text()')
+        self.assertEqual(cells,[str(row['value'])+row['unit'] for row in figure['rows']])
         self.assertEqual(content, before)
         self.assertEqual(figure['unit'], '%/年')
         return cells
@@ -55,11 +58,10 @@ class ReaderFiveFreezeTests(unittest.TestCase):
         fixture = self.fixture(documents.DocumentReportIndexTests)
         before = copy.deepcopy(fixture.content)
         paper = render(fixture.content, pdf.ROOT)
-        self.assertEqual(READER_VERSION, 'rh-reader-5')
-        self.assertEqual(TEMPLATE_VERSION, 'rh-paper-3')
-        self.assertIn("data-reader-version='rh-reader-5'", paper)
-        self.assertIn("<header class='report-header'>", paper)
-        self.assertIn("研究截止：<time datetime='" + html.escape(fixture.content['cutoff']) + "'>", paper)
+        tree=dom.document_fromstring(paper)
+        self.assertEqual(tree.get('data-reader-version'),READER_VERSION)
+        self.assertEqual(fixture.content['template_version'],TEMPLATE_VERSION)
+        self.assertEqual(tree.find('.//header//time').get('datetime'),fixture.content['cutoff'])
         self.assertEqual(fixture.content, before)
         self.assertEqual(fixture.fixture.agent.export(fixture.task_id), fixture.frozen)
 
@@ -67,10 +69,12 @@ class ReaderFiveFreezeTests(unittest.TestCase):
         fixture = self.fixture(pdf.PDFQuoteReflowTests)
         before = copy.deepcopy(fixture.content)
         paper = render(fixture.content, pdf.ROOT)
-        self.assertIn("data-reader-version='rh-reader-5'", paper)
-        self.assertIn('模板' + fixture.content['template_version'], paper)
+        tree=dom.document_fromstring(paper)
+        self.assertEqual(tree.get('data-reader-version'),READER_VERSION)
+        self.assertIn('模板'+fixture.content['template_version'],tree.text_content())
+        quotes=tree.xpath('//main//p[contains(concat(" ",normalize-space(@class)," ")," document-content-quote ")]')
         for evidence in fixture.content['evidence']:
-            self.assertEqual(paper.count(html.escape(evidence['text'], quote=True)), 1)
+            self.assertEqual(sum(' '.join(node.text_content().split())==' '.join(evidence['text'].split()) for node in quotes),1)
         self.assertEqual(fixture.content, before)
         self.assertEqual(fixture.fixture.agent.export(fixture.done['id']), fixture.original_export)
 
@@ -80,9 +84,14 @@ class ReaderFiveFreezeTests(unittest.TestCase):
         content = compose(fixture.fixture.agent.start(task['id']))
         before = copy.deepcopy(content)
         paper = render(content, pdf.ROOT)
-        for index, evidence in enumerate(content['evidence'], 1):
-            heading = f"<h3>3.{index} {html.escape(evidence['object'])}</h3>"
-            self.assertIn(heading + "<p class='figure-context'>" + html.escape(evidence['period']) + '</p>', paper)
+        tree=dom.document_fromstring(paper)
+        for evidence in content['evidence']:
+            record=tree.get_element_by_id('ev-'+evidence['id'])
+            heading=record.find('.//h3')
+            self.assertIsNotNone(heading)
+            self.assertIn(evidence['object'],heading.text_content())
+            self.assertNotIn(evidence['period'],heading.text_content())
+            self.assertIn(evidence['period'],record.text_content())
         self.assertEqual(content, before)
 
 
