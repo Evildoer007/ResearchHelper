@@ -113,7 +113,7 @@ class FOMCOfficialChannelTests(unittest.TestCase):
 
     def test_inventory_has_one_entry_per_operation_and_no_fake_permission(self):
         tools = [tool for tool in data_request_contract(self.task)['tools'] if tool['source'] == 'official']
-        self.assertEqual([tool['operation'] for tool in tools], ['release_catalog', 'release_original'])
+        self.assertEqual([tool['operation'] for tool in tools], ['release_catalog', 'release_original', 'hsi_close_history'])
         self.assertTrue(all(tool['credential_required'] is False for tool in tools))
 
 
