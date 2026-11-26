@@ -1,18 +1,16 @@
 """Readable quantities and source-level disclosure without rewriting frozen research."""
 import copy
-import hashlib
 from html.parser import HTMLParser
-import json
 from pathlib import Path
 import unittest
 
+from tests.argument_review_fixture import ENTITY, financial_review_fixture
 from researchhelper.contracts import fingerprint
-from researchhelper.reports import report_heading
+from researchhelper.reports import READER_VERSION, report_heading
 from researchhelper.visual import (render, statement_display_text, statement_paragraphs,
     reading_diagnostics)
 
 ROOT=Path(__file__).resolve().parents[1]
-SOURCE=ROOT/'result/acceptance/one-sentence-research-v799vtkq/report.json'
 
 
 class MainPaper(HTMLParser):
@@ -31,17 +29,10 @@ class MainPaper(HTMLParser):
 
 
 class ReportReadingPrecisionTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.digest=hashlib.sha256(SOURCE.read_bytes()).hexdigest()
-        cls.frozen=json.loads(SOURCE.read_text())
-
     def setUp(self):
-        self.content=copy.deepcopy(self.frozen)
+        _, self.frozen = financial_review_fixture()
+        self.content = copy.deepcopy(self.frozen)
         self.question=self.content['questions'][0]
-
-    def tearDown(self):
-        self.assertEqual(hashlib.sha256(SOURCE.read_bytes()).hexdigest(),self.digest)
 
     def render(self):
         self.content['content_hash']=fingerprint({key:value for key,value in self.content.items() if key!='content_hash'})
@@ -61,7 +52,7 @@ class ReportReadingPrecisionTests(unittest.TestCase):
         return record,content
 
     def test_heading_uses_frozen_verified_entity_and_actual_methods(self):
-        self.assertEqual(report_heading(self.content),'贵州茅台盈利与现金流')
+        self.assertEqual(report_heading(self.content), ENTITY+'盈利与现金流')
 
     def test_user_short_title_is_preserved(self):
         self.content['title']='指定研究标题'
@@ -74,17 +65,17 @@ class ReportReadingPrecisionTests(unittest.TestCase):
 
     def test_large_money_and_ratios_are_readable_without_source_change(self):
         text=statement_display_text(self.question,'answer',self.content)
-        self.assertIn('907.03亿元',text);self.assertIn('460.33亿元',text)
-        self.assertIn('706.91亿元',text);self.assertIn('50.75%',text);self.assertIn('153.56%',text)
-        self.assertIn('90703260964.4800元',self.question['answer'])
+        self.assertIn('840.00亿元',text);self.assertIn('426.30亿元',text)
+        self.assertIn('654.63亿元',text);self.assertIn('50.75%',text);self.assertIn('153.56%',text)
+        self.assertIn('84000000000.4800元',self.question['answer'])
         self.assertIn('2026年1月1日至2026年6月30日',text)
 
     def test_numeric_links_keep_exact_original_and_existing_target(self):
         parsed=MainPaper(self.render())
         links=[item for item in parsed.links if item.get('class')=='quantity-link']
         self.assertTrue(links)
-        self.assertTrue(any('90,703,260,964.48元' in item['title'] for item in links))
-        self.assertTrue(any('90703260964.4800元' in item['data-original-display'] for item in links))
+        self.assertTrue(any('84,000,000,000.48元' in item['title'] for item in links))
+        self.assertTrue(any('84000000000.4800元' in item['data-original-display'] for item in links))
         self.assertTrue(all(item['href'][1:] in parsed.targets for item in links))
         self.assertTrue(all(item['aria-haspopup']=='dialog' for item in links))
 
@@ -107,7 +98,7 @@ class ReportReadingPrecisionTests(unittest.TestCase):
     def test_frozen_claim_words_not_shortened_or_rejudged(self):
         original=self.content['theses'][0]
         page=self.render()
-        self.assertIn('在表面上与盈利质量良好的解读一致',page)
+        self.assertIn('本期数据支持现金流覆盖报表净利润的判断。回款仍需单独核对。',page)
         self.assertEqual(original['judgment'],'支持')
         self.assertIn(original['title'],page)
 
@@ -158,10 +149,10 @@ class ReportReadingPrecisionTests(unittest.TestCase):
 
     def test_new_reader_identity_and_offline_chart_data_retained(self):
         page=self.render()
-        self.assertIn("data-reader-version='rh-reader-11'",page)
-        self.assertIn('90703260964.48',page)
-        self.assertIn('46033330566.78',page)
-        self.assertIn('70690750119.06',page)
+        self.assertIn(f"data-reader-version='{READER_VERSION}'",page)
+        self.assertIn('84000000000.48',page)
+        self.assertIn('42630000000.78',page)
+        self.assertIn('65462628001.2',page)
         self.assertEqual(self.content['content_hash'],self.frozen['content_hash'])
 
 
