@@ -4,9 +4,6 @@
 .login-logo [id$="-word-helper"] { fill: var(--text, #252525); }
 html[data-theme="dark"] .login-logo [id$="-word-research"],
 html[data-theme="dark"] .login-logo [id$="-word-helper"] { fill: #e8eaed; }
-/* Match OH's disc diameter and baseline, not its shorter brand-name width. */
-.login-splash__fallback-logo,
-.login-splash__reference-logo { width: min(367.127989px, 53.539457vw); }
 #login-setup-note { margin: 0 0 20px; color: var(--text-muted, #62656b); font-size: 13px; line-height: 1.6; }
 [hidden] { display: none !important; }
 .login-page { --login-error: var(--login-brand); }
