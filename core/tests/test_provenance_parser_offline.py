@@ -85,6 +85,25 @@ class ProvenanceParserTests(unittest.TestCase):
                 self.assertEqual(parser.verified_material(material, payload)["parts"], material["parts"])
         self.assertEqual(calls, ["original.pdf"])
 
+    def test_cold_pdf_uses_remaining_task_time_up_to_the_local_limit(self):
+        material, payload = self.material()
+        original = parser.MaterialParser.parse
+        limits = []
+
+        def measured(instance, *args, **kwargs):
+            result = original(instance, *args, **kwargs)
+            limits.append(result['parse_runtime']['timeout_seconds'])
+            return result
+
+        with patch.object(parser.MaterialParser, 'parse', measured):
+            token = parser.begin_verification({'id': 'limited'}, lambda task: None, 55)
+            try:
+                parser.verified_material(material, payload)
+            finally:
+                parser.end_verification(token)
+        limit, = limits
+        self.assertTrue(30 < limit <= 55)
+
     def test_initial_upload_seeds_only_private_extraction_not_research_approval(self):
         payload = synthetic_pdf()
         material = parser.MaterialParser().parse("original.pdf", payload)
@@ -129,7 +148,7 @@ class ProvenanceParserTests(unittest.TestCase):
             token = parser.begin_verification({"id": "cold"}, lambda task: None, .6)
             started = time.monotonic()
             try:
-                with self.assertRaisesRegex(ContractError, "未取得完整正文"):
+                with self.assertRaisesRegex(ContractError, "本地解析已超过本次时限"):
                     parser.verified_material(material, payload)
             finally:
                 parser.end_verification(token)
@@ -208,6 +227,52 @@ class ProvenanceParserTests(unittest.TestCase):
             foreign["id"] = "another-task"
             with self.assertRaises(ContractError):
                 read(foreign, selection, binding(foreign))
+
+    def test_manual_read_does_not_block_task_edits_or_save_stale_spans(self):
+        with tempfile.TemporaryDirectory() as folder:
+            agent = ResearchAgent(ResearchArchive(folder), ROOT, offline=True, isolate_materials=True)
+            self.addCleanup(agent.close_runtime)
+            task = agent.create('核对原件内容', intent='原件内容核对')
+            task = agent.add_material(task['id'], 'original.txt', b'Synthetic original')
+            original, = task['materials']
+            selection = [{'artifact_id': original['id'], 'snapshot_hash': original['snapshot_hash'],
+                          'queries': ['Synthetic'], 'parts': [], 'question_ids': ['q1'], 'reason': '合成材料定位'}]
+            started, release = threading.Event(), threading.Event()
+            errors = []
+
+            def delayed(*args):
+                started.set()
+                if not release.wait(5):
+                    raise AssertionError('Test read did not resume')
+                return read(*args)
+
+            def reading():
+                try:
+                    agent.read_materials(task['id'], selection, binding(task))
+                except Exception as error:
+                    errors.append(error)
+
+            with patch('researchhelper.engine.read_sources', side_effect=delayed):
+                worker = threading.Thread(target=reading)
+                worker.start()
+                try:
+                    self.assertTrue(started.wait(5))
+                    self.assertTrue(agent.lock.acquire(timeout=1))
+                    try:
+                        agent.create('另一个任务')
+                        updated = agent.add_material(task['id'], 'added.txt', b'Concurrent original')
+                    finally:
+                        agent.lock.release()
+                finally:
+                    release.set()
+                    worker.join(5)
+            self.assertFalse(worker.is_alive())
+            stale, = errors
+            self.assertIsInstance(stale, ContractError)
+            self.assertIn('读取期间任务已更新', str(stale))
+            self.assertFalse(agent.archive.get(task['id']).get('source_readings'))
+            current = agent.read_materials(task['id'], selection, binding(updated))
+            self.assertEqual(agent.archive.get(task['id'])['source_readings'], [current])
 
     def test_cache_is_bounded_and_keeps_no_original_text_or_approvals(self):
         for index in range(parser.MAX_VERIFIED_EXTRACTIONS + 3):
