@@ -1,13 +1,12 @@
 """Source anchors stay exact and frozen; the reader sees human labels."""
 import copy
-import json
 from pathlib import Path
 import unittest
 
 from researchhelper.reports import render, source_locator_label
+from tests import test_document_content_offline as documents
 
 ROOT = Path(__file__).resolve().parents[2]
-REAL_CONTENT = ROOT / "result/host-research/lpr-20250520/study-kfq462ut/result/researchhelper/rh_b1a55ca1d11e45e29261fc5b2eeda858/research-v1.json"
 
 
 class SourceLocatorPresentationTests(unittest.TestCase):
@@ -31,12 +30,30 @@ class SourceLocatorPresentationTests(unittest.TestCase):
         for locator in (None, {}, "not a mapping", {"unknown": 8}):
             self.assertEqual(source_locator_label({"record_locator": locator, "locator": "历史定位原文"}), "历史定位原文")
 
-    def test_actual_retained_report_preserves_frozen_content(self):
-        content = json.loads(REAL_CONTENT.read_text())
-        original = copy.deepcopy(content)
-        paper = render(content, ROOT)
-        self.assertIn("用户提供材料，段落4", paper)
-        self.assertNotIn("&#x27;part&#x27;:", paper)
-        self.assertIn("一年期LPR为3.0%", paper)
-        self.assertIn("不能识别银行净息差变化方向", paper)
-        self.assertEqual(content, original)
+    def test_archived_report_keeps_frozen_content_and_readable_location(self):
+        from lxml import html
+
+        fixture = documents.DocumentContentTests()
+        self.addCleanup(fixture.doCleanups)
+        fixture.setUp()
+        literal = '费用上限为100百万元。'
+        material = '\n\n'.join(('合成政策', '适用范围另行发布。', '以批复为准。', literal))
+        task = fixture.material_task(text=material)
+        spec = fixture.spec(task, record_locator={'part':'段落4'}, text=literal, raw_token='100',
+                            raw_value=100, value=100, unit='百万元', raw_unit='百万元', conversion_factor=1)
+        done = fixture.run_spec(task, spec)
+        self.assertEqual(done['status'], '已完成', done.get('error'))
+        saved = fixture.agent.export(done['id'])
+        frozen = copy.deepcopy(saved)
+        evidence, = saved['content']['evidence']
+        self.assertEqual(evidence['record_locator'], {'part':'段落4'})
+        for profile in ('standard','detailed'):
+            page = html.document_fromstring(render(saved['content'], ROOT, report_profile=profile))
+            article = page.get_element_by_id('ev-' + evidence['id'])
+            source, = article.xpath('.//a')
+            archived = page.get_element_by_id(source.get('href')[1:]).text_content()
+            self.assertIn('用户提供材料，段落4', archived)
+            self.assertIn(literal, archived)
+            self.assertNotIn("'part':", archived)
+        self.assertEqual(saved, frozen)
+        self.assertEqual(fixture.agent.export(done['id']), frozen)
