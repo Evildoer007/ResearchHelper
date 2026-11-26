@@ -18,7 +18,6 @@ class CompletedReviewChoiceRecoveryTests(unittest.TestCase):
         self.fixture = fixtures.ArgumentSupportWorkflowTests()
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
-        self.addCleanup(self.fixture.tearDown)
         self.task, self.proposal, self.agent = self.fixture.task, self.fixture.proposal, self.fixture.agent
         self.task.update(status='运行中', run_mode='model', argument_submission_recovery_version=1,
             argument_choice_recovery_version=1, review_basis_presentation_version=1, argument_reference_format=2)
