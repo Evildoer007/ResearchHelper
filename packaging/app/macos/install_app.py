@@ -83,7 +83,8 @@ def verify_bundle(bundle, manifest):
     if (info.get('CFBundleIdentifier') != 'io.researchhelper.app'
             or info.get('CFBundleName') != 'ResearchHelper'
             or info.get('CFBundleExecutable') != 'ResearchHelper'
-            or info.get('CFBundleShortVersionString') != manifest['version']):
+            or info.get('CFBundleShortVersionString') != manifest['version']
+            or info.get('CFBundleVersion') != manifest['version']):
         raise RuntimeError('App身份或版本不匹配')
     return manifest['files']
 
@@ -143,7 +144,17 @@ def promote(stage, destination, manifest, previous, recovery, preflight):
         raise
 
 
-def install(candidate_path=None, *, previous_candidate=None):
+def recovery_directory(value, destination):
+    """Keep atomic rollback in an explicit ordinary directory when supplied."""
+    target = Path(value) if value is not None else Path.home() / '.Trash'
+    destination = Path(destination).resolve()
+    if (target.is_symlink() or not target.is_dir() or target.resolve() != target
+            or target.is_relative_to(destination) or destination.is_relative_to(target)):
+        raise RuntimeError('安装回退目录不可用或与App重叠，未安装')
+    return target
+
+
+def install(candidate_path=None, *, previous_candidate=None, recovery_root=None):
     """Callable installation step; never infer a release from modification time."""
     selected = candidate_path or os.environ.get('RESEARCHHELPER_CURRENT_RECEIPT')
     if not selected:
@@ -162,9 +173,7 @@ def install(candidate_path=None, *, previous_candidate=None):
             previous = recorded_manifest(previous_candidate)
             verify_bundle(DESTINATION, previous)
             signature(DESTINATION)
-        recovery_root = Path.home() / '.Trash'
-        if recovery_root.is_symlink() or not recovery_root.is_dir():
-            raise RuntimeError('可恢复废纸篓不可用，未安装')
+        recovery_root = recovery_directory(recovery_root, DESTINATION)
         if ROOT.stat().st_dev != DESTINATION.parent.stat().st_dev or recovery_root.stat().st_dev != ROOT.stat().st_dev:
             raise RuntimeError('安装与恢复须位于同一卷，未安装')
         output = ROOT / 'result/maintenance/app-installation' / datetime.now().strftime('%Y%m%d-%H%M%S-%f')
