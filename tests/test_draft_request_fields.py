@@ -142,7 +142,7 @@ class DraftRequestFieldsTests(unittest.TestCase):
         class Model:
             def reason(self,task,messages,**options):captured.append(messages);return '{}'
         class Engine:model=Model()
-        with tempfile.TemporaryDirectory(dir=ROOT/'result') as folder:
+        with tempfile.TemporaryDirectory(dir=ROOT/'result/acceptance') as folder:
             # The unit test owns a temporary archive within RH; independent
             # package acceptance separately exercises the installation boundary.
             with patch('core.session.project_store',return_value=ResearchArchive(Path(folder)/'data/researchhelper')):
