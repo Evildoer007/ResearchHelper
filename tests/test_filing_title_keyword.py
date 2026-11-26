@@ -76,7 +76,7 @@ class FilingTitleKeywordTests(unittest.TestCase):
         choices = [row for row in _planned_request_schemas(self.task)
                    if row['properties']['operation']['enum'] == ['report_query']]
         request = dict(id='filing', source='ifind', operation='report_query', parameters=self.params,
-                       question_ids=['q1'], selection_reason='按问题定位半年度报告')
+                       question_ids=['q1'], selection_reason='按问题定位半年度报告',catalogue_alternative_ref=None)
         self.assertTrue(any(_matches(request, schema) for schema in choices))
         request['parameters'] = dict(self.params, functionpara={'keyWord': '报告', 'mode': 'allAStock'})
         self.assertFalse(any(_matches(request, schema) for schema in choices))
