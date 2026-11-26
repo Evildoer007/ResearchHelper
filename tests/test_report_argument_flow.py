@@ -64,6 +64,7 @@ class ReportArgumentFlowTests(unittest.TestCase):
         cls.content = saved['content']
         cls.before = fingerprint(cls.content)
         cls.tree = ReportTree(render(cls.content, resources))
+        cls.detailed_tree = ReportTree(render(cls.content, resources, report_profile='detailed'))
 
     @classmethod
     def tearDownClass(cls):
@@ -83,16 +84,27 @@ class ReportArgumentFlowTests(unittest.TestCase):
             self.assertTrue(required.issubset(located), required - located)
 
     def test_comparisons_use_one_full_width_reading_flow(self):
-        self.assertEqual(len(self.tree.with_class('argument-comparisons')), 1)
+        for name, tree in (('standard', self.tree), ('detailed', self.detailed_tree)):
+            with self.subTest(profile=name):
+                comparison, = tree.with_class('argument-comparisons')
+                evidence, = [node for node in tree.with_class('paper-wide') if comparison in node['ancestors']]
+                figure, = [node for node in tree.nodes if node['tag'] == 'figure' and comparison in node['ancestors']]
+                self.assertIn(evidence, figure['ancestors'])
+                self.assertEqual(evidence['attrs']['data-columns'], '1')
+                self.assertFalse(tree.with_class('logic-reading-grid'))
 
     def test_short_conclusion_precedes_complete_question_basis(self):
-        bodies = [node for node in self.tree.nodes if 'data-main-question-ref' in node['attrs']]
-        self.assertTrue(bodies)
-        introduction = self.tree.with_class('argument-introduction')[0]
-        for body in bodies:
-            self.assertLess(self.tree.nodes.index(introduction), self.tree.nodes.index(body))
-            self.assertTrue(any('argument-continuation' in parent['attrs'].get('class','').split()
-                                for parent in body['ancestors']))
+        for name, tree in (('standard', self.tree), ('detailed', self.detailed_tree)):
+            with self.subTest(profile=name):
+                introduction, = tree.with_class('argument-introduction')
+                evidence, = tree.with_class('argument-visual')
+                continuation, = tree.with_class('argument-continuation')
+                self.assertLess(tree.nodes.index(introduction), tree.nodes.index(evidence))
+                self.assertLess(tree.nodes.index(evidence), tree.nodes.index(continuation))
+                bodies = [node for node in tree.nodes if 'data-main-question-ref' in node['attrs']]
+                self.assertTrue(bodies)
+                for body in bodies:
+                    self.assertIn(continuation, body['ancestors'])
 
     def test_every_registered_figure_remains_present_exactly_once(self):
         references = [node['attrs']['data-calculation-ref'] for node in self.tree.nodes
