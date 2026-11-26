@@ -14,7 +14,7 @@ from researchhelper.official_sources import release_choices
 from tests.test_official_release_channel import CATALOG
 from researchhelper.reasoning import extractable_source_views,evidence_contract
 from researchhelper.output_schema import (original_batch_output_schema,original_batch_prompt,
-    decode_original_batch,_original_quote_selector)
+    decode_original_batch,_original_quote_selector, ORIGINAL_SELECTION_REJECTIONS)
 
 
 class BatchQuoteNeedAliasTests(unittest.TestCase):
@@ -66,12 +66,22 @@ class BatchQuoteNeedAliasTests(unittest.TestCase):
         self.assertEqual(result['evidence_specs'][0]['review']['evidence_need_texts'],
             {'q1':['报告对现金流与利润差异的原文说明']})
 
-    def test_wrong_alias_or_canonical_hash_is_not_silently_repaired(self):
+    def test_wrong_alias_or_canonical_hash_is_rejected_at_the_selected_record(self):
         canonical=self.payload['evidence_contract']['question_requirements']['q1'][0]['id']
         for reference in ('n2',canonical):
             wire=self.wire();wire['sources'][0]['selection']['text_quotes'][0]['review']['need_links'][0]['need_ids']=[reference]
-            with self.assertRaises(ContractError):decode_original_batch(wire,
+            result = decode_original_batch(wire,
                 original_batch_output_schema(self.task,self.views),(self.task,self.views))
+            self.assertEqual(result['evidence_specs'], [])
+            rejection = result[ORIGINAL_SELECTION_REJECTIONS]
+            self.assertEqual((rejection['submitted_items'], rejection['accepted_items']), (1, 0))
+            self.assertEqual(rejection['rejected_items'][0]['location'], '$.sources[0].selection.text_quotes[0]')
+            self.assertFalse(rejection['automatic_repair'])
+            self.assertFalse(rejection['evidence_approved'])
+            legacy = dict(self.task)
+            legacy.pop('independent_financial_selections_version')
+            with self.assertRaises(ContractError):
+                decode_original_batch(wire, original_batch_output_schema(legacy, self.views), (legacy, self.views))
 
     def test_decode_does_not_change_task_requirements_or_source(self):
         before=fingerprint(self.task);payload_before=copy.deepcopy(self.payload)
