@@ -1,6 +1,6 @@
 {
   "schema": "researchhelper.native-icon",
-  "tile": "same approved Helper-family white rounded tile",
+  "tile": "user-supplied rounded Helper tile, light and dark",
   "sizes": [
     16,
     20,
@@ -13,15 +13,24 @@
     128,
     256
   ],
-  "source_candidate": "result/build-staging/20261010-204451-762361",
+  "origin": {
+    "archive": "researchhelper-icons.zip",
+    "sha256": "63a4b35c496f94d503f74348be29f1d56ff077de89ccaa34fc61a8e785e2d0da"
+  },
+  "png_source": "original ICNS ic10 PNG chunk, no redraw",
   "source_hashes": {
-    "products/app/frontend/app-icon.svg": "75d19465cfc24092ff8d65798083ea5783dfcbe9c996ab0ee25324a001944333",
-    "products/app/frontend/brand.svg": "98e6b32705673c48305342703226f7fc75ee5bc4a8c2414e72bef0826060ddb6",
-    "assets/icons/researchhelper-app-icon-tile-light.png": "c20ce0c3bdebe9c545f18a8b601046e25607497906ed27bd04eee34f27066566",
-    "assets/icons/researchhelper-app-icon-tile-light.ico": "cb84ad975d4d64d789c8385a720a9e3ef548482554b8d7a577125901e315ec56",
-    "assets/icons/researchhelper-app-icon-tile-light.icns": "de91f38fd7c0e65d3ebd70ec1869bb431c4eb0588b50d892190d45082a40065b",
-    "assets/icons/researchhelper-mark.svg": "98e6b32705673c48305342703226f7fc75ee5bc4a8c2414e72bef0826060ddb6",
-    "assets/icons/researchhelper-logo.svg": "837cfaa96fb95e0c26569e19e66e56213f5fa04c8de82f80bff1fc39e9dad9dd",
-    "assets/icons/researchhelper-app-icon-tile-light.svg": "75d19465cfc24092ff8d65798083ea5783dfcbe9c996ab0ee25324a001944333"
+    "assets/icons/researchhelper-app-icon-tile-dark.icns": "3948c9c65687b5731120160c0edf2bf3972013e1c0ce3460969272fa5ee4c733",
+    "assets/icons/researchhelper-app-icon-tile-dark.ico": "f58b094e305225dfd67f2b5ae4e6e38337c93082954aa479fa9bd944c9802120",
+    "assets/icons/researchhelper-app-icon-tile-dark.png": "f9af65b99f72ee5995a646ca1a9114ebcbab0957e71e7809a20caef54c83ced4",
+    "assets/icons/researchhelper-app-icon-tile-dark.svg": "c91c9cccde8d7deeb3b5c59c3b484eb6ee7e94f14936e49897430a0e9b72a26c",
+    "assets/icons/researchhelper-app-icon-tile-light.icns": "bc30df89f33a9f41011d3566deb100f526b74c6323e91c0a742031ed7a6a69ec",
+    "assets/icons/researchhelper-app-icon-tile-light.ico": "bf979f8adbd9c6a401fe00be4d434e21ea89339e14254fb4111c52f979ee2128",
+    "assets/icons/researchhelper-app-icon-tile-light.png": "0e47f694c4627a6426c74d6812412ea83b7b32e99b91574feb052bb54e7dbe40",
+    "assets/icons/researchhelper-app-icon-tile-light.svg": "54a51a391c2ef0be71cd4345bf358595a7b7c5a14cb364fbf066a3ae1f630922",
+    "assets/icons/researchhelper-logo.svg": "92261dc58811f9deaca3209c81513fedab1994b4dd63db4548643f927e9ab498",
+    "assets/icons/researchhelper-mark.svg": "8c7302f6927c6906917ce096995224338c95526ce825541b1a52a099721bdc8e",
+    "products/app/frontend/app-icon-dark.svg": "c91c9cccde8d7deeb3b5c59c3b484eb6ee7e94f14936e49897430a0e9b72a26c",
+    "products/app/frontend/app-icon.svg": "54a51a391c2ef0be71cd4345bf358595a7b7c5a14cb364fbf066a3ae1f630922",
+    "products/app/frontend/brand.svg": "8c7302f6927c6906917ce096995224338c95526ce825541b1a52a099721bdc8e"
   }
 }
