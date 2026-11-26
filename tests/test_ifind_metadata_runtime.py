@@ -84,6 +84,10 @@ class IFindMetadataRuntimeTests(unittest.TestCase):
         return [self.collect('get_indicator_params', dict(indicator=field['indicator'], func_name='基础函数'))
             for field in self.fixture['request']['indipara']]
 
+    def use_retained_metadata_policy(self):
+        self.task.pop('fixed_financial_catalog_version', None)
+        self.task['input_hash'] = input_fingerprint(self.task)
+
     def test_new_policy_is_bound_to_the_task_and_old_defaults_do_not_change(self):
         self.assertEqual(self.task[IFIND_METADATA_POLICY], 1)
         old = copy.deepcopy(self.task); old.pop(IFIND_METADATA_POLICY)
@@ -133,6 +137,7 @@ class IFindMetadataRuntimeTests(unittest.TestCase):
         self.assertIsNotNone(current_query_reference(self.task, record))
 
     def test_planning_schema_exposes_the_same_registered_requests(self):
+        self.use_retained_metadata_policy()
         self.definitions()
         contract = data_request_contract(self.task)
         schema = dict(anyOf=_planned_request_schemas(self.task, contract))
@@ -148,6 +153,7 @@ class IFindMetadataRuntimeTests(unittest.TestCase):
         self.assertEqual(len(self.calls), before)
 
     def test_changed_metadata_cannot_authorize_a_later_financial_request(self):
+        self.use_retained_metadata_policy()
         records = self.definitions()
         records[0]['snapshot']['data'] = '[]'
         self.assertEqual(len(basic_financial_definitions(self.task)), 1)
@@ -155,6 +161,7 @@ class IFindMetadataRuntimeTests(unittest.TestCase):
             validate_source_request(self.task, 'ifind', 'basic_data_service', self.fixture['request'])
 
     def test_imports_do_not_acquire_current_parameter_authority(self):
+        self.use_retained_metadata_policy()
         self.definitions()
         for record in self.task['source_records']:
             record.pop('acquisition', None)
@@ -162,6 +169,7 @@ class IFindMetadataRuntimeTests(unittest.TestCase):
         self.assertEqual([row['operation'] for row in metadata_request_shapes(self.task)], ['get_limit_policy'])
 
     def test_foreign_task_or_version_cannot_borrow_the_dictionary(self):
+        self.use_retained_metadata_policy()
         self.definitions()
         for change in (dict(id='foreign'), dict(version=self.task['version']+1)):
             task = dict(self.task, **change)
@@ -244,6 +252,7 @@ class IFindMetadataRuntimeTests(unittest.TestCase):
         self.assertEqual(len(self.calls), before)
 
     def test_malformed_parameter_result_is_retained_without_inventing_empty_definitions(self):
+        self.use_retained_metadata_policy()
         self.catalogue(); self.fixture = copy.deepcopy(self.fixture)
         code = self.fixture['request']['indipara'][0]['indicator']
         self.fixture['parameters'][code]['data'] = 'invalid-json'
