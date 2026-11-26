@@ -7,7 +7,7 @@ import re
 from datetime import date
 
 from .contracts import ContractError
-from .financial_sources import original_line_index,original_date_anchors,selected_original_span
+from .financial_sources import original_line_index,original_date_anchors,original_interval_spans,selected_original_span
 
 ROLE=re.compile(r'管理人报酬|年?管理费(?:率)?|年?托管费(?:率)?')
 PERCENT=re.compile(r'(?<![\d.,+\-−])(?P<token>\d+(?:\.\d+)?)\s*(?P<unit>%/年|%)')
@@ -51,7 +51,23 @@ def validate_fee_component_binding(item):
         raise ContractError('费率数字须属于当前费用条款，不能借用同段其他费用行的数字')
 
 
-def original_fee_choices(view,*,object_code):
+def _fee_period_spans(text, *, literal_duration):
+    if literal_duration:
+        yield from original_interval_spans(text)
+        return
+    # Existing disclosures without the duration policy retain their original
+    # schema and candidate addresses.
+    for match in PERIOD.finditer(text):
+        try:
+            start = date(*map(int,re.findall(r'\d+',match['start'])))
+            end = date(*map(int,re.findall(r'\d+',match['end'])))
+        except ValueError:
+            continue
+        if start <= end:
+            yield dict(start=match.start(),end=match.end(),quote=match.group(),period=f'{start}/{end}')
+
+
+def original_fee_choices(view,*,object_code,literal_duration=False):
     """Finite local refs preserve literal values and original line positions."""
     lines=original_line_index(view);dates=original_date_anchors(view)
     result=dict(rates=[],funds=[],shares=[],periods=[],candidate_is_approval=False)
@@ -100,18 +116,14 @@ def original_fee_choices(view,*,object_code):
                     add('shares',dict(value=value,role='reported_fund_scope_not_share_class',span=location,
                         basis=selected_original_span(lines,location),
                         limitation='仅原件所列基金整体范围，不证明A/C等份额类别，不将基金简称当交易代码。'))
-        for match in PERIOD.finditer(text):
-            start=tuple(map(int,re.findall(r'\d+',match['start'])))
-            end=tuple(map(int,re.findall(r'\d+',match['end'])))
-            try:date(*start);endpoint=date(*end).isoformat()
-            except ValueError:continue
-            if start>end:continue
+        for interval in _fee_period_spans(text,literal_duration=literal_duration):
+            endpoint=interval['period'].rsplit('/',1)[-1]
             anchor=next((index for index,value in enumerate(dates)
                 if value['part']==part['locator'] and value['date']==endpoint
-                and value['quote'] in match['end']),None)
-            location=span(fragment,match.start(),match.end())
+                and interval['quote'].endswith(value['quote'])),None)
+            location=span(fragment,interval['start'],interval['end'])
             if location is not None and anchor is not None:
-                add('periods',dict(value=re.sub(r'\s+','',match.group()),
+                add('periods',dict(value=re.sub(r'\s+','',interval['quote']),
                     observation_date=endpoint,observation_anchor=anchor,span=location,
                     basis=selected_original_span(lines,location)))
     result['eligible']=all(result[kind] for kind in ('rates','funds','shares','periods'))
