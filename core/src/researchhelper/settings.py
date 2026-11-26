@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from .contracts import ContractError
+from .contracts import ContractError, unique_json_object
 from .credentials import LocalSecretStore, configuration_lock, owned_bytes, replace_references
 
 
@@ -31,7 +31,10 @@ class DataSettings:
         raw = owned_bytes(self.path)
         if raw is None:
             return {source: {name: "" for name in names} for source, names in self.fields.items()}
-        saved = json.loads(raw)
+        try:
+            saved = json.loads(raw, object_pairs_hook=unique_json_object)
+        except (ValueError, RecursionError):
+            raise ContractError("数据源配置JSON损坏或含重复字段，原件保留") from None
         if not isinstance(saved, dict):
             raise ContractError("数据源配置字段无效")
         references = "schema" in saved
