@@ -149,9 +149,10 @@ class ObservedWritingProfileTests(unittest.TestCase):
             session.agent=ResearchAgent(session.archive,ROOT,offline=True,require_argument_support=True,draft_first=True)
             self.addCleanup(session.agent.close_runtime)
             fresh=session.agent.create(task['question'],entry='宏观',objects=task['objects'],research_mode='current')
-            fresh['knowledge']=task['knowledge']
             source=deepcopy(task['source_records'][0]);source.update(task_id=fresh['id'],research_version=fresh['version'],content_version=1)
             fresh['source_records']=[source];session.archive.save(fresh)
+            fresh=session.draft(fresh['id'], data_requests=[], defer_delivery=True)
+            self.assertEqual(fresh['knowledge'][CATALOGUE_POLICY],fresh[CATALOGUE_POLICY])
             _write(Engine(),fresh,observations(fresh));packet=json.loads(calls[0][1]['content'])
             skill=session.tools(fresh['id'])['first_report']
             self.assertEqual(skill['observation_profiles'],observation_context(fresh,observations(fresh))['profiles'])
