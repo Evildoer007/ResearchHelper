@@ -34,7 +34,7 @@ class GatewayIsolatedTransportTests(unittest.TestCase):
         self.task['ifind_gateway_recovery_version'] = 1
         self.requests = []
 
-    def server(self, statuses):
+    def server(self, statuses, response=None):
         requests = self.requests
         class Handler(BaseHTTPRequestHandler):
             def log_message(self,*args):pass
@@ -42,7 +42,7 @@ class GatewayIsolatedTransportTests(unittest.TestCase):
                 request = self.rfile.read(int(self.headers['Content-Length']))
                 requests.append((self.path,request))
                 status = statuses[min(len(requests)-1,len(statuses)-1)]
-                body = json.dumps(dict(errorcode=0,tables=[dict(fixture=1)])).encode()
+                body = response if response is not None else json.dumps(dict(errorcode=0,tables=[dict(fixture=1)])).encode()
                 self.send_response(status)
                 self.send_header('Content-Length',str(len(body)))
                 self.end_headers()
@@ -88,6 +88,17 @@ class GatewayIsolatedTransportTests(unittest.TestCase):
         with self.assertRaises(ContractError):self.fixture.ifind(self.task)
         self.verify_workers(1)
         self.assertTrue(self.requests[0][0].endswith('/cmd_history_quotation'))
+
+    def test_duplicate_fields_reap_worker_and_leave_no_success(self):
+        self.server([200], b'{"errorcode":-4001,"errorcode":0,"tables":[{"fixture":1}]}')
+        with self.assertRaisesRegex(ContractError, '重复字段'):
+            self.fixture.ifind(self.task)
+        self.verify_workers(1)
+        event = self.task['ledger']['dispatches'][0]
+        self.assertEqual(event['failure_code'], 'duplicate_response_field')
+        self.assertEqual(event['status'], '返回结构异常')
+        self.assertNotIn('business_code', event)
+        self.assertNotIn('response_snapshot_hash', event)
 
 
 def run():
