@@ -14,7 +14,8 @@ class FixedFinancialCatalogueTests(unittest.TestCase):
     def test_only_confirmed_fields_and_distinct_profit_meaning(self):
         rows = catalog.catalogue()["definitions"]
         self.assertEqual(set(rows), {"ths_revenue_stock", "ths_np_atoopc_stock",
-                                    "ths_operating_cost_stock", "ths_np_stock", "ths_ncf_from_oa_stock"})
+                                    "ths_operating_cost_stock", "ths_np_stock", "ths_ncf_from_oa_stock",
+                                    "ths_account_receivable_stock", "ths_inventory_stock", "ths_accounts_payable_stock"})
         self.assertEqual(rows["ths_np_atoopc_stock"]["meaning"], "归属于母公司所有者的净利润")
         self.assertNotEqual(rows["ths_np_atoopc_stock"]["metric"], "net_profit")
         self.assertEqual(rows["ths_np_stock"]["metric"], "net_profit")
