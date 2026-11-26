@@ -23,17 +23,17 @@ class CurrentAppInstallationTests(unittest.TestCase):
         self.stage = self.root / 'staged/ResearchHelper.app'
         self.backup = self.root / 'recovery/ResearchHelper.app'
         self.backup.parent.mkdir()
-        self.before = self.make_bundle(self.old, b'old frozen candidate')
-        self.after = self.make_bundle(self.stage, b'new frozen candidate')
+        self.before = self.make_bundle(self.old, b'old frozen candidate', '0.10.0')
+        self.after = self.make_bundle(self.stage, b'new frozen candidate', '0.1.0')
 
-    def make_bundle(self, directory, content):
+    def make_bundle(self, directory, content, version):
         executable = directory / 'Contents/MacOS/ResearchHelper'
         executable.parent.mkdir(parents=True)
         executable.write_bytes(content)
         info = dict(CFBundleIdentifier='io.researchhelper.app', CFBundleName='ResearchHelper',
-            CFBundleExecutable='ResearchHelper', CFBundleShortVersionString='0.10.0')
+            CFBundleExecutable='ResearchHelper', CFBundleShortVersionString=version, CFBundleVersion=version)
         (directory / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))
-        return dict(version='0.10.0', files=installer.bundle_files(directory))
+        return dict(version=version, files=installer.bundle_files(directory))
 
     def promote(self, before=True, preflight=lambda: None):
         installer.promote(self.stage, self.old, self.after,
@@ -57,6 +57,15 @@ class CurrentAppInstallationTests(unittest.TestCase):
         self.assertEqual(installer.bundle_files(self.old), self.after['files'])
         self.assertEqual(installer.bundle_files(self.backup), self.before['files'])
         self.assertFalse(self.stage.exists())
+
+    def test_stale_bundle_build_number_is_rejected_even_if_file_hashes_match(self):
+        path = self.stage / 'Contents/Info.plist'
+        info = plistlib.loads(path.read_bytes())
+        info['CFBundleVersion'] = self.before['version']
+        path.write_bytes(plistlib.dumps(info))
+        manifest = dict(self.after, files=installer.bundle_files(self.stage))
+        with self.assertRaisesRegex(RuntimeError, 'App身份或版本不匹配'):
+            installer.verify_bundle(self.stage, manifest)
 
     def test_new_installation_requires_unoccupied_destination(self):
         os.replace(self.old, self.root / 'uninstalled-old.app')
@@ -173,6 +182,27 @@ class CurrentAppInstallationTests(unittest.TestCase):
         with patch.object(installer.subprocess, 'run', return_value=result):
             with self.assertRaisesRegex(RuntimeError, 'Finder information'):
                 installer.signature(self.stage)
+
+    def test_explicit_recovery_does_not_require_or_use_trash(self):
+        with patch.object(installer.Path, 'home', side_effect=AssertionError('No Trash access')):
+            selected = installer.recovery_directory(self.backup.parent, self.old)
+        self.assertEqual(selected, self.backup.parent)
+        self.promote()
+        self.assertEqual(installer.bundle_files(self.backup), self.before['files'])
+
+    def test_linked_and_overlapping_recovery_paths_are_rejected(self):
+        link = self.root / 'linked-recovery'
+        link.symlink_to(self.backup.parent, target_is_directory=True)
+        for path in (link, self.old, self.old / 'Contents', self.old.parent):
+            with self.subTest(path=path), self.assertRaises(RuntimeError):
+                installer.recovery_directory(path, self.old)
+        self.assertEqual(installer.bundle_files(self.old), self.before['files'])
+
+    def test_missing_recovery_is_not_implicitly_created(self):
+        missing = self.root / 'not-created'
+        with self.assertRaises(RuntimeError):
+            installer.recovery_directory(missing, self.old)
+        self.assertFalse(missing.exists())
 
 
 if __name__ == '__main__':
