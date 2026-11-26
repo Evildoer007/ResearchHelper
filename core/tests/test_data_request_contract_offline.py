@@ -11,7 +11,7 @@ from unittest.mock import patch
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError
 from researchhelper.engine import ResearchAgent
-from researchhelper.evidence import FIELD_REGISTRY, FILING_REQUEST_REGISTRY, data_request_contract, snapshot_record
+from researchhelper.evidence import data_request_contract, snapshot_record
 from researchhelper.model import ModelService, ModelSettings
 from researchhelper.planning import question_specs
 from researchhelper.reasoning import PHASE_RULES, validate_plan
@@ -39,8 +39,12 @@ class DataRequestContractTests(unittest.TestCase):
 
     def test_tools_equal_implemented_registries_not_supplier_marketing(self):
         contract = data_request_contract(self.task)
-        self.assertEqual({tool["qualified_id_for_lookup_only"] for tool in contract["tools"]},
-                         set(FIELD_REGISTRY) | set(FILING_REQUEST_REGISTRY))
+        self.assertEqual({tool["qualified_id_for_lookup_only"] for tool in contract["tools"]}, {
+            'ifind.cmd_history_quotation', 'ifind.date_sequence', 'ifind.edb_service', 'ifind.filing_original',
+            'ifind.get_thscode', 'ifind.report_query', 'ifind.smart_stock_picking',
+            'official.release_catalog', 'official.release_original',
+            'tinyshare.cashflow', 'tinyshare.daily', 'tinyshare.daily_basic', 'tinyshare.fund_daily', 'tinyshare.income',
+        })
         self.assertNotIn("basic_data_service", [tool["operation"] for tool in contract["tools"]])
 
     def test_every_concrete_example_passes_actual_plan_validator(self):
@@ -65,12 +69,15 @@ class DataRequestContractTests(unittest.TestCase):
         self.assertEqual(contract["declared_codes"], [])
         self.assertTrue(all(tool["example"] is None for tool in contract["tools"]))
 
-    def test_hk_code_never_generates_mainland_tinyshare_or_filing_example(self):
+    def test_hk_code_uses_hk_filing_and_never_generates_mainland_tinyshare_example(self):
         task = copy.deepcopy(self.task)
         task["question"], task["objects"] = "研究00700.HK", ["00700.HK"]
         contract = data_request_contract(task)
         self.assertTrue(next(tool for tool in contract["tools"] if tool["operation"] == "cmd_history_quotation")["example"])
-        self.assertTrue(all(tool["example"] is None for tool in contract["tools"] if tool["source"] == "tinyshare" or tool["operation"] == "report_query"))
+        self.assertTrue(all(tool["example"] is None for tool in contract["tools"] if tool["source"] == "tinyshare"))
+        filing = next(tool["example"] for tool in contract["tools"] if tool["operation"] == "report_query")
+        self.assertEqual(filing['parameters']['codes'], '00700.HK')
+        validate_plan(task, {'questions': question_specs(task), 'data_requests': [filing], 'calculations': []})
 
     def test_descriptor_is_read_only_and_does_not_dispatch(self):
         before = copy.deepcopy(self.task)
