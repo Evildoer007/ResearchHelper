@@ -39,7 +39,7 @@ class ResearchCoverageInterfaces(previous.QuestionPlanInterfaces):
         worker.join(10)
         self.assertFalse(worker.is_alive())
         final = self.server.agent.archive.get(task['id'])
-        self.assertEqual(final['status'], '已完成', final.get('error'))
+        self.assertEqual(final['status'], '已完成', {key:final.get(key) for key in ('error','gaps','rejected_evidence')})
         self.assertEqual(final['theses'], [])
         self.assertEqual(final['ledger']['used']['model_calls'], 0)
         self.assertEqual(final['ledger']['used']['data_requests'], 0)
@@ -77,8 +77,18 @@ entry={'id':'effective_date','artifact_id':original['id'],'object':'材料示例
  'part':'段落2','quote':'发布日期：2026年7月19日。'}},'review':{'question_ids':['q1'],'allowed_natures':['合同政策条款'],
  'conditions':['仅核对本次条款'],'reason':'原件生效条款与问题直接对应',
  'evidence_need_ids':{'q1':[evidence_requirements(saved['questions'][0])[0]['id']]}}}
-final=session.run(task['id'],evidence_specs=[entry],answers={'q1':{'answer':'2026年7月21日生效。','refs':['effective_date']}})
-assert final['status']=='已完成',final.get('error')
+staged=session.run(task['id'],evidence_specs=[entry],answers={'q1':{'answer':'2026年7月21日生效。','refs':['effective_date']}},defer_delivery=True)
+assert staged['status']=='待开始' and not staged.get('delivery'),staged.get('gaps')
+request=session.argument_review_inputs(task['id'])['request']
+assert len(request['targets'])==1 and request['targets'][0]['text']=='2026年7月21日生效。'
+assert len(staged['evidence'])==1 and staged['evidence'][0]['text']=='政策自2026年7月21日起生效。'
+submission=dict(version=request['version'],review_hash=request['review_hash'],
+ questions=[dict(question_id='q1',status='answered',missing_evidence=[],reason='仅核对固定合成原件明确列示的生效日')],
+ reviews=[dict(target_id=request['targets'][0]['id'],segments=[dict(text='2026年7月21日生效。',
+ verdict='supported',basis_refs=['evidence:effective_date'],explanation='合成原件逐字列示该日生效，不推断经营或投资结果')])])
+session.review_arguments(task['id'],submission)
+final=session.deliver(task['id'])
+assert final['status']=='已完成',json.dumps({key:final.get(key) for key in ('error','gaps','rejected_evidence')},ensure_ascii=False)
 assert not final['theses'] and final['plan_version']==2
 assert final['ledger']['used']['model_calls']==final['ledger']['used']['data_requests']==0
 target=session.export(task['id'])
@@ -86,6 +96,8 @@ assert target.is_file() and target.with_suffix('.json').is_file() and '2026年7�
 import researchhelper.engine
 assert Path(researchhelper.engine.__file__).resolve().is_relative_to(install.resolve())
 assert session.archive.root==project/'data/researchhelper'
+assert len(final['argument_support_reviews'])==1
+session.agent.close_runtime()
 print(json.dumps({'status':final['status'],'report':str(target),'plan_version':final['plan_version']}))
 '''
         # Inherit the full suite's network sandbox; macOS cannot apply another
