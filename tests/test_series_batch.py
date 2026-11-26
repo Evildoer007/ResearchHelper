@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 from researchhelper.archive import ResearchArchive
-from researchhelper.contracts import ContractError
+from researchhelper.contracts import ContractError, fingerprint
 from researchhelper.engine import ResearchAgent
 from researchhelper.evidence import data_request_contract, snapshot_record
 from researchhelper.market_series import (batch_capacity, batch_enabled, series_settings,
@@ -189,6 +189,130 @@ class SeriesBatchTests(unittest.TestCase):
             content = compose(task)
             check_content(content)
             self.assertEqual(content['series_batch_version'], 1)
+
+
+class PartialDateSeriesDraftTests(unittest.TestCase):
+    def setUp(self):
+        retained = SeriesBatchTests()
+        retained.setUp()
+        self.addCleanup(retained.doCleanups)
+        self.addCleanup(retained.tearDown)
+        self.task, self.params, self.payload = retained.task, retained.params, retained.payload
+        ResearchAgent._apply_draft_policies(self.task)
+        self.task['input_hash'] = input_fingerprint(self.task)
+
+    def observe(self, payload, *, params=None, latest=None):
+        from researchhelper.draft_sources import observations, source_context, source_issues
+        from researchhelper.market_series import record_observation_scope
+        task = copy.deepcopy(self.task)
+        record = snapshot_record(task, 'ifind', 'date_sequence', params or self.params, payload)
+        self.assertEqual(record['snapshot'], payload)
+        self.assertEqual(record['hash'], fingerprint(payload))
+        if latest:
+            record['data_need_ids'] = [latest['id']]
+            record_observation_scope(record, latest, ['q1'])
+        task['source_records'] = [record]
+        context, = source_context(task)
+        return record, observations(task), source_issues(task), context
+
+    def mixed_response(self):
+        payload = copy.deepcopy(self.payload)
+        first = payload['tables'][0]
+        rejected_field = self.params['indipara'][1]['indicator']
+        first['time'][1] = '2026-10-17'
+        first['table'][rejected_field].pop()
+        payload['tables'].append(dict(copy.deepcopy(payload['tables'][1]), thscode='510500.SH'))
+        return payload
+
+    def test_bad_date_column_and_foreign_table_leave_original_cells_in_the_draft(self):
+        payload = self.mixed_response()
+        record, facts, issues, context = self.observe(payload)
+        self.assertEqual(record['status'], '成功待核验')
+        self.assertIn('response_issue', record['series_contract'])
+        scope = record['series_contract']['draft_response_coverage']
+        self.assertEqual((scope['numeric_cells'], scope['rejected_tables']), (14, 1))
+        self.assertFalse(scope['financial_approval'])
+        self.assertEqual(len(facts), 14)
+        self.assertTrue(issues[0]['partial'])
+        for fact in facts:
+            locator = fact['locator']
+            table = payload['tables'][locator['table']]
+            row = locator['row']
+            self.assertEqual(fact['code'], table['thscode'])
+            self.assertEqual(fact['period'], table['time'][row])
+            self.assertEqual(fact['raw_value'], table['table'][locator['field']][row])
+        self.assertNotIn('510500.SH', context['content'])
+        self.assertNotIn('2026-10-17', context['content'])
+        self.assertEqual({table['thscode'] for table in json.loads(context['content'])['tables']}, set(self.params['codes'].split(',')))
+
+    def test_partial_response_uses_one_supplier_dispatch_and_keeps_the_query_identity(self):
+        from researchhelper.evidence import EvidenceCollector, current_query_reference
+        collector = EvidenceCollector(offline=False)
+        payload = self.mixed_response()
+        before = self.task['ledger']['used']['data_requests']
+
+        def transport(task, request, timeout, event):
+            self.assertEqual(json.loads(request.data), self.params)
+            event.update(transport_isolated=True, network_request_started=True, network_worker_reaped=True)
+            return payload
+
+        with patch.object(collector, '_http_json', side_effect=transport) as send:
+            record = collector.external(self.task, 'ifind', 'date_sequence', self.params, {'access_token': 'offline-fixture'})
+        send.assert_called_once()
+        self.assertEqual(self.task['ledger']['used']['data_requests'], before + 1)
+        self.assertEqual(self.task['ledger']['dispatches'][-1]['response_snapshot_hash'], fingerprint(payload))
+        self.assertEqual(record['snapshot'], payload)
+        self.assertIsNotNone(current_query_reference(self.task, record))
+        self.assertFalse(record['series_contract']['draft_response_coverage']['financial_approval'])
+
+    def test_a_conflicting_row_code_does_not_move_values_to_another_requested_code(self):
+        payload = copy.deepcopy(self.payload)
+        first, other = payload['tables']
+        first['table']['ts_code'] = [other['thscode']] + [first['thscode']] * (len(first['time']) - 1)
+        record, facts, issues, context = self.observe(payload)
+        self.assertEqual(len(facts), 18)
+        self.assertFalse(any(row['locator']['table'] == row['locator']['row'] == 0 for row in facts))
+        self.assertTrue(issues[0]['partial'])
+        self.assertEqual(record['series_contract']['draft_response_coverage']['rejected_cells'], 2)
+        kept_first = next(row for row in json.loads(context['content'])['tables'] if row['thscode'] == first['thscode'])
+        self.assertEqual(kept_first['table']['ts_code'], [first['thscode']] * (len(first['time']) - 1))
+
+    def test_latest_scope_keeps_a_conflicting_last_date_unresolved(self):
+        from datetime import date, timedelta
+        from researchhelper.market_series import compile_observation_window, observation_selection
+        selection = observation_selection(self.task)
+        as_of = selection['as_of']
+        previous = (date.fromisoformat(as_of) - timedelta(days=1)).isoformat()
+        instrument = '510300.SH'
+        field = self.params['indipara'][0]['indicator']
+        window = dict(mode='latest_available', as_of=as_of, lookback_calendar_days=7)
+        request = compile_observation_window(dict(id='latest', source='ifind', operation='date_sequence',
+            parameters=dict(codes=instrument, indipara=self.params['indipara'][:1],
+                            functionpara=self.params['functionpara'], observation_window=window)), selection)
+        payload = dict(errorcode=0, tables=[
+            dict(thscode=instrument, time=[previous, as_of], table={field: [1.25, 1.26]}),
+            dict(thscode=instrument, time=[as_of.replace('-', '/')], table={field: [1.28]}),
+        ])
+        _, rows, _, _ = self.observe(payload, params=request['parameters'])
+        self.assertEqual([(row['period'], row['raw_value']) for row in rows], [(previous, 1.25)])
+        record, rows, issues, context = self.observe(payload, params=request['parameters'], latest=request)
+        self.assertEqual(record['status'], '成功待核验')
+        self.assertEqual(rows, [])
+        self.assertTrue(issues[0]['partial'])
+        self.assertEqual(json.loads(context['content']), {'tables': []})
+
+    def test_unusable_values_and_failed_envelopes_cannot_rescue_a_response(self):
+        first = self.payload['tables'][0]
+        field = self.params['indipara'][0]['indicator']
+        params = dict(self.params, codes=first['thscode'], indipara=self.params['indipara'][:1])
+        for code, raw in ((0, True), (0, 10**400), (-4001, 1.25), (0.0, 1.25)):
+            with self.subTest(errorcode=code, raw_type=type(raw).__name__):
+                payload = dict(errorcode=code, tables=[
+                    dict(thscode=first['thscode'], time=first['time'][:1], table={field: [raw]})])
+                record, rows, _, context = self.observe(payload, params=params)
+                self.assertEqual(record['status'], '返回结构异常')
+                self.assertEqual(rows, [])
+                self.assertEqual(context['content'], '')
 
 
 if __name__ == '__main__':
