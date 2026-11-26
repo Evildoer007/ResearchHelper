@@ -1,12 +1,11 @@
 """Required original-source dependencies cannot be hidden by another ready API."""
 import copy
-import json
 import socket
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from tests import ROOT
+from tests.legacy_replay_fixtures import ETF_ORIGINAL, etf_task
 from researchhelper import acquisition
 from researchhelper.contracts import budget, fingerprint
 from researchhelper.reasoning import extractable_source_views
@@ -121,19 +120,17 @@ class InitialSourceCoverageTests(unittest.TestCase):
         self.assertEqual(self.task['source_records'], before)
         self.assertEqual(self.task['reasoning_state']['acquisition']['status'], 'stopped')
 
-    def test_closed_live_case_replay_exposes_original_dependency_without_mutation(self):
-        source = ROOT / 'result/acceptance/one-sentence-research-ykr4oaf1/task.json'
-        original = source.read_bytes()
-        task = json.loads(original)
-        task['initial_acquisition_scope_version'] = 1
-        task['source_records'] = task['source_records'][:3]
+    def test_original_dependency_replay_does_not_mutate_the_task_or_pdf(self):
+        original = ETF_ORIGINAL.read_bytes()
+        task = etf_task()
+        task['source_records'] = [record for record in task['source_records'] if record['kind'] != 'filing']
         before = fingerprint(task)
         with patch.object(acquisition, 'extractable_source_views', side_effect=extractable_source_views):
             coverage = acquisition.initial_acquisition_coverage(task)
         self.assertFalse(coverage['ready'])
         self.assertEqual(coverage['pending_original_question_ids'], ['q1'])
         self.assertEqual(fingerprint(task), before)
-        self.assertEqual(source.read_bytes(), original)
+        self.assertEqual(ETF_ORIGINAL.read_bytes(), original)
 
     def test_one_question_with_two_funds_requires_both_scoped_originals(self):
         self.task['data_need_specs'] = [dict(id='discover_' + code, source='ifind', operation='report_query',
