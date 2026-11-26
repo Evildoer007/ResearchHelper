@@ -1,26 +1,18 @@
 """A single budgeted final submission, never rewriting rejected client prose."""
 import copy
-import hashlib
-import json
-from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 
+from tests.legacy_replay_fixtures import financial_task, numeric_proposal
 from researchhelper.contracts import charge
 from researchhelper.engine import ResearchAgent
 from researchhelper.model import ModelCompletionError
 
-ROOT = Path(__file__).resolve().parents[1]
-FAILED = ROOT/'result/acceptance/one-sentence-research-7s8j8_l8/task.json'
-PASSED = ROOT/'result/acceptance/one-sentence-research-jrfhac2u/task.json'
-
-
 class FinalNumericSubmissionTests(unittest.TestCase):
     def setUp(self):
-        self.hashes = {path:hashlib.sha256(path.read_bytes()).hexdigest() for path in (FAILED,PASSED)}
-        self.task = json.loads(FAILED.read_text())
-        self.proposal = copy.deepcopy(self.task['host_result'])
+        self.task = financial_task()
+        self.proposal = numeric_proposal(valid=False)
         self.agent = ResearchAgent.__new__(ResearchAgent)
         self.agent.model = SimpleNamespace(supports_final_delivery=lambda:True, reason_final_analysis=lambda:None)
         self.agent._save_model_checkpoint = Mock()
@@ -33,16 +25,12 @@ class FinalNumericSubmissionTests(unittest.TestCase):
             return copy.deepcopy(self.final)
         self.agent._reason_on_verified_material = Mock(side_effect=submit)
 
-    def tearDown(self):
-        for path,value in self.hashes.items():
-            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(),value)
-
-    def test_valid_actual_analysis_does_not_spend_another_call(self):
-        task = json.loads(PASSED.read_text()); proposal = task['host_result']
-        self.assertIs(self.agent._finalize_numeric_submission(task,proposal),proposal)
+    def test_valid_analysis_does_not_spend_another_call(self):
+        proposal = numeric_proposal(valid=True)
+        self.assertIs(self.agent._finalize_numeric_submission(self.task,proposal),proposal)
         self.agent._reason_on_verified_material.assert_not_called()
 
-    def test_invalid_actual_prose_gets_one_budgeted_submission_and_quarantine(self):
+    def test_invalid_prose_gets_one_budgeted_submission_and_quarantine(self):
         before = copy.deepcopy((self.task['evidence'],self.task['calculations'],self.proposal))
         result = self.agent._finalize_numeric_submission(self.task,self.proposal)
         self.assertEqual(result,self.final)
