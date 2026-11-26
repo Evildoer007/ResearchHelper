@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock,patch
 
-from tests import ROOT
+from tests import ROOT, read_retained_export
 from tests.test_operating_original_protocol import payload
 from researchhelper.contracts import ContractError,charge,fingerprint
 from researchhelper.data_requirements import unproposed_numeric
@@ -20,8 +20,9 @@ class RequiredNumericCompletionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.path=ROOT/'result/acceptance/one-sentence-research-xe3jpgn9/task.json'
-        cls.before=hashlib.sha256(cls.path.read_bytes()).hexdigest()
-        cls.closed=json.loads(cls.path.read_text())
+        original = read_retained_export(cls.path)
+        cls.before=hashlib.sha256(original).hexdigest()
+        cls.closed=json.loads(original)
 
     def setUp(self):
         # An offline post-extraction fixture, not a resumed real task. Its
@@ -104,7 +105,7 @@ class RequiredNumericCompletionTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        assert hashlib.sha256(cls.path.read_bytes()).hexdigest()==cls.before
+        assert hashlib.sha256(read_retained_export(cls.path)).hexdigest()==cls.before
 
 
 if __name__=='__main__':unittest.main()
