@@ -76,8 +76,23 @@ def aggregate(records):
         raise ContractError('评估记录版本不一致，旧回执不能冒充新版评估')
     converted = [dict(record, evaluation_version=legacy.VERSION) for record in records]
     result = legacy.aggregate(converted)
+    groups = {(entry, intent): [] for entry in legacy.ENTRIES for intent in legacy.INTENTS}
+    for record in records:
+        pair = (record['entry'], record['intent'])
+        if pair not in groups:
+            raise ContractError('评估记录包含未登记的研究入口或意图')
+        groups[pair].append(record)
+    coverage = [
+        dict(entry=entry, intent=intent, recorded_runs=len(group),
+             distinct_inputs=len({record['input_digest'] for record in group}),
+             functional_passed=sum(record['functional_status'] == 'passed' for record in group))
+        for (entry, intent), group in groups.items()
+    ]
     result.update(evaluation_version=VERSION,
         cost_basis='sum_of_cumulative_run_ledgers_not_unique_network_usage',
         saved_html_verified_count=sum(record.get('saved_html_integrity') == 'verified' for record in records),
-        legacy_html_unverified_count=sum(record.get('saved_html_integrity') == 'legacy_unverified' for record in records))
+        legacy_html_unverified_count=sum(record.get('saved_html_integrity') == 'legacy_unverified' for record in records),
+        entry_intent_coverage=coverage,
+        uncovered_entry_intent_combinations=[dict(entry=row['entry'], intent=row['intent'])
+                                              for row in coverage if row['recorded_runs'] == 0])
     return result
