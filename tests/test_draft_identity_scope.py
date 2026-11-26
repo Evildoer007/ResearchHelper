@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from tests import ROOT
 from researchhelper.archive import ResearchArchive
-from researchhelper.contracts import charge, now
+from researchhelper.contracts import ContractError, charge, now
 from researchhelper.engine import ResearchAgent
 from researchhelper.evidence import (snapshot_record, _record_current_acquisition, identity_query_parameters,
     identity_resolutions, identity_candidates, available_security_codes, validate_source_request, IDENTITY_CANDIDATE_PROFILE)
@@ -96,6 +96,69 @@ class DraftIdentityScopeTests(unittest.TestCase):
         task['source_records'].append(self.transport(task, 'ifind', 'get_thscode', identity_query_parameters('seccode', '00700'), {}))
         self.assertNotIn('hk_code_alias_version', task)
         self.assertNotEqual(identity_resolutions(task)[0]['status'], '代码映射已核验')
+
+    def test_name_only_continuation_requeries_the_user_literal_after_reopen(self):
+        original = self.agent.create('核对港股腾讯控股的挂牌代码。', research_mode='current')
+        self.task = original
+        first = self.acquire('secname', '腾讯控股', IDENTITY_CANDIDATE_PROFILE)
+        first = self.agent.start(first['id'], dict(data_requests=[], draft_report=dict(
+            title='挂牌代码核对', conclusion='列示实际查询到的市场候选。')))
+        frozen = self.agent.archive.report(first['id'], 1)
+        self.assertEqual(identity_candidates(first)[0]['codes'], ['0700.HK', 'TCTZF.PQ'])
+        self.assertTrue(first.get('delivery'))
+
+        reopened = ResearchAgent(ResearchArchive(self.folder/'current'), ROOT, offline=False,
+            require_argument_support=True, draft_first=True)
+        self.addCleanup(reopened.close_runtime)
+        reopened.collector.external = self.transport
+        neutral = reopened.follow_up(first['id'], '先解释一下证券简称的口径。', start=False)
+        self.assertEqual(neutral['objects'], [])
+        child = reopened.follow_up(neutral['id'], '它在2026年10月12日的收盘价呢？', start=False)
+        self.assertEqual(child['objects'], ['腾讯控股'])
+        self.assertEqual(child['source_records'], [])
+        self.assertEqual(available_security_codes(child), [])
+        params = identity_query_parameters('secname','腾讯控股',IDENTITY_CANDIDATE_PROFILE)
+        self.assertEqual(validate_source_request(child,'ifind','get_thscode',params),params)
+        for invalid in ('腾讯', '宁德时代'):
+            with self.assertRaises(ContractError):
+                validate_source_request(child,'ifind','get_thscode',
+                                        identity_query_parameters('secname',invalid,IDENTITY_CANDIDATE_PROFILE))
+        short = reopened.follow_up(neutral['id'], '收盘价呢？', start=False)
+        self.assertEqual(short['objects'], ['腾讯控股'])
+        need = dict(id='child_name', source='ifind', operation='get_thscode', parameters=params,
+            question_ids=['q1'], selection_reason='按本轮沿用的用户原名重新查询。')
+        resolved = reopened.start(child['id'], dict(data_requests=[need], draft_report=None), defer_delivery=True)
+        self.assertEqual(available_security_codes(resolved), ['0700.HK'])
+        self.assertEqual(resolved['ledger']['used']['data_requests'], 1)
+        self.assertEqual(resolved['source_records'][0]['task_id'], child['id'])
+        self.assertEqual(reopened.archive.report(first['id'], 1), frozen)
+        self.assertNotEqual(first['source_records'][0]['id'], resolved['source_records'][0]['id'])
+
+        switched = reopened.follow_up(child['id'], '改看宁德时代的风险。', start=False)
+        self.assertEqual(switched['objects'], [])
+        with self.assertRaises(ContractError):
+            validate_source_request(switched,'ifind','get_thscode',params)
+
+    def test_name_comparison_uses_user_order_and_does_not_guess_a_market(self):
+        task = self.agent.create('比较腾讯控股和宁德时代的行情。', research_mode='current')
+        for name, value in [('宁德时代','300750.SZ,3750.HK'), ('腾讯控股','0700.HK,TCTZF.PQ')]:
+            params = identity_query_parameters('secname',name,IDENTITY_CANDIDATE_PROFILE)
+            payload = dict(errorcode=0,inputParams=dict(mode='secname'),
+                tables=[dict(secname=name,table=dict(thscode=[value]))])
+            record = snapshot_record(task,'ifind','get_thscode',params,payload)
+            event = dict(kind='data_requests', source='ifind', operation='get_thscode', status='成功',
+                fingerprint=record['request_hash'], batch=task['batch'], time=now(), transport_isolated=True,
+                network_request_started=True, network_worker_reaped=True)
+            task['ledger']['dispatches'].append(event)
+            task['source_records'].append(_record_current_acquisition(task,record,event))
+        self.agent.archive.save(task)
+        ambiguous = self.agent.follow_up(task['id'],'它的行情呢？',start=False)
+        self.assertEqual(ambiguous['objects'], [])
+        child = self.agent.follow_up(ambiguous['id'],'只看后者的收盘价。',start=False)
+        self.assertEqual(child['objects'], ['宁德时代'])
+        self.assertEqual(available_security_codes(child), [])
+        self.assertNotIn('腾讯控股',json.dumps(child['conversation_context'],ensure_ascii=False))
+        self.assertTrue(child['conversation_context']['comparison_requests'])
 
 
 if __name__ == '__main__':
