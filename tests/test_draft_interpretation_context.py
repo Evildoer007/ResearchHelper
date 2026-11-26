@@ -7,10 +7,12 @@ from unittest.mock import patch
 
 from tests import ROOT
 from tests.test_client_report_audience import fixture
-from tests.test_draft_first_workflow import SOURCE
+from tests.test_draft_financial_period import add_record
+from tests.market_observation_fixtures import FIXED_FINANCIAL_RESPONSES, append_simulated_ifind_response, read_captures
 from core.session import Session
 from researchhelper.contracts import canonical,ENTRIES,fingerprint
 from researchhelper.draft_analysis import analyze,interpretation_context
+from researchhelper.draft_analysis import execute
 from researchhelper.draft_sources import observations
 from researchhelper.draft_workflow import _write
 from researchhelper.drafts import normalize_report
@@ -49,6 +51,42 @@ class DraftInterpretationTests(unittest.TestCase):
         self.assertEqual(rules['cash_attribution']['objects'],['600519.SH'])
         self.assertEqual(rules['close_scope']['objects'],['000001.SZ','600519.SH'])
         self.assertIn('不能自动代替该观察时点的TTM分母',rules['valuation_scope']['text'])
+
+    def test_faster_profit_decline_does_not_identify_a_below_gross_profit_cause(self):
+        # Revenue falls from100 to90, cost stays60 and other net deductions
+        # stay10. Profit falls from30 to20 with no expense/tax increase.
+        revenue=execute('raw_change_v1',dict(a=100,b=90))['value']
+        profit=execute('raw_change_v1',dict(a=30,b=20))['value']
+        self.assertLess(profit,revenue)
+        self.assertEqual((100-60)-30,(90-60)-20)
+        self.assertIn('profit_attribution',self.rules())
+        self.assertIn('基数不同',self.rules()['profit_attribution']['text'])
+        self.assertFalse(interpretation_context(self.task,self.facts)['delivery_blocking'])
+
+    def test_profit_guidance_needs_same_object_observed_fields(self):
+        rows=[deepcopy(r) for r in self.facts if r['field'] in ('ths_revenue_stock','ths_np_atoopc_stock')]
+        self.assertIn('profit_attribution',self.rules(facts=rows))
+        for row in rows:
+            if row['field']=='ths_np_atoopc_stock':row['code']='000001.SZ'
+        self.assertNotIn('profit_attribution',self.rules(facts=rows))
+        self.assertNotIn('profit_attribution',self.rules(facts=[r for r in self.facts if r['field']=='close']))
+
+    def test_margin_ratio_does_not_establish_unit_product_profit(self):
+        rows=deepcopy(self.facts)
+        cost=dict(rows[0],id='cost',field='ths_operating_cost_stock',label='营业成本',value=60,raw_value=60)
+        rows.append(cost)
+        self.assertIn('gross_margin_scope',self.rules(facts=rows))
+        # Identical revenue/cost totals permit different sales volumes and
+        # therefore different gross profit per unit. No volume is inferred.
+        self.assertNotEqual((100-60)/10,(100-60)/20)
+        self.assertIn('不是单位产品毛利',self.rules(facts=rows)['gross_margin_scope']['text'])
+        cost['value']=None
+        self.assertNotIn('gross_margin_scope',self.rules(facts=rows))
+
+    def test_valuation_guidance_preserves_reading_units_and_conditional_business_logic(self):
+        text=self.rules()['valuation_scope']['text']
+        self.assertIn('盈利兑现',text);self.assertIn('风险补偿',text)
+        self.assertIn('unit_basis',text);self.assertIn('未知时称读数',text)
 
     def test_balance_and_macro_guidance_is_not_assigned_to_unrelated_price_data(self):
         facts=deepcopy(self.facts)
@@ -97,16 +135,14 @@ class DraftInterpretationTests(unittest.TestCase):
     def test_independent_host_reads_the_same_observation_bound_guidance(self):
         with TemporaryDirectory() as folder:
             session=Session(folder);self.addCleanup(session.agent.close_runtime)
-            task=session.create('比较归母净利润和经营现金流',entry='个股',research_mode='current')
-            task['source_records']=[dict(id='cash-fixture',task_id=task['id'],research_version=task['version'],
-                kind='api',content_version=1,status='成功待核验',obtained_at=task['cutoff'],
-                source='ifind',operation='basic_data_service',parameters=dict(report_period='20251231',statement_type='1'),
-                snapshot=dict(tables=[dict(thscode='600519.SH',table=dict(ths_np_atoopc_stock=[5],ths_ncf_from_oa_stock=[4]))]))]
-            source=task['source_records'][0]
-            source['hash']=fingerprint(source['snapshot'])
-            source['request_hash']=fingerprint({key:source[key] for key in ('source','operation','parameters')})
+            task=session.create('比较600519.SH的归母净利润和经营现金流',entry='个股',objects=['600519.SH'],research_mode='current')
+            fields = ('ths_np_atoopc_stock', 'ths_ncf_from_oa_stock')
+            source = add_record(task, '20251231', (5, 4), fields=fields)
+            source.update(content_version=1, obtained_at=task['cutoff'])
             task['synthetic']=True;session.archive.save(task)
             task=session.draft(task['id'],defer_delivery=True,data_requests=[])
+            self.assertEqual([(row['field'], row['period'], row['raw_value']) for row in task['draft_observations']],
+                             [(fields[0], '20251231', 5), (fields[1], '20251231', 4)])
             guide=session.tools(task['id'])['first_report']['interpretation_context']
             self.assertEqual(guide,interpretation_context(task,task['draft_observations']))
             self.assertIn('parent_profit_scope',{row['id'] for row in guide['rules']})
@@ -115,16 +151,25 @@ class DraftInterpretationTests(unittest.TestCase):
             self.assertEqual(task['ledger']['used']['model_calls'],0)
             self.assertEqual(task['ledger']['used']['data_requests'],0)
 
-    def test_each_entry_can_still_deliver_a_relevant_conditional_outline(self):
-        forbidden={'事件':('利率与风险溢价传导',),'指数':('跟踪与交易约束','对照净值、市场价格和费用'),'宏观':('利率与风险溢价传导',),
-                   'ETF':('现金兑现与反证',),'混合':('现金兑现与反证',)}
-        for entry in ENTRIES:
-            task=dict(self.task,entry=entry,question='围绕宏观事件解释该对象的变化')
-            report=normalize_report(None,task,[]);text=canonical(report['logics'])
-            with self.subTest(entry=entry):
-                self.assertTrue(report['logics']);self.assertFalse(report['interpretation_context']['delivery_blocking'])
-                for phrase in forbidden.get(entry,()):
-                    self.assertNotIn(phrase,text)
+    def test_each_entry_saves_a_limited_report_when_all_observations_are_missing(self):
+        with TemporaryDirectory(prefix='rh-empty-evidence-') as folder:
+            session = Session(folder)
+            try:
+                for entry in ENTRIES:
+                    with self.subTest(entry=entry):
+                        task = session.create('当前是否有充分依据支持增持？列出判断成立的条件。', entry=entry)
+                        done = session.draft(task['id'])
+                        self.assertEqual(done['status'], '部分完成')
+                        draft = done['draft_report']
+                        self.assertEqual(draft['facts'], [])
+                        self.assertEqual(draft['logics'], [])
+                        self.assertFalse(draft['interpretation_context']['delivery_blocking'])
+                        saved = session.archive.report(task['id'], 1)
+                        self.assertTrue(saved['html_integrity_verified'])
+                        self.assertIn('未取得足以形成研究判断的资料', saved['html'])
+                        self.assertEqual(session.export(task['id']).read_text(), saved['html'])
+            finally:
+                session.agent.close_runtime()
 
     def test_incidental_event_word_does_not_reclassify_an_etf_or_company(self):
         for entry in ('ETF','个股'):
@@ -133,17 +178,29 @@ class DraftInterpretationTests(unittest.TestCase):
             self.assertNotIn('事件变化与实际暴露',[row['title'] for row in report['logics']])
 
     def test_financial_echo_contradictions_are_rejected_before_draft_normalization(self):
-        before=SOURCE.read_bytes();task=json.loads(before)
-        original=next(row for row in task['source_records'] if row['operation']=='basic_data_service')
-        for field,value in [('FDREPORT','19991231'),('FL','2')]:
-            payload=deepcopy(original['snapshot'])
-            values=payload['inputParams']['params'][0]['params']
-            next(row for row in values if row['name']==field)['value']=value
-            record=snapshot_record(task,'ifind','basic_data_service',original['parameters'],payload)
-            with self.subTest(field=field):
-                self.assertEqual(record['status'],'返回结构异常')
-                self.assertEqual(observations(dict(task,source_records=[record])),[])
-        self.assertEqual(SOURCE.read_bytes(),before)
+        before = FIXED_FINANCIAL_RESPONSES.read_bytes()
+        captures = read_captures(before, grouped=True)
+        policy, capture = captures['get_limit_policy:'], captures['basic_data_service:20260630']
+        with TemporaryDirectory() as folder:
+            session = Session(folder)
+            try:
+                task = session.create('核对比亚迪002594.SZ的2026年上半年合并报表营业收入、营业成本、净利润和经营现金流')
+                retained_policy = append_simulated_ifind_response(task, 'get_limit_policy',
+                                                                  policy['parameters'], policy['snapshot'])
+                original = snapshot_record(task, 'ifind', 'basic_data_service',
+                                           capture['parameters'], capture['snapshot'])
+                self.assertEqual(original['status'], '成功待核验')
+                for field, value in [('FDREPORT', '19991231'), ('FL', '2')]:
+                    payload = deepcopy(capture['snapshot'])
+                    fields = payload['inputParams']['params'][0]['params']
+                    next(row for row in fields if row['name'] == field)['value'] = value
+                    record = snapshot_record(task, 'ifind', 'basic_data_service', capture['parameters'], payload)
+                    with self.subTest(field=field):
+                        self.assertEqual(record['status'], '返回结构异常')
+                        self.assertEqual(observations(dict(task, source_records=[retained_policy, record])), [])
+            finally:
+                session.agent.close_runtime()
+        self.assertEqual(FIXED_FINANCIAL_RESPONSES.read_bytes(), before)
 
 
 if __name__=='__main__':unittest.main()
