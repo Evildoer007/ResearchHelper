@@ -1,44 +1,85 @@
-"""Independent offline regressions for typed provenance and resolved gaps.
-
-The retained partial task is read-only evidence. Scope changes below are
-explicit unit-test projections of a fresh plan, never repairs to that task.
-No model, supplier, production database or frozen delivery is changed.
-"""
+"""Typed provenance and gap checks using verified synthetic market records."""
 import copy
-import hashlib
-import importlib.util
+from functools import lru_cache
 import json
-from pathlib import Path
-import sys
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch, Mock
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-if importlib.util.find_spec('researchhelper') is None:
-    from core.bootstrap import configure_imports
-    configure_imports()
-from researchhelper.contracts import ContractError, fingerprint, missing_evidence_requirements
+from tests import ROOT
+from researchhelper.archive import ResearchArchive
+from researchhelper.analyzer import ResearchAnalyzer
+from researchhelper.contracts import ContractError, METHOD_REGISTRY, charge, fingerprint, missing_evidence_requirements
 from researchhelper.engine import ResearchAgent
 from researchhelper.planning import normalize_questions, question_contract, question_specs, validate_question_revision
 from researchhelper.provenance import bind_query_references
 from researchhelper.reasoning import analysis_contract, evidence_contract, model_object
-from researchhelper.evidence import candidate_evidence, api_cell_choices, expand_api_cell_selection
+from researchhelper.evidence import (candidate_evidence, api_cell_choices, expand_api_cell_selection,
+                                    snapshot_record, _record_current_acquisition)
 
-ORIGINAL = ROOT/'result/acceptance/direct-code-checkpoint-854csral/task.json'
+PRICE_NEEDS = {
+    '2026-09-21': '核对2026-09-21的实际收盘原值',
+    '2026-09-30': '核对2026-09-30的实际收盘原值',
+}
+TRACE_NEED = '核对本次查询来源、操作、参数与响应身份'
+METHOD = 'observed_price_return_v1'
+
+
+@lru_cache(maxsize=1)
+def price_task():
+    with TemporaryDirectory(prefix='requirement-lifecycle-') as directory, \
+            patch('socket.socket.connect', side_effect=AssertionError('offline regression')):
+        agent = ResearchAgent(ResearchArchive(directory), ROOT, offline=True)
+        try:
+            code = '510300.SH'
+            question = '核对510300.SH的两日收盘价、区间变化及本次查询记录'
+            task = agent.create(question, entry='ETF', objects=[code], research_mode='current',
+                questions=[dict(id='q1', question=question, kind='fact', method_needs=[METHOD],
+                                evidence_needs=[*PRICE_NEEDS.values(), TRACE_NEED])])
+            start, end = PRICE_NEEDS
+            parameters = dict(codes=code, indicators='close', startdate=start, enddate=end,
+                              functionpara=dict(Currency='RMB', CPS='1', Fill='Omit'))
+            snapshot = dict(errorcode=0, tables=[dict(thscode=code, time=[start, end], table={'close': [4, 4.5]})])
+            record = snapshot_record(task, 'ifind', 'cmd_history_quotation', parameters, snapshot)
+            charge(task['ledger'], 'data_requests')
+            event = dict(kind='data_requests', source='ifind', operation=record['operation'],
+                         fingerprint=record['request_hash'], batch=task['batch'], status='成功',
+                         transport_isolated=True, network_request_started=True, network_worker_reaped=True)
+            task['ledger']['dispatches'].append(event)
+            _record_current_acquisition(task, record, event)
+            record['question_ids'] = ['q1']
+            task['source_records'].append(record)
+            specs, references = [], {}
+            for choice in api_cell_choices(task, record):
+                period = choice['period']
+                review = dict(question_ids=['q1'], allowed_natures=['已实现事实'], conditions=['合成的两日收盘原值'],
+                    reason='已核对标的、登记单位及交易日', evidence_need_ids={'q1': [fingerprint(PRICE_NEEDS[period])]})
+                spec = expand_api_cell_selection(task, dict(api_cell_selection=choice['candidate_id'],
+                                                          question_ids=['q1'], review=review))
+                evidence = candidate_evidence(task, record, spec)
+                task['evidence'].append(ResearchAnalyzer().assess(task, evidence, review, task['source_records']))
+                references[period] = evidence['id']
+                specs.append(spec)
+            task['host_result'] = {'evidence_specs': specs}
+            calculation = dict(id='observed_return', method=METHOD, question_ids=['q1'],
+                inputs={'start_price': references[start], 'end_price': references[end]},
+                parameters=dict(METHOD_REGISTRY[METHOD]['parameters'], start_date=start, end_date=end))
+            task['calculation_specs'] = [calculation]
+            agent._adopt_method_knowledge(task)
+            agent._calculate_spec(task, calculation)
+            assert len(task['evidence']) == 2 and len(task['calculations']) == 1, task['gaps']
+            return json.dumps(task, ensure_ascii=False)
+        finally:
+            agent.close_runtime()
 
 
 class SourceRequirementLifecycleTests(unittest.TestCase):
     def setUp(self):
-        self.before = hashlib.sha256(ORIGINAL.read_bytes()).hexdigest()
-        self.task = json.loads(ORIGINAL.read_text())
+        self.task = json.loads(price_task())
         self.agent = ResearchAgent.__new__(ResearchAgent)
         guard = patch('socket.socket.connect', side_effect=AssertionError('offline regression'))
         guard.start()
         self.addCleanup(guard.stop)
-
-    def tearDown(self):
-        self.assertEqual(hashlib.sha256(ORIGINAL.read_bytes()).hexdigest(), self.before)
 
     def projected_plan(self):
         q = self.task['questions'][0]
@@ -173,6 +214,7 @@ class SourceRequirementLifecycleTests(unittest.TestCase):
 
     def test_supplement_new_evidence_reaches_original_method_binding(self):
         self.clear_gaps()
+        self.task['run_mode'] = 'model'
         self.task['calculations'] = []
         self.task['calculation_specs'] = []
         active = {'affected_questions':['q1'], 'before':{'calculations':[]}}
