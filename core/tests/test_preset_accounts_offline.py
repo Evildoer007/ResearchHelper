@@ -1,4 +1,5 @@
 """Preset login, preservation and failure checks without touching user stores."""
+import ast
 import concurrent.futures
 import json
 import tempfile
@@ -6,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from researchhelper import service
 from researchhelper.auth import LocalAccount, AuthenticationRequired
 from researchhelper.contracts import ContractError
 from researchhelper.service import make_server
@@ -13,7 +15,7 @@ from researchhelper.service import make_server
 
 class PresetAccountsTests(unittest.TestCase):
     def setUp(self):
-        root = Path(__file__).resolve().parents[1] / "result/acceptance"
+        root = Path(__file__).resolve().parents[2] / "result/acceptance"
         root.mkdir(parents=True, exist_ok=True)
         self.temp = tempfile.TemporaryDirectory(prefix="preset-accounts-", dir=root)
         self.addCleanup(self.temp.cleanup)
@@ -70,7 +72,13 @@ class PresetAccountsTests(unittest.TestCase):
         self.assertTrue(self.account.status()["configured"])
         with self.assertRaises(ContractError):
             self.account.setup("overwrite-admin", "overwrite-sales")
-        source = (Path(__file__).resolve().parents[1] / "researchhelper/service.py").read_text()
-        self.assertIn("authentication=True, runtime_configurable=True, preset_accounts=True", source)
+        source = Path(service.__file__).read_text()
+        serve = next(node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == 'serve')
+        call, = [node for node in ast.walk(serve) if isinstance(node, ast.Call)
+                 and isinstance(node.func, ast.Name) and node.func.id == 'make_server']
+        flags = {keyword.arg: keyword.value for keyword in call.keywords}
+        for flag in ('authentication', 'runtime_configurable', 'preset_accounts'):
+            self.assertIsInstance(flags[flag], ast.Constant)
+            self.assertIs(flags[flag].value, True)
         with self.assertRaises(ContractError):
             make_server(self.temp.name, preset_accounts=True)
