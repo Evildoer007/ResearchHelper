@@ -26,15 +26,18 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from researchhelper.contracts import ContractError, budget
 from researchhelper.archive import ResearchArchive
 from researchhelper.engine import ResearchAgent
-from researchhelper.evidence import EvidenceCollector, snapshot_record
+from researchhelper.evidence import snapshot_record
 from researchhelper.source_transport import IsolatedEvidenceCollector, _source_worker
 from researchhelper.service import make_server
+from researchhelper.transport import run_isolated
 from tests import test_isolated_model_transport_offline as model_fixture
 from tests import test_skill_source_execution_offline as skill_fixture
 
 ROOT = Path(__file__).resolve().parents[2]
 SECRET = "SOURCE_FIXTURE_PRIVATE_KEY"
 RETURNED = "SOURCE_FIXTURE_RETURNED_ACCESS"
+QUOTE_PARAMS = {"codes": "600000.SH", "indicators": "close", "startdate": "2026-09-29",
+    "enddate": "2026-09-30", "functionpara": {"Currency": "RMB", "CPS": "1", "Fill": "Omit"}}
 
 
 class FixtureFrame:
@@ -74,12 +77,18 @@ def fixture_source_worker(connection, deadline):
             time.sleep(30)
         return b"%PDF-synthetic-unparseable"
     source._download_filing_pdf = download
-    _source_worker(connection, deadline)
+    with patch("researchhelper.https_transport.bundled_ca_file", return_value=os.environ["SSL_CERT_FILE"]):
+        _source_worker(connection, deadline)
 
 
 def fixture_dns_stall(connection, deadline):
     socket.getaddrinfo = lambda *args, **kwargs: time.sleep(30)
     _source_worker(connection, deadline)
+
+
+def fixture_source_startup_stall(connection, deadline):
+    connection.recv()
+    time.sleep(30)
 
 
 class LocalCollector(IsolatedEvidenceCollector):
@@ -118,8 +127,9 @@ class SourceTransportTests(unittest.TestCase):
         self.addCleanup(environment.stop)
 
     def task(self):
-        return {"id": "rh-source-fixture", "version": 1, "batch": 1, "objects": ["600000.SH"],
-            "question": "600000.SH测试取数", "cutoff": "2026-10-02T18:00:00+08:00", "ledger": budget(), "source_records": []}
+        return {"id": "rh-source-fixture", "version": 1, "batch": 1, "objects": ["600000.SH", "510300.SH"],
+            "question": "600000.SH及510300.SH测试取数", "cutoff": "2026-10-02T18:00:00+08:00",
+            "ledger": budget(), "source_records": []}
 
     def server(self, mode="normal"):
         stop, entered = threading.Event(), threading.Event()
@@ -189,7 +199,7 @@ class SourceTransportTests(unittest.TestCase):
         return events[-1]
 
     def ifind(self, task, credentials=None):
-        return self.collector.external(task, "ifind", "cmd_history_quotation", {"codes": "600000.SH"}, credentials or {"access_token": SECRET})
+        return self.collector.external(task, "ifind", "cmd_history_quotation", QUOTE_PARAMS, credentials or {"access_token": SECRET})
 
     def test_ifind_response_remains_unverified_snapshot(self):
         self.server()
@@ -297,15 +307,108 @@ class SourceTransportTests(unittest.TestCase):
             self.tiny(task, "unknown")
         self.assertEqual(self.check(task)["failure_code"], "provider_failure")
 
-    def test_sdk_stall_cannot_hold_parent_controller(self):
+    def test_sdk_startup_timeout_leaves_preparation_unconfirmed(self):
+        self.collector.worker_target = fixture_source_startup_stall
         self.collector.MAX_WAIT_SECONDS = .65
         task, began = self.task(), time.monotonic()
         with self.assertRaises(ContractError):
-            self.tiny(task, "stall")
+            self.tiny(task)
         self.assertLess(time.monotonic() - began, 1.8)
         event = self.check(task)
         self.assertEqual(event["failure_code"], "response_deadline_exceeded")
+        self.assertFalse(event["network_request_started"])
+        self.assertNotIn("sdk_history_cache_disabled", event)
+        self.assertEqual(task["source_records"], [])
+
+    def test_sdk_stall_cannot_hold_parent_controller(self):
+        self.collector.MAX_WAIT_SECONDS = 6
+        task = self.task()
+        prepared = threading.Event()
+
+        def expire_after_preparation(task, spec, started, timeout, diagnostics, worker, **options):
+            def observe_stage():
+                if diagnostics.get("sdk_history_cache_disabled") is True:
+                    prepared.set()
+
+            def clock():
+                return started + timeout if prepared.is_set() else time.monotonic()
+
+            # Advance the parent deadline only after the child reports readiness.
+            # The spawned worker still uses the real wall clock and can stall.
+            with patch("researchhelper.transport.time", types.SimpleNamespace(monotonic=clock)):
+                return run_isolated(task, spec, started, timeout, diagnostics, worker,
+                                    on_stage=observe_stage, **options)
+
+        with patch("researchhelper.source_transport.run_isolated", side_effect=expire_after_preparation):
+            with self.assertRaises(ContractError):
+                self.tiny(task, "stall")
+        self.assertTrue(prepared.is_set())
+        event = self.check(task)
+        self.assertEqual(event["failure_code"], "response_deadline_exceeded")
         self.assertTrue(event["sdk_history_cache_disabled"])
+        self.assertFalse(event["network_request_started"])
+        self.assertEqual(task["source_records"], [])
+
+    def test_etf_report_keeps_close_when_official_nav_transport_times_out(self):
+        from lxml import html
+        from researchhelper.report_designer import render_html
+        from tests.market_observation_fixtures import ETF_CLOSES, read_captures
+
+        with tempfile.TemporaryDirectory(prefix="rh-report-source-timeout-") as folder:
+            agent = ResearchAgent(ResearchArchive(folder), ROOT, offline=False, isolate_sources=True,
+                source_credentials={"ifind": {"access_token": SECRET}}, require_argument_support=True, draft_first=True)
+            self.addCleanup(agent.close_runtime)
+            day, code = "2026-10-21", "510300.SH"
+            capture = read_captures(ETF_CLOSES.read_bytes(), grouped=False)["snapshot"]
+            original = capture["tables"][0]
+            price = original["table"]["close"][original["time"].index(day)]
+
+            def ifind_reply(current, request, timeout, event):
+                requested = json.loads(request.data)
+                self.assertEqual((requested["startdate"], requested["enddate"]), (day, day))
+                event.update(transport_isolated=True, network_request_started=True, network_worker_reaped=True)
+                if request.full_url.endswith("/get_trade_dates"):
+                    return dict(errorcode=0, tables=dict(time=[day]))
+                self.assertTrue(request.full_url.endswith("/cmd_history_quotation"))
+                self.assertEqual(requested["codes"], code)
+                return dict(capture, tables=[dict(thscode=code, time=[day], table=dict(close=[price]))])
+
+            def timed_out(current, received_code, started, timeout, event, **options):
+                self.assertEqual(received_code, code)
+                return run_isolated(current, dict(kind="official_etf", code=code), started, .65, event,
+                                    fixture_source_startup_stall, label="ETF清单", **options)
+
+            question = "核对2026年10月21日510300.SH的iFinD收盘价和上交所申赎清单的官方单位净值，计算当日收盘折溢价率。"
+            with (patch.object(agent.collector, "_http_json", side_effect=ifind_reply) as ifind,
+                  patch("researchhelper.source_transport.official_etf", side_effect=timed_out) as official):
+                created = agent.create(question, entry="ETF", research_mode="current")
+                result = agent.start(created["id"])
+            self.assertTrue(result.get("delivery"), result.get("error"))
+            self.assertEqual(result["run_mode"], "direct")
+            self.assertEqual((ifind.call_count, official.call_count), (2, 1))
+            self.assertEqual(result["ledger"]["used"]["model_calls"], 0)
+            self.assertEqual(result["ledger"]["used"]["data_requests"], 3)
+            events = result["ledger"]["dispatches"]
+            self.assertEqual([row["operation"] for row in events],
+                ["cmd_history_quotation", "get_trade_dates", "etf_pcf"])
+            failed = events[-1]
+            self.assertEqual(failed["failure_code"], "response_deadline_exceeded")
+            self.assertTrue(failed["network_worker_reaped"])
+            self.assertFalse(failed["network_request_started"])
+            draft = result["draft_report"]
+            self.assertEqual([(row["period"], row["raw_value"]) for row in draft["facts"]], [(day, price)])
+            self.assertEqual(draft["calculations"], [])
+            self.assertTrue(any(day in note and "折溢价率暂缺" in note for note in draft["reader_notes"]))
+            saved = agent.archive.report(result["id"], 1)
+            for profile in ("standard", "detailed"):
+                with self.subTest(profile=profile):
+                    document = html.document_fromstring(render_html(saved["content"], ROOT, profile=profile))
+                    summary = document.get_element_by_id("summary")
+                    self.assertIn(str(price), summary.text_content())
+                    self.assertNotIn("-0.0143%", summary.text_content())
+                    link, = summary.xpath('.//a[@class="quantity-link"]')
+                    self.assertEqual(len(document.get_element_by_id(link.get("href")[1:]).xpath('.//tr[@data-observation-id]')), 1)
+                    self.assertNotIn(SECRET, document.xpath("//main")[0].text_content())
 
     def test_offline_and_invalid_tiny_parameters_spawn_no_worker(self):
         task = self.task()
@@ -424,11 +527,7 @@ class PublicationFixtureSourceTransportTests(unittest.TestCase):
     request = model_fixture.PublicationFixtureTransportTests.request
     login = model_fixture.PublicationFixtureTransportTests.login
 
-    def setUp(self):
-        model_fixture.PublicationFixtureTransportTests.setUp(self)
-        collector = self.server.agent.collector
-        self.assertIsInstance(collector, IsolatedEvidenceCollector)
-        self.server.agent.collector = EvidenceCollector(offline=collector.offline, journal=collector.journal)
+    setUp = model_fixture.PublicationFixtureTransportTests.setUp
 
     def test_original_publication_assertions_with_explicit_model_and_source_fixtures(self):
         model_fixture.PublicationFixtureTransportTests.test_original_auth_publication_assertions_with_explicit_mock_transport(self)
@@ -444,20 +543,7 @@ class SkillParentFixtureTransportTests(unittest.TestCase):
     run_source = skill_fixture.SkillSourceExecutionTests.run_source
     replies = staticmethod(skill_fixture.SkillSourceExecutionTests.replies)
     tearDown = skill_fixture.SkillSourceExecutionTests.tearDown
-
-    def setUp(self):
-        skill_fixture.SkillSourceExecutionTests.setUp(self)
-        original = self.module.Session
-
-        def fixture_session(*args, **kwargs):
-            session = original(*args, **kwargs)
-            if kwargs.get("allow_network"):
-                collector = session.agent.collector
-                self.assertIsInstance(collector, IsolatedEvidenceCollector)
-                session.agent.collector = EvidenceCollector(offline=collector.offline, journal=collector.journal)
-            return session
-
-        self.module.Session = fixture_session
+    setUp = skill_fixture.SkillSourceExecutionTests.setUp
 
     def test_refresh_token_original_assertions(self):
         skill_fixture.SkillSourceExecutionTests.test_explicit_refresh_token_two_dispatches_and_no_secret_in_task_or_report(self)
