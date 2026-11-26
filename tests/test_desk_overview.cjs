@@ -26,4 +26,7 @@ assert.doesNotMatch(render(review,{...ctx,readOnly:true}),/data-action="start"/)
 const observed={...task,objects:[],question:'只核对现有数据',original_input:{question:'只核对现有数据'},questions:[{id:'actual',required:true,question:'只核对现有数据',status:'待回答'}],identity_resolutions:[],draft_report:{facts:[{code:'600519.SH'}]}};
 const observedBefore=JSON.stringify(observed),observedHTML=render(observed,ctx);
 assert.match(observedHTML,/已取数对象/);assert.match(observedHTML,/600519.SH/);assert.doesNotMatch(observedHTML,/尚未明确|待回答/);assert.equal(observedHTML.split('只核对现有数据').length-1,1);assert.equal(JSON.stringify(observed),observedBefore);
+const interrupted={...task,status:'失败',has_pending_content:true};
+assert.match(render(interrupted,ctx),/报告待保存/);
+assert.match(render(interrupted,{...ctx,edition:{version:1}}),/版本1已保存，本版报告待保存/);
 console.log('desk overview: all rendering boundary checks passed');
