@@ -11,8 +11,9 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from .contracts import METHOD_REGISTRY, DOCUMENT_CONTENT_INTENT, document_content_answer, fingerprint
 from .layout import resource_directory
-from .visual_selection import select_figures,ledger_html
-from .publication_content import source_label
+from .visual_selection import _shown, argument_charts, ledger_html, plot_values_fit_browser, report_chart_supported, select_figures
+from .publication_content import (observation_raw_unit, observation_title,
+                                  observation_value, reader_period_label, source_label)
 
 
 MONEY_UNIT_FACTORS = {'元': 1, '千元': 1_000, '万元': 10_000,
@@ -51,6 +52,32 @@ def display_money_scale(figure):
     yuan=maximum*factors[unit]
     target,factor=('亿元',100_000_000) if yuan>=100_000_000 else ('万元',10_000) if yuan>=10_000 else ('元',1)
     return dict(unit=target,source_unit=unit,divisor=factor/factors[unit],monetary=True)
+
+
+def research_chart_spec(content, figure, target):
+    """Use one plot scale for both the reading caption and the selected chart."""
+    display = display_money_scale(figure)
+    spec = select_figures(content, [dict(figure, target=target, display=display)])[0]
+    choice = spec.get('auto_visual')
+    if choice and figure['kind'] == 'valuation_scenarios':
+        choice['data'].update(numberDigits=4, focusIndex=0)
+        choice['reason'] = 'registered_valuation_scenarios'
+        choice['ledger']['columns'] = ['情景', '数值（' + figure['unit'] + '）']
+    if not choice or display['unit'] == figure['unit']:
+        return spec
+    data = choice['data']
+    series = data.get('series', [data])
+    values = [value for item in series for value in item.get('values', []) if value is not None]
+    scaled = {value: value / display['divisor'] for value in values}
+    if (data.get('unit') != figure['unit'] or not scaled
+            or len(set(scaled.values())) != len(scaled)
+            or any(not math.isfinite(shown) or original != 0 and shown == 0 for original, shown in scaled.items())):
+        spec['display'] = dict(display, unit=figure['unit'], divisor=1)
+        return spec
+    for item in series:
+        item['values'] = [scaled.get(value) for value in item['values']]
+    data['unit'] = display['unit']
+    return spec
 
 
 def display_prose_numbers(text):
@@ -207,12 +234,14 @@ def reading_diagnostics(content):
         note for state in states for note in state.get('limitations', []) if isinstance(note, str)}
 
 
-def inspection_link(target, label, purpose=None):
+def inspection_link(target, label, purpose=None, *, observation_ref=None, described_by=None):
     """A report-local reference, never an external query or a new inference."""
     escape = lambda value: html.escape(str(value), quote=True)
     purpose = purpose or ('查看' + label)
+    observation = " data-inspection-observation='" + escape(observation_ref) + "'" if observation_ref else ''
+    description = " aria-describedby='" + escape(described_by) + "'" if described_by else ''
     return ("<a href='#" + escape(target) + "' aria-haspopup='dialog' aria-label='"
-            + escape(purpose) + "'>" + escape(label) + '</a>')
+            + escape(purpose) + "'" + observation + description + ">" + escape(label) + '</a>')
 
 
 def inspection_surface(records):
@@ -244,7 +273,13 @@ INSPECTION_SCRIPT = r"""
   function returnRecord(){
     if(current&&placeholder){placeholder.replaceWith(current);current=null;placeholder=null;}
   }
+  function resetClosed(){
+    for(const row of [...records.querySelectorAll('[data-chart-selected]'),...dialog.querySelectorAll('[data-chart-selected]')])row.removeAttribute('data-chart-selected');
+    returnRecord();history=[];opener=null;
+    document.documentElement.classList.remove('report-inspecting');
+  }
   function show(id,trigger,{remember=true,scroll=0}={}){
+    if(!dialog.open&&current)resetClosed();
     const next=document.getElementById(id);
     if(!next||!records.contains(next))return false;
     if(current&&remember)history.push({id:current.id,scroll:body.scrollTop});
@@ -255,10 +290,22 @@ INSPECTION_SCRIPT = r"""
     if(!dialog.open){opener=trigger;dialog.showModal();document.documentElement.classList.add('report-inspecting');}
     body.scrollTop=scroll;close.focus({preventScroll:true});return true;
   }
+  function selectObservations(refs){
+    const ids=new Set(refs);
+    for(const row of body.querySelectorAll('[data-observation-id]')){
+      if(ids.has(row.dataset.observationId))row.setAttribute('data-chart-selected','true');
+      else row.removeAttribute('data-chart-selected');
+    }
+    body.querySelector('[data-chart-selected]')?.scrollIntoView({block:'nearest'});
+  }
   dialog.addEventListener('close',()=>{
-    for(const row of dialog.querySelectorAll('[data-chart-selected]'))row.removeAttribute('data-chart-selected');
-    returnRecord();history=[];document.documentElement.classList.remove('report-inspecting');
-    if(opener?.isConnected&&opener.getClientRects().length)opener.focus({preventScroll:true});opener=null;
+    // A queued close event can arrive after a newer record opens.
+    if(dialog.open)return;
+    const focused=document.activeElement;
+    const trigger=opener;
+    const restoreFocus=focused===document.body||dialog.contains(focused)||focused===trigger;
+    resetClosed();
+    if(restoreFocus&&trigger?.isConnected&&trigger.getClientRects().length)trigger.focus({preventScroll:true});
   });
   close.addEventListener('click',()=>dialog.close());
   dialog.addEventListener('keydown',event=>{
@@ -280,9 +327,18 @@ INSPECTION_SCRIPT = r"""
   document.addEventListener('click',event=>{
     const link=event.target.closest('a[href^="#"]');if(!link)return;
     let id;try{id=decodeURIComponent(link.hash.slice(1));}catch{return;}
-    if(show(id,link)){event.preventDefault();return;}
+    if(show(id,link)){
+      event.preventDefault();
+      if(link.dataset.inspectionObservation)selectObservations(link.dataset.inspectionObservation.split(/\s+/));
+      return;
+    }
     const target=document.getElementById(id);
     if(target&&dialog.contains(target)){event.preventDefault();target.scrollIntoView({block:'start'});}
+  });
+  document.addEventListener('researchhelper:inspect',event=>{
+    const detail=event.detail;
+    if(!detail||typeof detail.target!=='string'||!(detail.opener instanceof Element)||!detail.opener.isConnected)return;
+    if(show(detail.target,detail.opener)&&Array.isArray(detail.observations))selectObservations(detail.observations);
   });
   function followHash(){let id;try{id=decodeURIComponent(location.hash.slice(1));}catch{return;}show(id,null);}
   window.addEventListener('hashchange',followHash);if(location.hash)followHash();
@@ -354,7 +410,7 @@ def knowledge_reading(item):
             '<p>版本'+escape(item['version'])+'</p><p>'+escape(item.get('content',''))+'</p><dl>'+notes+'</dl></article>')
 
 
-def _verified_price_rows(content, binding, evidence):
+def _verified_price_rows(content, binding, evidence, *, minimum=3):
     """Select verified rows from one bound iFinD price snapshot, never fill it.
 
     Intermediate prices need no invented calculation context: the exact
@@ -424,7 +480,7 @@ def _verified_price_rows(content, binding, evidence):
                 or item.get('raw_unit') != '元' or item.get('conversion_factor') != 1):
             return None
         rows.append({'label': day, 'value': value, 'unit': '元', 'ref': item['id']})
-    if (len(rows) < 3 or len({row['label'] for row in rows}) != len(rows)
+    if (len(rows) < minimum or len({row['label'] for row in rows}) != len(rows)
             or not set(bindings.values()).issubset({row['ref'] for row in rows})):
         return None
     return sorted(rows, key=lambda row: row['label'])
@@ -485,7 +541,7 @@ def question_observation_figures(content, question):
     figures = []
     for members in groups.values():
         members = sorted(members, key=lambda item: item.get('period', ''))
-        if len(members) < 3:
+        if len(members) < 2:
             continue
         first, last = members[0], members[-1]
         if not first.get('calculation_context'):
@@ -494,7 +550,7 @@ def question_observation_figures(content, question):
             'parameters': {'start_date': first['period'], 'end_date': last['period']},
             'question_ids': [question['id']]}
         subset = dict(content, evidence=members)
-        rows = _verified_price_rows(subset, locator_binding, {item['id']: item for item in members})
+        rows = _verified_price_rows(subset, locator_binding, {item['id']: item for item in members}, minimum=2)
         if not rows:
             continue
         title = str(first['object']) + '未复权收盘价'
@@ -507,7 +563,8 @@ def question_observation_figures(content, question):
             'note': '只展示已核验观测，不补值，不代表持有总回报。'}
         if content.get('market_calendar_coverage_version') != 1:
             figure['note'] = '只连接已核验观测，不补齐缺失日期，不代表完整交易日历或持有总回报。'
-        figures.append(calendar_observation_figure(content, figure, full_query_window=True))
+        figures.append(calendar_observation_figure(content, figure, full_query_window=True)
+                       if len(rows) >= 3 else dict(figure, note='两期未复权收盘价。'))
     return figures
 
 
@@ -555,7 +612,7 @@ def economic_observation_figures(content, question, *, adopted_only=False):
             if prior is not None and prior['value'] != item['value']:
                 conflict = True
             by_period.setdefault(item['period'], item)
-        if conflict or len(by_period) < 3:
+        if conflict:
             continue
         ordered = [by_period[period] for period in sorted(by_period)]
         first = ordered[0]
@@ -927,6 +984,7 @@ def research_figures(content):
             'result_value': calculation['output']['value'], 'result_unit': calculation['output']['unit'],
         }
         if method in fee_components:
+            figures[calculation['id']]['unit_type'] = 'annual_fee_rate'
             group_names = [evidence[bindings['management_' + side]]['object'] for side in ('a', 'b')]
             if group_names[0] == group_names[1]:
                 group_names = [name + '，' + evidence[bindings['management_' + side]]['calculation_context']['share_class']
@@ -943,27 +1001,98 @@ def research_figures(content):
                         'gross_margin_v1', 'net_profit_margin_v1',
                         'operating_cash_profit_ratio_v1', 'fee_difference_v1', 'fee_difference_v2',
                         'etf_nav_premium_v1','etf_daily_nav_premium_v1'):
-            # Two observations can earn an honest comparison, not a fabricated
-            # history. Price/index points are never joined or interpolated.
             figures[calculation['id']]['presentation'] = 'chart'
             figures[calculation['id']]['categories'] = [row['label'] for row in rows]
             figures[calculation['id']]['groups'] = [{'name': title, 'indices': list(range(len(rows)))}]
             if method in ('etf_nav_premium_v1','etf_daily_nav_premium_v1'):
                 figures[calculation['id']]['unit_type']='fund_unit_price'
-        figures[calculation['id']] = calendar_observation_figure(content, figures[calculation['id']])
+        figure = calendar_observation_figure(content, figures[calculation['id']])
+        if figure['presentation'] == 'chart' and not report_chart_supported(figure):
+            figure['presentation'] = 'table'
+        figures[calculation['id']] = figure
     return figures
+
+
+def valuation_scenario_figures(references, calculations, evidence, figures):
+    """Compare co-cited outputs on the same frozen per-share basis."""
+    fixed = ('shares', 'rate', 'years', 'price')
+    cohorts = {}
+    for ref in references:
+        calculation = calculations.get(ref)
+        if not calculation or calculation['method'] != 'residual_present_value_v1' or ref not in figures:
+            continue
+        inputs, bindings = calculation.get('inputs'), calculation.get('input_bindings')
+        overrides = calculation.get('scenario_overrides')
+        if (not isinstance(inputs, dict) or not set(fixed).issubset(inputs) or not isinstance(bindings, dict)
+                or bindings.get('price') not in evidence or not calculation.get('input_versions')
+                or not isinstance(overrides, dict) or set(overrides) - {'receipt', 'debt', 'cost'}):
+            continue
+        if any(not isinstance(row, dict) or not row.get('reason') or row.get('base_ref') != bindings.get(field)
+               or row.get('value') != inputs.get(field) for field, row in overrides.items()):
+            continue
+        basis = {name: calculation.get(name) for name in ('task_id', 'research_version',
+            'implementation_version', 'input_bindings', 'input_versions', 'parameters', 'assumptions')}
+        basis['fixed_inputs'] = {name: inputs[name] for name in fixed}
+        cohorts.setdefault(fingerprint(basis), []).append(calculation)
+
+    comparisons = {}
+    for members in cohorts.values():
+        bases = [item for item in members if not item.get('scenario_overrides')]
+        if len(bases) != 1:
+            continue
+        base, = bases
+        original = figures[base['id']]
+        price = evidence[base['input_bindings']['price']]
+        unit = base['output']['unit']
+        if (len(original['objects']) != 1 or not original['objects'][0] or price['unit'] != unit
+                or price['value'] != base['inputs']['price']):
+            continue
+        variants = [item for item in members if item.get('scenario_overrides') and
+            item['output']['unit'] == unit and item['inputs'] != base['inputs']]
+        if not variants:
+            continue
+        rows = [dict(label='基准现值', value=base['output']['value'], unit=unit, ref=None, calculation_ref=base['id'])]
+        conditions = []
+        for index, item in enumerate(variants, 1):
+            title = item['scenario'] if isinstance(item.get('scenario'), str) else ''
+            label = (('压力现值' if '压力' in title else '情景现值') if len(variants) == 1
+                     else f'情景{index}现值')
+            rows.append(dict(label=label, value=item['output']['value'], unit=unit, ref=None, calculation_ref=item['id']))
+            reasons = [row['reason'] for row in item['scenario_overrides'].values()]
+            conditions.append(dict(label=label, descriptions=list(dict.fromkeys(filter(None, [title, *reasons])))))
+        rows.append(dict(label='参考价格', value=price['value'], unit=unit, ref=price['id']))
+        values = [row['value'] for row in rows]
+        if not plot_values_fit_browser(values) or not all(type(value) in (int, float) and math.isfinite(value) for value in values):
+            continue
+        refs = [base['id'], *(item['id'] for item in variants)]
+        figure = dict(original, kind='valuation_scenarios', title='情景现值与参考价',
+            presentation='chart', rows=rows, categories=[row['label'] for row in rows],
+            groups=[dict(name='每股金额', indices=list(range(len(rows))))],
+            calculation_refs=refs, scenario_conditions=conditions,
+            note='现值按所列假设测算，情景不赋予概率。')
+        for ref in refs:
+            comparisons[ref] = figure
+    return comparisons
 
 
 def render(content, resources, visual_profile=None, report_profile='standard'):
     if content.get('report_kind') == 'research_draft':
         from .drafts import render as render_draft
         return render_draft(content, resources, visual_profile=visual_profile, report_profile=report_profile)
+    return render_research(content, resources, visual_profile, report_profile)[0]
+
+
+def render_research(content, resources, visual_profile=None, report_profile='standard'):
+    """Return the report markup and the chart plan used to render it."""
     from .reports import (check_content, report_heading, research_date_label, version_basis,
-                          TEMPLATE_VERSION, READER_VERSION, METHOD_NOTATION, source_publisher_label)
+                          TEMPLATE_VERSION, READER_VERSION, calculation_notation, source_publisher_label)
+    from .knowledge import cited_definitions, definition_only
     check_content(content)
     escape = lambda value: html.escape(str(value), quote=True)
     sections, inspection_records = [], []
     document_only = content.get("intent") == DOCUMENT_CONTENT_INTENT
+    concept_only = definition_only(content)
+    concepts = {(item['id'], item['version']): item for item in cited_definitions(content)} if concept_only else {}
     display_title = report_heading(content)
     evidence_by_id = {item["id"]: item for item in content["evidence"]}
     evidence_numbers = {item["id"]: index + 1 for index, item in enumerate(content["evidence"])}
@@ -1028,29 +1157,70 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
             references += (' ' if references else '') + inspection_link(target, '引用说明')
         return references
 
-    def figures_for(refs):
+    def admit_chart(figure, admitted):
+        if not report_chart_supported(figure):
+            return False
+        if admitted is not None:
+            if len(argument_charts([*admitted, figure], evidence_by_id)) <= len(admitted):
+                return False
+            admitted.append(figure)
+        return True
+
+    def event_timeline(refs, heading, admitted):
+        if not any(word in heading for word in ('公告', '事件', '发布', '生效', '进展')):
+            return ''
+        from .evidence_visuals import announcement_timeline
+        figure = announcement_timeline(content, (), refs)
+        if not figure:
+            return ''
+        figure = select_figures(content, [figure])[0]
+        if not admit_chart(figure, admitted):
+            return ''
+        number = len(chart_data) + 1
+        target = 'research-chart-' + str(number)
+        detail = 'figure-detail-' + target
+        events = figure['data']['events']
+        caption = '图' + str(number) + ' 公告时间线'
+        chart_data.append(dict(figure, target=target, refs=[event['ref'] for event in events], inspection_target=detail))
+        rows = ''.join('<li>' + escape(event['date']) + ' ' + escape(event['name']) + ' '
+                       + evidence_link(event['ref']) + '</li>' for event in events)
+        inspection_records.append("<section id='" + detail + "' data-inspection-title='公告时间线'><ol>"
+                                  + rows + '</ol></section>')
+        return ("<figure class='research-figure' data-presentation='chart'><figcaption>"
+                + inspection_link(detail, caption) + "</figcaption><div id='" + target
+                + "' class='chart chart-grouped' role='img' aria-label='公告时间线' aria-details='"
+                + detail + "'></div></figure>")
+
+    def figures_for(refs, admitted=None):
         nonlocal table_count
         markup = []
-        for ref in refs:
-            if ref not in figure_specs or ref in drawn_figures:
+        available = [ref for ref in dict.fromkeys(refs) if ref in figure_specs and ref not in drawn_figures]
+        comparisons = valuation_scenario_figures(available, calculations_by_id, evidence_by_id, figure_specs)
+        for requested in available:
+            if requested in drawn_figures:
                 continue
-            drawn_figures.add(ref)
-            figure = copy.deepcopy(figure_specs[ref])
-            chart = figure['presentation'] == 'chart'
+            figure = copy.deepcopy(comparisons.get(requested, figure_specs[requested]))
+            calculation_refs = figure.get('calculation_refs', [requested])
+            ref = calculation_refs[0]
+            drawn_figures.update(calculation_refs)
+            scenario = figure['kind'] == 'valuation_scenarios'
+            chart = figure['presentation'] == 'chart' and admit_chart(figure, admitted)
             if chart:
-                figure['display']=display_money_scale(figure)
                 number = len(chart_data) + 1
-                figure['target'] = 'research-chart-' + str(number)
-                figure=select_figures(content,[figure])[0]
+                figure = research_chart_spec(content, figure, 'research-chart-' + str(number))
                 chart_data.append(figure)
             else:
                 table_count += 1
                 number = table_count
             method = calculations_by_id[ref]['method']
-            context = '、'.join(figure['objects']) + '；' + '、'.join(figure['periods']) + '；单位' + figure['unit']
+            identity_context = '、'.join(figure['objects']) + '；' + '、'.join(figure['periods'])
+            source_units = list(dict.fromkeys(row['unit'] for row in figure['rows'])) or [figure['unit']]
+            source_context = identity_context + '；' + (
+                '单位' + source_units[0] if len(source_units) == 1 else '各项单位' + '、'.join(source_units))
+            context = identity_context + '；单位' + figure['unit']
             if chart and figure['display']['unit']!=figure['unit']:
                 context='、'.join(figure['objects'])+'；'+'、'.join(figure['periods'])+'；图示单位'+figure['display']['unit']
-            detail_context = context + ('；' + '，'.join(figure['basis']) if figure['basis'] else '')
+            detail_context = source_context + ('；' + '，'.join(figure['basis']) if figure['basis'] else '')
             displayed_basis = figure['basis']
             if method == 'etf_daily_nav_premium_v1':
                 displayed_basis = [
@@ -1066,20 +1236,39 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
             # Derived scenario values use the same readable precision as their
             # result label. Literal source values retain source precision;
             # raw derived floats remain in the same-version calculation record.
-            row_number = lambda row: (str(row['value']) if row['ref'] else
-                format(row['value'], '.4f').rstrip('0').rstrip('.'))
-            rows = ''.join(f"<tr><td>{escape(row['label'])}</td><td class='num' data-raw-value='{escape(row['value'])}'>{escape(row_number(row))}{escape(row['unit'])}</td><td>"
-                           + (evidence_link(row['ref']) if row['ref'] else calculation_link(ref)) + '</td></tr>' for row in figure['rows'])
+            def row_number(row):
+                value = row['value']
+                if row['ref']:
+                    return str(value)
+                if scenario:
+                    return _shown(value)
+                return format(value, '.4f').rstrip('0').rstrip('.')
+            rows = ''.join(("<tr data-observation-id='" + escape(row['ref']) + "'>" if row['ref'] else '<tr>')
+                           + f"<td>{escape(row['label'])}</td><td class='num' data-raw-value='{escape(row['value'])}'>{escape(row_number(row))}{escape(row['unit'])}</td><td>"
+                           + (evidence_link(row['ref']) if row['ref'] else calculation_link(row.get('calculation_ref', ref)))
+                           + '</td></tr>' for row in figure['rows'])
             precision = ('.'+str(percentage_reading_digits(method, figure['result_value']))+'f'
                          if figure['result_unit'] == '%' else '.4f')
             result_number = format(figure['result_value'], precision).rstrip('0').rstrip('.')
             result = f"{figure['result_label']}：{result_number}{figure['result_unit']}"
+            if scenario:
+                result = '；'.join(row['label'] + row_number(row) + row['unit'] for row in figure['rows'])
             accessible = figure['title'] + '；' + context + '；' + result
-            data_table = (f"<div class='scroll' tabindex='0'><table aria-label='{escape(accessible)}'><thead><tr><th scope='col'>项目</th><th scope='col' class='num'>数值</th><th scope='col'>依据</th></tr></thead><tbody>"
+            # The plot may use a readable money scale; this table retains
+            # original amounts and therefore names its own source unit.
+            table_accessible = figure['title'] + '；' + detail_context + '；' + result
+            data_table = (f"<div class='scroll' tabindex='0'><table aria-label='{escape(table_accessible)}'><thead><tr><th scope='col'>项目</th><th scope='col' class='num'>数值</th><th scope='col'>依据</th></tr></thead><tbody>"
                           + rows + '</tbody></table></div>')
+            inline = not chart and report_profile == 'standard' and len(figure['rows']) <= 2
             if chart:
                 visual = f"<div id='{figure['target']}' class='chart chart-grouped' role='img' aria-label='{escape(accessible)}' aria-details='figure-detail-{escape(ref)}'></div>"
                 if report_profile=='detailed':visual=ledger_html(figure,visual,'figure-detail-'+ref)
+            elif inline:
+                visual = "<p class='measured-reading'>" + '，'.join(
+                    "<span data-observation-id='" + escape(row['ref']) + "' data-raw-value='" + escape(row['value']) + "'>"
+                    + escape(row['label']) + '为' + inspection_link('figure-detail-'+ref, row_number(row)+row['unit'],
+                        '查看' + row['label'] + '的原始数据') + '</span>' if row['ref']
+                    else escape(row['label']+row_number(row)+row['unit']) for row in figure['rows']) + '。</p>'
             else:
                 visual = data_table
             # Financial method instructions are not a second body paragraph.
@@ -1088,7 +1277,7 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
             financial_notes = {
                 'gross_margin_v1': '同一期间与报表口径，不代表同行可比或盈利预测。',
                 'net_profit_margin_v1': '同一期间与报表口径，未年化，不推断证券收益。',
-                'operating_cash_profit_ratio_v1': '利润与经营现金流是不同指标，本图不是因果分解。',
+                'operating_cash_profit_ratio_v1': '两项采用同一会计期间和报表口径。',
                 'etf_daily_nav_premium_v1': '日度事后比较，不代表同刻可成交价差或套利机会，不作估值与收益预测。',
             }
             common_note = (METHOD_REGISTRY[method].get('limitations')
@@ -1099,16 +1288,21 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
             # because its calculation belongs to this financial method.
             reading_note = (financial_notes.get(method, figure['note'])
                             if figure['note'] == common_note else figure['note'])
-            caption = ('图' if chart else '表') + str(number) + ' ' + figure['title']
+            caption = figure['title'] if inline else ('图' if chart else '表') + str(number) + ' ' + figure['title']
             detail_id = 'figure-detail-' + ref
+            conditions = ''.join('<p>' + escape(item['label'] + '：' + '；'.join(item['descriptions'])) + '</p>'
+                                 for item in figure.get('scenario_conditions', []))
             inspection_records.append(f"<section id='{escape(detail_id)}' data-inspection-title='{escape(caption)}'><h3>{escape(caption)}</h3>"
-                                      f"<p>{escape(detail_context)}</p><p>{escape(result)}</p>" + data_table
+                                      f"<p>{escape(detail_context)}</p>" + ('' if scenario else f'<p>{escape(result)}</p>') + data_table + conditions
                                       + '<p>' + escape(figure['note']) + '</p><div class="report-references">'
-                                      + ' '.join(evidence_link(r) for r in figure['refs']) + ' ' + calculation_link(ref) + '</div></section>')
-            markup.append(f"<figure class='research-figure' data-calculation-ref='{escape(ref)}' data-presentation='{figure['presentation']}'><figcaption>"
+                                      + ' '.join(evidence_link(r) for r in figure['refs']) + ' '
+                                      + ' '.join(calculation_link(r) for r in calculation_refs) + '</div></section>')
+            result_band = ('' if scenario else f"<p class='figure-result'><span>{escape(figure['result_label'])}</span>"
+                           f"<strong>{escape(result_number)}{escape(figure['result_unit'])}</strong></p>")
+            presentation = 'chart' if chart else 'inline' if inline else 'table'
+            markup.append(f"<figure class='research-figure' data-calculation-ref='{escape(ref)}' data-presentation='{presentation}'><figcaption>"
                           + inspection_link(detail_id, caption, '查看' + caption + '的数据与口径') + '</figcaption>' +
-                          f"<p class='figure-context'>{escape(context)}</p>"
-                          f"<p class='figure-result'><span>{escape(figure['result_label'])}</span><strong>{escape(result_number)}{escape(figure['result_unit'])}</strong></p>" + visual +
+                          f"<p class='figure-context'>{escape(context)}</p>" + result_band + visual +
                           f"<p class='figure-note'>{escape(reading_note)}</p>"
                           "<p class='figure-source'>来源：" + inspection_link(detail_id,
                               '、'.join(dict.fromkeys(source_publisher_label(evidence_by_id[item]) for item in figure['refs'])),
@@ -1116,7 +1310,7 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
                           + '</figure>')
         # Adjacent sparse tables remain independent measurements. Keep each
         # caption and provenance; do not merge scenarios or fabricate a series.
-        if len(markup) > 1 and all("data-presentation='table'" in item for item in markup):
+        if len(markup) > 1 and all("data-presentation='chart'" not in item for item in markup):
             return "<div class='measurement-figures'>" + ''.join(markup) + '</div>'
         if len(markup) > 1:
             return f"<div class='comparison-figures' data-figure-count='{len(markup)}'>" + ''.join(markup) + '</div>'
@@ -1143,7 +1337,8 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
         inspection_records.append("<section id='" + escape(ident) + "' data-inspection-title='查询留痕'><h3>查询留痕</h3>" + ''.join(parts) + '</section>')
         return "<p class='query-reference'>" + inspection_link(ident, '查询口径') + '</p>'
 
-    def observations_for(question, *, adopted_only=False):
+    def observations_for(question, *, adopted_only=False, include_tables=True, admitted=None):
+        nonlocal table_count
         markup = []
         figures=question_observation_figures(content, question)
         figures+=pmi_observation_figures(content,set(question.get('refs',[])))
@@ -1152,28 +1347,49 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
             figures+=annual_fee_observation_figures(content, question)
         for index, figure in enumerate(figures, start=1):
             identity = fingerprint(figure)
-            if identity in drawn_observations: continue
+            if identity in drawn_observations:
+                continue
+            chart = admit_chart(figure, admitted)
+            inline = not chart and report_profile == 'standard' and len(figure['rows']) <= 2
+            if not chart and not include_tables:
+                continue
             drawn_observations.add(identity)
-            number = len(chart_data) + 1
             ref = 'observation-' + question['id'] + '-' + str(index)
             detail = 'figure-detail-' + ref
-            figure = dict(figure, target='research-chart-' + str(number), display=display_money_scale(figure))
-            chart_data.append(figure)
-            caption = '图' + str(number) + ' ' + figure['title']
+            if chart:
+                number = len(chart_data) + 1
+                figure = research_chart_spec(content, figure, 'research-chart-' + str(number))
+                chart_data.append(figure)
+            else:
+                table_count += 1
+                number = table_count
+            caption = figure['title'] if inline else ('图' if chart else '表') + str(number) + ' ' + figure['title']
             context = '至'.join(figure['periods']) + '，单位：'+figure['unit']
-            rows = ''.join('<tr><td>' + escape(row['label']) + "</td><td class='num'>"
+            rows = ''.join("<tr data-observation-id='" + escape(row['ref']) + "'><td>" + escape(row['label']) + "</td><td class='num'>"
                 + escape(row['value']) + '</td><td>' + evidence_link(row['ref']) + '</td></tr>' for row in figure['rows'])
+            table = ('<div class="scroll" tabindex="0"><table aria-label="' + escape(caption)
+                + '"><thead><tr><th scope="col">' + escape(figure.get('row_heading','日期')) + '</th><th scope="col">'
+                + escape(figure.get('value_heading','收盘价')) + '</th><th scope="col">原始依据</th></tr></thead><tbody>'
+                + rows + '</tbody></table></div>')
             inspection_records.append("<section id='" + escape(detail) + "' data-inspection-title='" + escape(caption)
-                + "'><h3>" + escape(caption) + '</h3><p>' + escape(context) + '</p><div class="scroll" tabindex="0">'
-                + '<table><thead><tr><th>'+escape(figure.get('row_heading','日期'))+'</th><th>'
-                + escape(figure.get('value_heading','收盘价'))+'</th><th>原始依据</th></tr></thead><tbody>' + rows
-                + '</tbody></table></div><p>' + escape(figure['note']) + '</p></section>')
+                + "'><h3>" + escape(caption) + '</h3><p>' + escape(context) + '</p>' + table
+                + '<p>' + escape(figure['note']) + '</p></section>')
+            if chart:
+                visual = ("<div id='" + escape(figure['target']) + "' class='chart chart-grouped' role='img' aria-label='"
+                          + escape(caption + '，' + context) + "' aria-details='" + escape(detail) + "'></div>")
+            elif inline:
+                visual = "<p class='measured-reading'>" + '，'.join(
+                    "<span data-observation-id='" + escape(row['ref']) + "'>" + escape(row['label']) + '为'
+                    + inspection_link(detail, str(row['value'])+row['unit']) + '</span>' for row in figure['rows']) + '。</p>'
+            else:
+                visual = table
+            source = figure.get('publisher') or '、'.join(dict.fromkeys(source_publisher_label(evidence_by_id[item])
+                for item in figure['refs']))
             markup.append("<figure class='research-figure' data-evidence-series-ref='" + escape(ref)
-                + "' data-presentation='chart'><figcaption>" + inspection_link(detail, caption)
-                + "</figcaption><p class='figure-context'>" + escape(context) + "</p><div id='" + escape(figure['target'])
-                + "' class='chart chart-grouped' role='img' aria-label='" + escape(caption + '，' + context)
-                + "' aria-details='" + escape(detail) + "'></div><p class='figure-note'>" + escape(figure['note'])
-                + "</p><p class='figure-source'>来源：" + inspection_link(detail, figure.get('publisher','iFinD')) + '</p></figure>')
+                + "' data-presentation='" + ('chart' if chart else 'inline' if inline else 'table') + "'><figcaption>" + inspection_link(detail, caption)
+                + "</figcaption><p class='figure-context'>" + escape(context) + "</p>" + visual
+                + "<p class='figure-note'>" + escape(figure['note']) + "</p><p class='figure-source'>来源："
+                + inspection_link(detail, source) + '</p></figure>')
         return ''.join(markup)
 
     quote_class = " class='document-content-quote'" if document_only else ""
@@ -1203,7 +1419,17 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
         # answer is retained verbatim, even if the report has similar excerpts.
         quoted_below = (document_only and bool(refs) and all(ref in evidence_by_id for ref in refs)
                         and question["answer"] == document_content_answer([evidence_by_id[ref] for ref in refs]))
-        paragraphs = ([escape(question['answer'])] if document_only else statement_paragraphs(question,'answer',content))
+        if concept_only:
+            entries = [concepts[(ref['id'], ref['version'])] for ref in question['knowledge_refs']]
+            paragraphs = [escape(entry['content']) for entry in entries]
+            if len(answers) > 1 or len(entries) > 1:
+                paragraphs = ['<strong>' + escape(entry['title']) + '</strong><br>' + paragraph
+                              for entry, paragraph in zip(entries, paragraphs)]
+            paragraphs += [label + escape(entry[field]) for entry in entries
+                           for label, field in (('<strong>适用条件</strong> ', 'conditions'),
+                                                ('<strong>使用限制</strong> ', 'counterexample'))]
+        else:
+            paragraphs = ([escape(question['answer'])] if document_only else statement_paragraphs(question,'answer',content))
         answer_parts = [] if quoted_below else [f"<p{quote_class} data-answer-part>{part}</p>" for part in paragraphs]
         answer = ''.join(answer_parts)
         # A generated document answer is an index into the literal excerpts,
@@ -1222,9 +1448,13 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
         # than printing the user's entire prompt as a second display heading.
         question_heading = ("" if len(answers) == 1 and not document_only and not theses
                             else f"<h3>{heading}{escape(question['question'])}</h3>")
-        bound_figures = "" if theses and not document_only else figures_for(question.get('calculation_refs', []))
-        if not bound_figures and not document_only and not theses:
-            bound_figures = observations_for(question)
+        bound_figures = ''
+        if not document_only and not theses:
+            admitted = []
+            bound_figures = figures_for(question.get('calculation_refs', []), admitted)
+            if not admitted:
+                bound_figures += observations_for(question, include_tables=not bound_figures, admitted=admitted)
+            bound_figures += event_timeline(refs, question['question'], admitted)
         if bound_figures and not document_only:
             # A chart must be reachable before a long answer has consumed the
             # paper. Its first complete paragraph supplies context; all later
@@ -1281,12 +1511,18 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
         narrative = ''.join('<p>' + part + '</p>'
             for part in statement_paragraphs(thesis,'investment_meaning',content))
         basis = ''.join(prerequisites) + ''.join(explanations)
-        bound_figures = figures_for(list(dict.fromkeys(calculation_refs)))
-        if not bound_figures:
+        admitted = []
+        bound_figures = figures_for(calculation_refs, admitted)
+        if not admitted:
             # A supported mechanism can have literal observations but no
             # calculation. Keep those answered questions' cited data beside
             # the thesis instead of silently omitting all source figures.
-            bound_figures = ''.join(observations_for(answered[ident]) for ident in ordered if ident in answered)
+            bound_figures += ''.join(observations_for(answered[ident], include_tables=not bound_figures, admitted=admitted)
+                                     for ident in ordered if ident in answered)
+        if "data-presentation='chart'" not in bound_figures and thesis['support']:
+            bound_figures += observations_for(dict(id='thesis-'+str(index+1), status='已回答',
+                refs=thesis['support']), include_tables=not bound_figures, admitted=admitted)
+        bound_figures += event_timeline(thesis['support'], thesis['title'], admitted)
         # Lead with the conclusion, show its question's actual figures, then
         # retain the full reasoning. A chart must not pin a multi-page answer
         # into half the paper. Sparse measurements remain ordinary tables.
@@ -1329,14 +1565,19 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
     fact_only = not arguments and not theses and not document_only
     retained_numbers=adopted_numeric_evidence(content) if fact_only else []
     if retained_numbers:
-        table_rows=''.join('<tr><th scope="row">'+escape(item['object'])+'</th><td>'
-            +escape(item['period'])+'</td><td class="num">'+escape(item['value'])+escape(item['unit'])
-            +'</td><td>'+evidence_link(item['id'])+'</td></tr>' for item in retained_numbers)
+        table_rows = []
+        for item in retained_numbers:
+            title = observation_title(item)
+            value = observation_value(item) + observation_raw_unit(item)
+            original = inspection_link('ev-' + item['id'], value, '查看' + title + '的原文')
+            table_rows.append('<tr data-observation-id="' + escape(item['id']) + '"><th scope="row">'
+                + escape(title) + '</th><td>' + escape(reader_period_label(item['period']))
+                + '</td><td class="num">' + original + '</td></tr>')
         comparison=observations_for(dict(id='adopted-data',status='未回答',refs=[item['id'] for item in retained_numbers]), adopted_only=True)
         arguments.append('<p>以下观测值已核验，研究分析尚未完成，不构成投资结论。</p>'+comparison
-            +'<div class="scroll adopted-data-scroll" tabindex="0"><table class="adopted-data-table" aria-label="已核验观测值"><thead><tr><th scope="col">指标或对象</th>'
-            +'<th scope="col">所属期</th><th scope="col">原值</th><th scope="col">来源</th></tr></thead><tbody>'
-            +table_rows+'</tbody></table></div>')
+            +'<div class="scroll adopted-data-scroll" tabindex="0"><table class="adopted-data-table" aria-label="已核验观测值"><thead><tr><th scope="col">对象与指标</th>'
+            +'<th scope="col">所属期</th><th scope="col">原值</th></tr></thead><tbody>'
+            +''.join(table_rows)+'</tbody></table></div>')
     sections.append(("theses", f"{argument_number}." + ("问题回答与研究论点" if theses else "问题回答"), "".join(arguments) or '<p>' + no_answer + '</p>'))
     collections = []
     for index, collection in enumerate(content.get('collection_coverage', []), start=1):
@@ -1384,7 +1625,8 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
             checks = f"<dt>当前版本取得时间</dt><dd>{escape(availability['obtained_at'])}</dd><dt>可用范围</dt><dd>{boundary}</dd>" + checks
         if item.get('observation_date'):
             checks = f"<dt>观测日期</dt><dd>{escape(item['observation_date'])}</dd>" + checks
-        excerpt_heading = "；".join(excerpt_questions.get(item["id"], [])) or item["object"]
+        excerpt_heading = ("；".join(excerpt_questions.get(item["id"], [])) or item["object"]
+                           if document_only else observation_title(item))
         period = "" if document_only else f"<p class='figure-context'>{escape(item['period'])}</p>"
         metadata = (f"<dl><dt>来源</dt><dd>{escape(item['source'])}，{escape(source_locator_label(item))}</dd>"
                      f"<dt>公开时间</dt><dd>{escape(item['published_at'] or '未核验')}</dd><dt>所属期与性质</dt><dd>{escape(item['period'])}，{escape(item['nature'])}</dd>"
@@ -1401,13 +1643,11 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
     calculations, unattached_figures = [], []
     for item in content["calculations"]:
         output = item["output"]
-        title, notation, variables = METHOD_NOTATION.get(item["method"], (item.get("method_title", item["method"]), "", ""))
-        if METHOD_REGISTRY[item['method']].get('same_input_unit'):
-            variables = variables.replace('百万元', item['parameters']['amount_unit'])
+        title, notation, variables = calculation_notation(item)
         binding = item.get("method_binding", {})
         version = (f"方法知识{escape(binding['knowledge_id'])}，锁定版本{escape(binding['knowledge_version'])}。"
                    if binding else "历史计算未记录方法知识绑定，保留原交付。")
-        formula_detail = ("<div class='eq'><math xmlns='http://www.w3.org/1998/Math/MathML' display='block'>" + notation + "</math></div><p>" + escape(variables) + "</p>") if notation else ""
+        formula_detail = ("<div class='eq'>" + notation + "</div><p>" + escape(variables) + "</p>") if notation else ""
         limitations = item.get("limitations", "")
         if isinstance(limitations, list):
             limitations = "；".join(limitations)
@@ -1446,11 +1686,8 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
         unattached = figures_for([item['id']])
         if unattached:
             unattached_figures.append(unattached)
-    formula = ""
-    if any(item["method"] == "residual_present_value_v1" for item in content["calculations"]):
-        formula = """<div class="eq"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><mi>V</mi><mo>=</mo><mfrac><mrow><mi>C</mi><mo>−</mo><mi>D</mi><mo>−</mo><mi>F</mi></mrow><mrow><mi>N</mi><mo>×</mo><msup><mrow><mo>(</mo><mn>1</mn><mo>+</mo><mi>r</mi><mo>)</mo></mrow><mi>t</mi></msup></mrow></mfrac></math></div><p>C为收款，D为债务，F为费用，N为股数，r为必要回报率，t为年数。金额与股本使用相同百万量级。</p>"""
     if calculations:
-        sections.append(("methods", f"{len(sections)+1}.方法与可复算结果", formula + "".join(calculations)))
+        sections.append(("methods", f"{len(sections)+1}.方法与可复算结果", "".join(calculations)))
     if unattached_figures:
         sections.append(('figures', f'{len(sections)+1}.数据与测算',
                          "<div class='measurement-figures'>" + ''.join(unattached_figures) + '</div>'))
@@ -1534,7 +1771,8 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
                 calculation_links.append('<li>' + inspection_link(target, label, '查看计算变化的完整对照') + '</li>')
             if calculation_links:
                 difference += '<ul>' + ''.join(calculation_links) + '</ul>'
-        if content.get('judgment_review_contract') == 1:
+        tracked_review = content.get('judgment_review_contract') == 1
+        if tracked_review:
             from .judgment_review import DIMENSIONS
             difference += '<h3>原判断复核</h3>'
             for number, record in enumerate(content.get('judgment_reviews', [])):
@@ -1555,13 +1793,14 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
                 difference += '<div class="scroll"><table><thead><tr>' + ''.join(labels) + '</tr></thead><tbody><tr>' + ''.join(cells) + '</tr></tbody></table></div></article>'
             if content.get('judgment_review_pending'):
                 difference += '<p>部分原判断尚待复核，本版不判定其已经兑现。</p>'
-        elif changes.get("prior_basis") and changes.get("current_basis"):
-            for key, version in (("prior_basis", previous), ("current_basis", content["research_version"])):
-                difference += f"<h3>版本{version}判断</h3>"
-                theses = changes[key]["theses"]
-                difference += "".join(f"<article><h4>{escape(t['title'])}：{escape(t['judgment'])}</h4><p>{escape(t['investment_meaning'])}</p><p>{escape(t['limitation'])}</p></article>" for t in theses) or "<p>该版未形成可核验论点。</p>"
-        else:
-            difference += "<p>原判断：" + escape('、'.join(changes["prior_judgments"]) or '无') + "；本版判断：" + escape('、'.join(changes["current_judgments"]) or '无') + "。</p>"
+        if report_profile == 'detailed' or not tracked_review:
+            if changes.get("prior_basis") and changes.get("current_basis"):
+                for key, version in (("prior_basis", previous), ("current_basis", content["research_version"])):
+                    difference += f"<h3>版本{version}判断</h3>"
+                    theses = changes[key]["theses"]
+                    difference += "".join(f"<article><h4>{escape(t['title'])}：{escape(t['judgment'])}</h4><p>{escape(t['investment_meaning'])}</p><p>{escape(t['limitation'])}</p></article>" for t in theses) or "<p>该版未形成可核验论点。</p>"
+            else:
+                difference += "<p>原判断：" + escape('、'.join(changes["prior_judgments"]) or '无') + "；本版判断：" + escape('、'.join(changes["current_judgments"]) or '无') + "。</p>"
         if changes.get("knowledge_changes"):
             knowledge_difference = "<h3>采用的知识版本变化</h3><ul>" + "".join(
                 f"<li>{escape(item['id'])}：原版本{escape(item['prior_version'] or '未采用')}，本版{escape(item['current_version'] or '未采用')}</li>"
@@ -1575,13 +1814,19 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
             for t in changes["original_conditions"]) + "</ul>" if changes["original_conditions"] else "<p>原版本未登记适用的验证条件。</p>")
         conditions = "本版条件见限制与验证条件。" if tracks else "本版未登记适用的验证条件。"
         original_conditions += "<p>" + conditions + "记录修订不等于事实新增或判断兑现，论点不按编号自动对应。</p>"
-        inspection_records.append("<section id='version-original-conditions' data-inspection-title='原验证条件'>"
-            + original_conditions + '</section>')
-        difference += '<p>' + inspection_link('version-original-conditions', '原验证条件') + '</p>'
+        if report_profile == 'detailed':
+            difference += original_conditions
+        else:
+            inspection_records.append("<section id='version-original-conditions' data-inspection-title='原验证条件'>"
+                + original_conditions + '</section>')
+            difference += '<p>' + inspection_link('version-original-conditions', '原验证条件') + '</p>'
         sections.append(("changes", f"{len(sections)+1}.版本变化", difference))
-    scope = f"<p>对象：{escape('、'.join(content['objects']) or '待消歧')}。截止时点：{escape(content['cutoff'])}。</p><p>意图：{escape(content['intent'])}；研究版本{content['research_version']}；模板{escape(content['template_version'])}。</p>"
-    if not document_only and not content["theses"]:
-        scope = "<p>" + escape(content["scope"]) + "</p>" + scope
+    if concept_only:
+        scope = '<p>' + escape(content['scope']) + '</p>'
+    else:
+        scope = f"<p>对象：{escape('、'.join(content['objects']) or '待消歧')}。截止时点：{escape(content['cutoff'])}。</p><p>意图：{escape(content['intent'])}；研究版本{content['research_version']}；模板{escape(content['template_version'])}。</p>"
+        if not document_only and not content["theses"]:
+            scope = "<p>" + escape(content["scope"]) + "</p>" + scope
     answered_ids = {question["id"] for question in answers}
     question = content.get("question", content["title"])
     question_label = "原始问题" if content.get("question") or not content.get("synthetic") else "留存报告题目"
@@ -1600,7 +1845,7 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
     scope += "".join(f"<li>{escape(q['question'])}：{escape(q['status'])}" +
         (f"<p>{escape(q['answer'])}</p>" if q.get("answer") and q["id"] not in answered_ids else "") +
         "</li>" for q in content["questions"]) + "</ul>"
-    knowledge = content.get("knowledge", {}).get("entries", [])
+    knowledge = list(concepts.values()) if concept_only else content.get("knowledge", {}).get("entries", [])
     scope += "".join(knowledge_reading(item) for item in knowledge)
     if not tracks and content.get("tracking_reason"):
         scope += "<p>判断追踪：" + escape(content["tracking_reason"]) + "</p>"
@@ -1612,7 +1857,8 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
     if document_only:
         principal_keys.add('facts')  # Literal document answers live in these excerpts.
     principal_titles = {'summary': '核对范围' if document_only else '核心结论',
-                        'theses': '问题核对' if document_only else ('投资逻辑' if content['theses'] else '研究结论'),
+                        'theses': ('通用口径' if concept_only else '问题核对' if document_only
+                                   else '投资逻辑' if content['theses'] else '研究结论'),
                         'facts': '原件摘录', 'figures': '数据与测算', 'collection': '资料取得情况',
                         'risk': '风险与验证条件', 'changes': '版本变化'}
     if incomplete and not tracks and not document_only:
@@ -1626,6 +1872,8 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
         principal.append("<section id='summary' class='core-conclusion' data-main-question-ref='" + escape(main_answer['id'])
                          + "'><h2>核心结论</h2>" + core_conclusion + '</section>')
     for key, title, text in sections:
+        if concept_only and key == 'facts' and not content['evidence']:
+            continue
         if key in principal_keys:
             if key == 'theses' and core_conclusion:
                 principal.append(f"<section id='{key}' class='research-logics'>{text}</section>")
@@ -1637,11 +1885,14 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
     inspection_records.extend(supporting)
     source_names = list(dict.fromkeys(source_publisher_label(item) for item in content['evidence']))
     source_line = '来源：' + escape('、'.join(source_names) or '尚无已核验来源') + '。'
+    if concept_only:
+        source_line = '知识来源：' + inspection_link('scope', '查看条目与原始出处') if knowledge else ''
     if not source_names and content.get('collection_coverage'):
         received_sources = list(dict.fromkeys(source_label(row['source'])
                                              for row in content['collection_coverage']))
         source_line = '已取得资料：' + escape('、'.join(received_sources)) + '；金融适用性待核验。'
-    body += "<footer class='report-source-line'><p>" + source_line + inspection_link('scope', '研究范围') + '</p></footer>'
+    body += "<footer class='report-source-line'><p>" + source_line + (
+        '' if concept_only and knowledge else inspection_link('scope', '研究范围')) + '</p></footer>'
     css = (resource_directory(resources, 'frontend') / 'report.css').read_text(encoding='utf-8')
     vendor = (resource_directory(resources, 'vendor') / 'echarts.min.js').read_text(encoding='utf-8') if chart_data else ''
     data = json.dumps(chart_data, ensure_ascii=False).replace("<", "\\u003c")
@@ -1649,6 +1900,7 @@ def render(content, resources, visual_profile=None, report_profile='standard'):
 const figures=CHART_DATA,CHARTS=[],CHART_LAYOUTS=new Map();
 const s=getComputedStyle(document.documentElement);
 const theme={red:s.getPropertyValue('--red').trim(),blue:s.getPropertyValue('--blue').trim(),ink:s.getPropertyValue('--ink').trim(),rule:s.getPropertyValue('--rule').trim()};
+const reportAxes=figures.length?RHVisuals.axisFrame(RHVisuals.theme()):{};
 function normalizeChartOption(option){return {animation:false,textStyle:{fontFamily:'Arial, PingFang SC, sans-serif',fontSize:14,color:theme.ink},grid:{left:8,right:68,top:12,bottom:42,containLabel:true},tooltip:{show:false},...option};}
 function exactNumber(value){const [whole,fraction]=String(value).split('.');return /e/i.test(String(value))?String(value):whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')+(fraction===undefined?'':'.'+fraction);}
 function chartNumber(value,display,label=false){
@@ -1682,33 +1934,28 @@ for(const figure of figures){
   const observations=figure.kind==='observations';
   const observationValues=observations?new Map(figure.rows.map(row=>[row.label,row.value])):null;
   if(observations)series=[{type:'line',name:figure.title,smooth:false,connectNulls:false,
-    symbol:'circle',symbolSize:7,lineStyle:{width:2.5,color:theme.blue},itemStyle:{color:'#FFFFFF',borderColor:theme.blue,borderWidth:2},
-    areaStyle:{color:new echarts.graphic.LinearGradient(0,0,0,1,[{offset:0,color:theme.blue+'18'},{offset:1,color:theme.blue+'02'}])},
-    label:{show:true,position:'top',fontSize:13,color:theme.ink,
-      formatter:point=>point.value!==null&&(point.name===figure.rows[0].label||point.name===figure.rows[figure.rows.length-1].label)?String(point.value):''},
-    labelLayout:point=>({dx:figure.categories[point.dataIndex]===figure.rows[0].label?26:-26}),
+    showSymbol:false,lineStyle:{width:2.5,color:theme.blue},
     data:figure.categories.map(day=>observationValues.get(day)??null)}];
   const option=normalizeChartOption({
     grid:{left:8,right:observations?20:68,top:42,bottom:42,containLabel:true},
-    tooltip:observations?{trigger:'axis',confine:true}:{trigger:'item',confine:true,renderMode:'richText',formatter:originalTooltip},
+    tooltip:observations?{trigger:'axis',confine:true,axisPointer:{type:'none'}}:{trigger:'item',confine:true,renderMode:'richText',formatter:originalTooltip},
     legend:{show:figure.groups.length>1,type:'scroll',top:0,left:0,icon:'rect',itemWidth:16,itemHeight:5,itemGap:24,textStyle:{fontSize:14,color:theme.ink}},
     xAxis:observations?{type:'category',data:figure.categories,boundaryGap:false,
       axisLabel:{fontSize:13,hideOverlap:true,color:theme.ink,formatter:value=>value.slice(5)},
-      axisTick:{show:false},axisLine:{lineStyle:{color:theme.rule}}}:
+      ...reportAxes}:
       {type:'value',name:display.unit,nameLocation:'middle',nameGap:32,min:signed?undefined:0,
-      splitNumber:3,axisLabel:{fontSize:14,hideOverlap:true,color:'#64758A',formatter:value=>chartNumber(value,display)},axisLine:{show:false},axisTick:{show:false},splitLine:{show:true,lineStyle:{color:theme.rule,type:'dashed'}}},
+      splitNumber:3,axisLabel:{fontSize:14,hideOverlap:true,color:'#64758A',formatter:value=>chartNumber(value,display)},...reportAxes},
     yAxis:observations?{type:'value',scale:true,name:figure.unit,splitNumber:4,
-      axisLabel:{fontSize:13,color:theme.ink},axisLine:{show:false},axisTick:{show:false},
-      splitLine:{lineStyle:{color:theme.rule,type:'dashed'}}}:
+      axisLabel:{fontSize:13,color:theme.ink},...reportAxes}:
       {type:'category',inverse:true,data:figure.categories,
-      axisTick:{show:false},axisLine:{show:false},axisLabel:{fontSize:14,width:110,overflow:'break'}},
+      ...reportAxes,axisLabel:{fontSize:14,width:110,overflow:'break'}},
     series
   });
   let layoutKey=null;
   const applyLayout=width=>{
     if(figure.auto_visual&&window.RHVisuals){
       const item=RHVisuals.adapt(figure),profile=RHVisuals.profile(),scheme=profile.schemes[figure.target]||item.scheme;
-      chart.setOption(RHVisuals.option(scheme,RHVisuals.materialize(item,scheme),profile.theme,{width,height:chart.getHeight()}),{notMerge:true});return;
+      chart.setOption(RHVisuals.option(scheme,RHVisuals.materialize(item,scheme),profile.theme,{width,height:chart.getHeight(),chart}),{notMerge:true});return;
     }
     // Two nonnegative amounts need room for both names and the plotted bars.
     // At narrow paper widths, move names below vertical bars rather than
@@ -1721,15 +1968,14 @@ for(const figure of figures){
     if(!compact){chart.setOption(option,{notMerge:true});return;}
     chart.setOption({...option,
       grid:{left:8,right:12,top:36,bottom:8,containLabel:true},
-      xAxis:{type:'category',data:figure.categories,axisTick:{show:false},axisLine:{lineStyle:{color:theme.rule}},
+      xAxis:{type:'category',data:figure.categories,...reportAxes,
         axisLabel:{fontSize:14,interval:0,color:theme.ink,formatter:value=>{
           const letters=Array.from(value),lines=[];
           for(let i=0;i<letters.length;i+=characters)lines.push(letters.slice(i,i+characters).join(''));
           return lines.join('\n');
         }}},
-      yAxis:{type:'value',min:0,name:display.unit,splitNumber:3,axisLine:{show:false},axisTick:{show:false},
-        axisLabel:{fontSize:14,hideOverlap:true,color:'#64758A',formatter:value=>chartNumber(value,display)},
-        splitLine:{lineStyle:{color:theme.rule,type:'dashed'}}},
+      yAxis:{type:'value',min:0,name:display.unit,splitNumber:3,...reportAxes,
+        axisLabel:{fontSize:14,hideOverlap:true,color:'#64758A',formatter:value=>chartNumber(value,display)}},
       series:series.map(item=>({...item,barMaxWidth:36,label:{...item.label,position:'top'}}))
     },{notMerge:true});
   };
@@ -1777,4 +2023,5 @@ window.addEventListener('afterprint',restoreReportReading);
     if theme(selected_profile.get('theme')) is None:raise ValueError('配色未登记')
     profile_json = json.dumps(selected_profile,ensure_ascii=False).replace('<','\\u003c')
     renderer_version = escape(content.get('template_version', TEMPLATE_VERSION))
-    return f"<!doctype html><html lang='zh-CN' data-renderer-version='{renderer_version}' data-reader-version='{READER_VERSION}'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>{escape(display_title)}</title><style>{css}</style></head><body><a class='skip' href='#main'>跳转正文</a><main id='main' class='single-page-paper' tabindex='-1'>{header}{body}</main>{inspection_surface(inspection_records)}<script>{vendor}</script>{visual_assets}<script id='rh-visual-profile' type='application/json'>{profile_json}</script><script>{script}</script></body></html>"
+    document = f"<!doctype html><html lang='zh-CN' data-renderer-version='{renderer_version}' data-reader-version='{READER_VERSION}'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>{escape(display_title)}</title><style>{css}</style></head><body><a class='skip' href='#main'>跳转正文</a><main id='main' class='single-page-paper' tabindex='-1'>{header}{body}</main>{inspection_surface(inspection_records)}<script>{vendor}</script>{visual_assets}<script id='rh-visual-profile' type='application/json'>{profile_json}</script><script>{script}</script></body></html>"
+    return document, chart_data
