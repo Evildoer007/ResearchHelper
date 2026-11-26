@@ -74,6 +74,84 @@ class FinancialMetricBindingTests(unittest.TestCase):
                 self.assertEqual(checked["raw_value"], proposal["raw_value"])
         self.assertEqual(len(seen), 4)
 
+    def test_reports_name_the_original_amounts_and_keep_their_exact_source_links(self):
+        from lxml import html
+        from researchhelper.report_designer import design
+
+        task, original = self.original()
+        specs = {item["id"]: item for method in bridge.FINANCIAL_PERIOD_METHODS
+                 for item in self.fixture.specs(original, method)}
+        self.agent.offline = True
+        result = self.agent.start(task["id"], {"evidence_specs": list(specs.values())})
+        frozen = self.agent.archive.report(task["id"], task["version"])
+        self.assertEqual(result["status"], "部分完成")
+        expected = {"营业收入（合并）": 100, "营业成本（合并）": 60,
+                    "净利润（合并）": 12, "经营活动产生的现金流量净额（合并）": -8}
+        for profile in ("standard", "detailed"):
+            with self.subTest(profile=profile):
+                report = design(frozen["content"], self.agent.resources, profile=profile)
+                data = report["document"]["dataset"]["rows"]
+                self.assertEqual({row[1]: row[3] for row in data}, expected)
+                self.assertTrue(all(row[:1] == ["600000.SH"] and row[2] == "2026年上半年"
+                                    and row[4] == "百万元" for row in data))
+                tree = html.document_fromstring(report["html"])
+                paper_table, = tree.xpath('//main//table[contains(@class,"adopted-data-table")]')
+                self.assertEqual([cell.text_content() for cell in paper_table.xpath('thead/tr/th')],
+                                 ["对象与指标", "所属期", "原值"])
+                rows = paper_table.xpath("tbody/tr")
+                self.assertEqual(len(rows), 4)
+                for row, (name, value), ref in zip(rows, expected.items(), specs):
+                    self.assertIn(name, row.find("th").text_content())
+                    self.assertIn(str(value) + "百万元", row.text_content())
+                    link, = row.xpath('./td/a')
+                    self.assertEqual(link.get("href"), "#ev-" + ref)
+                    self.assertEqual(link.text_content(), str(value) + "百万元")
+                    record = tree.get_element_by_id("ev-" + ref).text_content()
+                    self.assertIn("第1页", record)
+                    self.assertIn(specs[ref]["text"], record)
+                self.assertFalse(tree.xpath('//main//*[@data-logic-detail="research-basis"]'))
+        self.assertEqual(self.agent.archive.report(task["id"], task["version"]), frozen)
+
+    def test_inline_pdf_cannot_borrow_a_scope_or_period_from_its_own_page(self):
+        task, original, valid = self.fixture.retained_original((
+            "2026年上半年合并利润表：营业收入100百万元。",
+            "母公司利润表（2026年上半年）：营业收入90百万元。",
+            "合并利润表（2025年上半年）：营业收入80百万元。",
+        ))
+        self.assertEqual(candidate_evidence(task, original, valid)["source_check"], "通过")
+        for field, value in (("accounting_scope", "parent"), ("period", "2025年上半年")):
+            with self.subTest(field=field), self.assertRaisesRegex(ContractError, "同一原文行"):
+                proposal = copy.deepcopy(valid)
+                proposal["calculation_context"][field] = value
+                if field == "period":
+                    proposal["period"] = value
+                candidate_evidence(task, original, proposal)
+
+    def test_inline_pdf_keeps_the_first_amount_and_rejects_amounts_after_a_period_change(self):
+        task, original, _ = self.fixture.retained_original((
+            "合并利润表（2026年上半年）：营业收入100百万元。上年同期。营业成本60百万元。",
+        ))
+        revenue, cost = self.fixture.specs(original, "gross_margin_v1")
+        self.assertEqual(candidate_evidence(task, original, revenue)["source_check"], "通过")
+        with self.assertRaisesRegex(ContractError, "同一原文行"):
+            candidate_evidence(task, original, cost)
+
+    def test_inline_pdf_rejects_currency_from_a_second_original(self):
+        task, original, valid = self.fixture.retained_original()
+        task = self.agent.add_material(task["id"], "other-statement.txt", "币种：人民币".encode())
+        other = task["materials"][-1]
+        valid["calculation_context_basis"]["currency"] = {"kind": "material", "artifact_id": other["id"],
+            "snapshot_hash": other["snapshot_hash"], "part": "段落1", "quote": "币种：人民币"}
+        with self.assertRaisesRegex(ContractError, "须来自同一原件"):
+            candidate_evidence(task, original, valid)
+
+    def test_inline_pdf_cannot_use_global_cny_when_statement_declares_another_currency(self):
+        task, original, proposal = self.fixture.retained_original((
+            "合并利润表（2026年上半年）：营业收入100百万元。币种：港币。",
+        ))
+        with self.assertRaisesRegex(ContractError, "币种"):
+            candidate_evidence(task, original, proposal)
+
     def test_negative_amount_cannot_lose_its_sign(self):
         task, original = self.original()
         proposal = self.fixture.specs(original, "operating_cash_profit_ratio_v1")[0]
@@ -207,17 +285,25 @@ class FinancialMetricBindingTests(unittest.TestCase):
         views = extractable_source_views(task)
         task["host_result"] = {}
         old_input = {"input_hash": task["input_hash"], "sources": views, "reader_version": 1}
-        task["reasoning_state"] = {"extraction": {"input_digest": fingerprint(old_input)}}
+        old_digest = fingerprint(old_input)
+        task["reasoning_state"] = {"extraction": {"input_digest": old_digest}}
         before = copy.deepcopy(task["ledger"])
         with patch.object(self.agent, "_reasoning_available", return_value=True), \
                 patch.object(self.agent, "_save_model_checkpoint"), \
                 patch("researchhelper.engine.model_object", return_value=({"evidence_specs": []}, {"synthetic": True})) as extract:
             self.agent._extract_model_sources(task)
+            current_digest = task["reasoning_state"]["extraction"]["input_digest"]
             self.agent._extract_model_sources(task)
-        extract.assert_called_once()
+            extract.assert_called_once()
+            with patch("researchhelper.engine.FINANCIAL_METRIC_BINDING_VERSION", FINANCIAL_METRIC_BINDING_VERSION + 1):
+                self.agent._extract_model_sources(task)
+                upgraded_digest = task["reasoning_state"]["extraction"]["input_digest"]
+                self.agent._extract_model_sources(task)
+            self.assertEqual(extract.call_count, 2)
         self.assertEqual(task["ledger"], before)
-        new_input = dict(old_input, financial_metric_binding_version=FINANCIAL_METRIC_BINDING_VERSION)
-        self.assertEqual(task["reasoning_state"]["extraction"]["input_digest"], fingerprint(new_input))
+        self.assertNotEqual(current_digest, old_digest)
+        self.assertNotEqual(upgraded_digest, current_digest)
+        self.assertEqual(task["reasoning_state"]["extraction"]["input_digest"], upgraded_digest)
 
 
 if __name__ == "__main__":
