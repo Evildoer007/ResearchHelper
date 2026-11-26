@@ -22,7 +22,7 @@ class FilingCandidateDistributionTests(unittest.TestCase):
                                   ('c','159919.SZ',1)):
             records.append(dict(id=ident,kind='api',operation='report_query',task_id='queue',
                 research_version=1,parameters=dict(codes=code),catalog_entries=[
-                    dict(source_id=ident+str(i),title=ident+str(i),
+                    dict(source_id=ident+str(i),title=ident+str(i),issuer=code,security_name='合成队列主体'+ident,
                          catalog_ref=dict(original_fields=dict(identity=ident+str(i)))) for i in range(count)]))
         return dict(id='queue',version=1,filing_candidate_distribution_version=1,source_records=records)
 
