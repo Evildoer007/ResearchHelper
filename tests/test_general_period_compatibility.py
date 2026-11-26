@@ -4,7 +4,8 @@ import unittest
 
 from tests import test_named_quantity_catalogue as fixtures
 from researchhelper.contracts import canonical
-from researchhelper.output_schema import original_span_output_schema, original_span_prompt, decode_original_spans
+from researchhelper.output_schema import (original_span_output_schema, original_span_prompt, decode_original_spans,
+    provider_request_schema, ORIGINAL_SPAN_PROTOCOL)
 from researchhelper.reasoning import MAX_CONTEXT_CHARACTERS
 
 
@@ -36,5 +37,6 @@ class GeneralPeriodCompatibilityTests(unittest.TestCase):
 
     def test_complete_three_source_payload_still_fits_existing_cap(self):
         self.assertEqual(self.schema['properties']['version']['enum'],[12])
-        size=len(canonical(self.prompt))+len(canonical(self.schema))
+        wire_schema=provider_request_schema(self.task,self.schema,ORIGINAL_SPAN_PROTOCOL)
+        size=len(canonical(self.prompt))+len(canonical(wire_schema))
         self.assertLessEqual(size,MAX_CONTEXT_CHARACTERS,size)
