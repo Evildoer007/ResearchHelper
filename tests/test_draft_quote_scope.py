@@ -1,13 +1,14 @@
 """A malformed quotation subset must not contaminate or block the first report."""
 import copy
+import json
 from pathlib import Path
 import tempfile
 import unittest
 from tests import ROOT
 from researchhelper.archive import ResearchArchive
 from researchhelper.engine import ResearchAgent
-from researchhelper.contracts import fingerprint
-from researchhelper.draft_sources import observations,source_context,writing_context,source_issues
+from researchhelper.contracts import ContractError, fingerprint
+from researchhelper.draft_sources import SCOPE_VERSION,observations,source_context,writing_context,source_issues
 
 POLICY='draft_quote_scope_version'
 
@@ -28,7 +29,7 @@ class DraftQuotationScopeTests(unittest.TestCase):
             agent=ResearchAgent(ResearchArchive(folder),ROOT,offline=True,require_argument_support=True,draft_first=True)
             try:
                 task=agent.create('研究600519.SH',cutoff=self.task['cutoff'])
-                self.assertEqual(task.get(POLICY),2)
+                self.assertEqual(task.get(POLICY),SCOPE_VERSION)
                 from researchhelper.planning import input_fingerprint
                 old=copy.deepcopy(task);old.pop(POLICY)
                 self.assertNotEqual(input_fingerprint(old),task['input_hash'])
@@ -54,6 +55,32 @@ class DraftQuotationScopeTests(unittest.TestCase):
     def test_duplicate_dates_leave_unambiguous_dates_usable(self):
         self.record(dict(thscode='600519.SH',time=['2026-10-29','2026-10-29','2026-10-30'],table=dict(close=[98765,99999,102])))
         self.assertEqual([r['raw_value'] for r in observations(self.task)],[102])
+    def test_duplicate_field_and_conflicting_code_are_local_to_the_original_cells(self):
+        self.task[POLICY] = SCOPE_VERSION
+        self.params['codes'] = '600519.SH,600036.SH'
+        record = self.record(dict(thscode='600519.SH',time=['2026-10-29','2026-10-30'],
+            table=dict(close=[101,102],open=[100,103])))
+        record['snapshot']['tables'].extend([
+            dict(thscode='600519.SH',time=['20261029'],table=dict(close=[98765])),
+            dict(thscode='600036.SH',time=['2026-10-29'],table=dict(close=[51])),
+            dict(thscode='600519.SH',time=['2026-10-29'],table=dict(thscode=['600036.SH'],close=[99999])),
+        ])
+        record['hash'] = fingerprint(record['snapshot'])
+        original = copy.deepcopy(record)
+        facts = observations(self.task)
+        self.assertEqual([(row['code'],row['field'],row['raw_value']) for row in facts],
+            [('600519.SH','open',100),('600519.SH','open',103),('600519.SH','close',102),('600036.SH','close',51)])
+        self.assertTrue(source_issues(self.task)[0]['partial'])
+        self.assertNotIn('98765',str(source_context(self.task)))
+        self.assertNotIn('99999',str(writing_context(self.task,facts)))
+        self.assertEqual(record,original)
+        legacy = observations(dict(self.task,**{POLICY:2}))
+        self.assertIn(99999,[row['raw_value'] for row in legacy])
+        from researchhelper.evidence import _source_extract
+        for index in (0,1,3):
+            with self.subTest(table=index), self.assertRaisesRegex(ContractError,'行情单元.*未能唯一核对'):
+                _source_extract(dict(artifact=record,snapshot=record['snapshot'],snapshot_hash=record['hash'],
+                    record_locator=dict(table=index,row=0,field='close')),self.task)
     def test_unrequested_numeric_columns_are_not_analysis_inputs(self):
         self.record(dict(thscode='600519.SH',time=['2026-10-29'],table=dict(close=[101],target_price=[99999])))
         rows=observations(self.task)
@@ -82,6 +109,27 @@ class DraftQuotationScopeTests(unittest.TestCase):
         self.task['cutoff']='2026-10-29T23:59:00+08:00'
         self.record()
         self.assertEqual([r['raw_value'] for r in observations(self.task)],[100,101])
+    def test_latest_single_day_scalar_is_read_with_its_original_locator(self):
+        from researchhelper.market_series import compile_observation_window, observation_selection, record_observation_scope
+
+        self.task.update(draft_quote_scope_version=2, market_observation_selection_version=3)
+        scope = observation_selection(self.task)
+        request = compile_observation_window(dict(id='latest', source='ifind', operation='cmd_history_quotation',
+            parameters=dict(codes='600519.SH', indicators='close', functionpara=self.params['functionpara'],
+                observation_window=dict(mode='latest_available', as_of=scope['as_of'], lookback_calendar_days=7))), scope)
+        self.params = request['parameters']
+        for raw in (101.25, 0, None):
+            with self.subTest(raw=raw):
+                self.task['source_records'].clear()
+                record = self.record(dict(thscode='600519.SH', time=['2026-10-30'], table=dict(close=raw)))
+                record['data_need_ids'] = ['latest']
+                record_observation_scope(record, request, ['q1'])
+                fact, = observations(self.task)
+                self.assertEqual(fact['raw_value'], raw)
+                self.assertEqual(fact['locator'], dict(table=0, field='close', row=0))
+                context = json.loads(source_context(self.task)[0]['content'])
+                self.assertEqual(context['tables'][0]['table']['close'], [raw])
+                self.assertEqual(record['snapshot']['tables'][0]['table']['close'], raw)
     def test_writer_rejects_previously_read_out_of_scope_rows(self):
         record=self.record(dict(thscode='600519.SH',time=['2026-10-29','2026-11-02'],table=dict(close=[101,98765])))
         legacy=copy.deepcopy(self.task);legacy.pop(POLICY)
@@ -118,7 +166,7 @@ class DraftQuotationScopeTests(unittest.TestCase):
                 saved=archive.report(done['id'],done['version'])
                 main=html.document_fromstring(saved['html']).xpath('//main')[0].text_content()
                 self.assertNotIn('98765',main);self.assertNotIn('99999',main)
-                self.assertEqual(saved['content'][POLICY],2)
+                self.assertEqual(saved['content'][POLICY],SCOPE_VERSION)
                 ident=done['id'];digest=saved['digest']
             finally:agent.close_runtime()
             reopened=ResearchArchive(folder)
