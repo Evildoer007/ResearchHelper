@@ -26,7 +26,7 @@ test('observation and zero calculation retain their exact source and method bind
 });
 test('source inventory distinguishes repeated names using retained periods and metrics',()=>{
  const task=fixture();task.source_records.push({id:'S2',name:'公开数据'});task.draft_report.facts.push({...task.draft_report.facts[0],id:'D2',artifact_id:'S2',period:'2024'});
- const html=D.library(task,D.observations(task.draft_report.facts),ctx);
+ const html=Array.from(D.sourceCatalog(task,D.observations(task.draft_report.facts),ctx).sections.values()).join('');
  assert.match(html,/2024/);assert.match(html,/2025/);assert.match(html,/利润/);assert.match(html,/data-source="S1"/);assert.match(html,/data-source="S2"/);
 });
 test('mixed draft and formal claims are visibly distinguished without hiding either',()=>{
@@ -61,7 +61,7 @@ test('a draft knowledge binding from another input cannot populate theory',()=>{
 
 test('a rejected source remains inspectable without being shown as a report input',()=>{
  const task=fixture();task.draft_source_issues=[{artifact_id:'S1',reason:'来源内容已变化'}];
- const before=JSON.stringify(task),html=D.library(task,[],ctx);
+ const before=JSON.stringify(task),html=Array.from(D.sourceCatalog(task,[],ctx).sections.values()).join('');
  assert.match(html,/data-source="S1"/);assert.match(html,/未用于报告/);
  assert.doesNotMatch(html,/未关联研究数值/);assert.equal(JSON.stringify(task),before);
 });
