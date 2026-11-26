@@ -7,10 +7,11 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock,patch
 
-from researchhelper.contracts import ContractError,budget
+from researchhelper.contracts import ContractError,budget,charge
 from researchhelper.model import ModelSettings,ModelService
 from researchhelper.engine import ResearchAgent
 from researchhelper.reasoning import model_object
+from researchhelper.transport import TransportFailure
 
 ROOT=Path(__file__).resolve().parents[1]
 
@@ -75,3 +76,24 @@ class FinalAnalysisReserveTests(unittest.TestCase):
         self.service.reason_final_analysis(self.task,[])
         self.assertLessEqual(self.request.call_args.args[3],5)
         self.assertGreater(self.request.call_args.args[3],0)
+
+    def test_failed_reserved_resubmission_keeps_the_previous_proposal_for_local_review(self):
+        task = dict(self.task, input_hash='fixture')
+        agent = ResearchAgent.__new__(ResearchAgent)
+        agent.model = self.service
+        agent._save_model_checkpoint = Mock()
+        proposal = {'answers': {}, 'theses': []}
+        review = dict(accepted=False, invalid_fields=['analysis.numeric'])
+
+        def interrupted(current, selected, *, final_delivery):
+            self.assertTrue(final_delivery)
+            charge(current['ledger'], 'model_calls', delivery=True)
+            raise TransportFailure('connection_interrupted', 'Controlled disconnect')
+
+        agent._reason_on_verified_material = Mock(side_effect=interrupted)
+        self.assertIs(agent._resubmit_analysis_once(task, proposal, review), proposal)
+        self.assertEqual(task['reasoning_state']['final_delivery']['status'], '未采用')
+        self.assertEqual(task['reasoning_state']['final_delivery']['failure_code'], 'connection_interrupted')
+        self.assertEqual(task['ledger']['used']['model_calls'], 8)
+        self.assertIs(agent._resubmit_analysis_once(task, proposal, review), proposal)
+        agent._reason_on_verified_material.assert_called_once()
