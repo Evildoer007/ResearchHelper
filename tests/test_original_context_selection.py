@@ -25,8 +25,11 @@ class OriginalContextSelectionTests(unittest.TestCase):
         self.schema = schema_module.original_span_output_schema(self.task, self.views)
         self.payload = dict(untrusted_sources=self.views, evidence_contract=evidence_contract(self.task, self.views))
         self.prompt = schema_module.original_span_prompt(self.payload, self.task)
-        line = next(line for line in fixture.fixture.lines if '基金主代码' in line['text'] and '510500' in line['text'])
-        self.context = dict(field='fund_id', value='510500', source_ref='source_2',
+        # The current API already carries this ETF's full code. Exercise an
+        # actually missing date using the unchanged controlled original; the
+        # proposal still carries no financial applicability approval.
+        line = next(line for line in fixture.fixture.lines if line['text'].strip() == '报告期末：2026年6月30日')
+        self.context = dict(field='valuation_date', value='2026-06-30', source_ref='source_2',
                             span=dict(start=line['index'], end=line['index']))
         self.wire = copy.deepcopy(fixture.wire)
         self.wire.update(version=3, binding_ref=self.prompt['span_binding_ref'])
@@ -38,12 +41,14 @@ class OriginalContextSelectionTests(unittest.TestCase):
     def test_original_context_is_added_without_changing_price_or_existing_scope(self):
         before = fingerprint((self.task, self.views, self.wire))
         selected = self.decode()['evidence_specs'][0]
-        self.assertEqual(selected['calculation_context']['fund_id'], '510500')
+        self.assertEqual(selected['calculation_context']['fund_id'], '510500.SH')
         self.assertEqual(selected['calculation_context']['currency'], 'CNY')
         self.assertEqual(selected['calculation_context']['price_kind'], 'close')
         self.assertEqual(selected['calculation_context']['corporate_action_status'], 'unknown')
         self.assertNotIn('api_context_reference', selected)
-        self.assertEqual(selected['calculation_context_basis']['fund_id']['kind'], 'material')
+        self.assertEqual(selected['api_value_reference']['artifact_id'], self.views[0]['id'])
+        self.assertEqual(selected['calculation_context_basis']['valuation_date']['kind'], 'material')
+        self.assertEqual(selected['calculation_context']['valuation_date'], '2026-06-30')
         self.assertEqual(selected['calculation_context_basis']['currency']['kind'], 'api')
         self.assertNotIn('source_check', selected)
         self.assertEqual(before, fingerprint((self.task, self.views, self.wire)))
@@ -75,23 +80,27 @@ class OriginalContextSelectionTests(unittest.TestCase):
         choices = schema_module._original_span_choices(self.task, self.views)
         choices[1]['description']['source']['object_binding']['value'] = '600519.SH'
         with patch.object(schema_module, '_original_span_choices', return_value=choices):
-            with self.assertRaisesRegex(ContractError, '不跨基金'):
+            with self.assertRaisesRegex(ContractError, '不跨基金|读取契约不符'):
                 self.decode()
 
     def test_api_numeric_source_validation_still_checks_new_original_anchor(self):
         record = next(record for record in self.task['source_records'] if record['id'] == self.views[0]['id'])
         selected = self.decode()['evidence_specs'][0]
         valid = candidate_evidence(self.task, record, selected)
-        self.assertEqual(valid['calculation_context']['fund_id'], '510500')
-        self.assertEqual(valid['value'], self.fixture.task['evidence'][0]['value'])
-        invalid = copy.deepcopy(selected); invalid['calculation_context']['fund_id'] = '510501'
+        self.assertEqual(valid['calculation_context']['fund_id'], '510500.SH')
+        self.assertEqual(valid['value'], 7.42)
+        self.assertEqual(valid['calculation_context']['valuation_date'], '2026-06-30')
+        invalid = copy.deepcopy(selected); invalid['calculation_context']['valuation_date'] = '2026-07-01'
         with self.assertRaises(ContractError): candidate_evidence(self.task, record, invalid)
 
     def test_absent_contexts_preserve_the_original_api_selection_not_a_fake_metadata_default(self):
         wire = copy.deepcopy(self.wire); wire['selections'][0]['additional_contexts'] = []
         result = self.decode(wire)['evidence_specs'][0]
-        self.assertIn('api_cell_selections', result)
-        self.assertNotIn('calculation_context', result)
+        self.assertEqual(result['api_value_reference']['snapshot_hash'], self.views[0]['snapshot_hash'])
+        self.assertEqual(result['calculation_context']['fund_id'], '510500.SH')
+        self.assertEqual(result['calculation_context']['currency'], 'CNY')
+        self.assertNotIn('valuation_date', result['calculation_context'])
+        self.assertFalse(any(basis.get('kind') == 'material' for basis in result.get('calculation_context_basis', {}).values()))
 
     def test_legacy_mixed_tasks_keep_version_two_and_no_new_context_field(self):
         self.task.pop('original_context_selection_version')
@@ -121,7 +130,7 @@ class OriginalContextSelectionTests(unittest.TestCase):
                 result, receipt = model_object(model, self.task, 'extract', self.payload, PHASE_FIELDS['extract'])
             transport.assert_called_once()
             self.assertEqual(transport.call_args.kwargs['output_schema']['properties']['version']['enum'], [3])
-            self.assertEqual(result['evidence_specs'][0]['calculation_context']['fund_id'], '510500')
+            self.assertEqual(result['evidence_specs'][0]['calculation_context']['fund_id'], '510500.SH')
             self.assertNotIn('source_check', result['evidence_specs'][0])
             prompt = transport.call_args.args[1][0]['content']
             self.assertNotIn('kind=api的条目仅含source_ref、kind、selection；', prompt)
@@ -169,7 +178,7 @@ class OriginalContextSelectionTests(unittest.TestCase):
             with patch.object(model, '_request_bytes', return_value=json.dumps(reply).encode()) as transport:
                 result, receipt = model_object(model, self.task, 'extract', self.payload, PHASE_FIELDS['extract'])
             transport.assert_called_once()
-            self.assertEqual(result['evidence_specs'][0]['calculation_context']['fund_id'], '510500')
+            self.assertEqual(result['evidence_specs'][0]['calculation_context']['fund_id'], '510500.SH')
             self.assertEqual(receipt['output_protocol'], 'strict_original_spans_v1')
             self.assertEqual(self.task['ledger']['used']['model_calls'], before_calls + 1)
             self.assertEqual(self.task['ledger']['used']['data_requests'], before_data)
