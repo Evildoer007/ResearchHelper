@@ -1,18 +1,26 @@
 """Observation dates and literal reporting periods have separate evidence."""
 import copy
 import importlib
-import json
-from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-from researchhelper.contracts import ContractError
+from researchhelper.contracts import ContractError, fingerprint
+from tests.test_financial_value_reference import archived_financial_original
 from researchhelper.evidence import validate_current_snapshot
 from researchhelper.output_schema import (financial_reference_output_schema, financial_reference_prompt,
     financial_reporting_period_choices, decode_financial_references)
 fixtures = importlib.import_module((__package__+'.' if __package__ else '')+'test_financial_reference_protocol')
 
-ROOT = Path(__file__).resolve().parents[1]
+def retained_period_proposal():
+    fixture, _ = archived_financial_original()
+    task, bundle = copy.deepcopy((fixture['task'], fixture['reading']))
+    originals = fixture['host_proposal']['evidence_specs']
+    excerpts = copy.deepcopy([item for item in originals if not item.get('calculation_context')][:6])
+    for excerpt in excerpts:
+        excerpt['period'] = '2026年1-6月'
+    choice = next(item for item in financial_reporting_period_choices(task, bundle['views'])
+                  if item['period'] == '2026年半年度')
+    return task, bundle, excerpts, copy.deepcopy(fixture['financial_specs']), choice
 
 
 class FinancialTextPeriodReferenceTests(unittest.TestCase):
@@ -114,68 +122,49 @@ class FinancialTextPeriodReferenceTests(unittest.TestCase):
         self.wire['text_quotes'][0]['id'] = self.wire['financial_cells'][0]['id']
         with self.assertRaises(ContractError): self.decode()
 
-    def test_actual_failed_batch_is_still_rejected_without_explicit_new_period_choices(self):
+    def test_unlocated_free_form_period_is_rejected_on_retained_original(self):
         from researchhelper.reasoning import validate_model_specs
-        path = ROOT/'result/acceptance/one-sentence-research-t_i59ukp/task.json'
-        before = path.read_bytes()
-        task = json.loads(before)
-        specs = copy.deepcopy(task['reasoning_state']['rejected_extraction']['proposed_specs'])
-        with self.assertRaisesRegex(ContractError, '财务所属期间'):
-            validate_model_specs(task, specs)
-        self.assertEqual(path.read_bytes(), before)
 
-    def test_new_explicit_header_choices_validate_the_real_sources_without_reopening_study(self):
+        task, _, excerpts, amounts, _ = retained_period_proposal()
+        before = fingerprint(task)
+        with self.assertRaisesRegex(ContractError, '财务所属期间'):
+            validate_model_specs(task, amounts + excerpts)
+        self.assertEqual(fingerprint(task), before)
+
+    def test_explicit_header_choice_preserves_original_amounts_and_uses_read_sources(self):
         from researchhelper.reasoning import validate_model_specs
         from researchhelper.source_reader import validate_read_specs
-        path = ROOT/'result/acceptance/one-sentence-research-t_i59ukp/task.json'
-        before = path.read_bytes()
-        task = json.loads(before)
-        views = task['reasoning_state']['reading']['bundle']['views']
-        choice = next(item for item in financial_reporting_period_choices(task, views)
-                      if item['period']=='2026年半年度')
-        specs = copy.deepcopy(task['reasoning_state']['rejected_extraction']['proposed_specs'])
-        original_numbers = [copy.deepcopy(item) for item in specs if item.get('calculation_context')]
-        # This is an explicit new test proposal, not production auto-repair or
-        # a claim that the rejected free-form periods were already verified.
-        changed = []
-        for item in specs:
-            if item['period']=='2026年1-6月':
-                item['period'] = choice['period']
-                item['reporting_period_basis'] = copy.deepcopy(choice['basis'])
-                changed.append(item['id'])
-        self.assertEqual(len(changed), 6)
-        validate_model_specs(task, specs)
-        validate_read_specs(task, specs, task['reasoning_state']['reading']['bundle'])
-        self.assertEqual([item for item in specs if item.get('calculation_context')], original_numbers)
+
+        task, bundle, excerpts, amounts, choice = retained_period_proposal()
+        before = fingerprint((task, bundle, amounts))
+        self.assertEqual(len(excerpts), 6)
+        for excerpt in excerpts:
+            excerpt['period'] = choice['period']
+            excerpt['reporting_period_basis'] = copy.deepcopy(choice['basis'])
+        validate_model_specs(task, amounts + excerpts)
+        validate_read_specs(task, amounts + excerpts, bundle)
         self.assertFalse(task['evidence'])
-        self.assertEqual(task['status'], '失败')
-        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(fingerprint((task, bundle, amounts)), before)
 
     def test_unread_period_basis_is_rejected_even_when_the_original_quote_exists(self):
         from researchhelper.source_reader import validate_read_specs, ReadingAnchorError
-        path = ROOT/'result/acceptance/one-sentence-research-t_i59ukp/task.json'
-        before = path.read_bytes()
-        task = json.loads(before)
-        bundle = copy.deepcopy(task['reasoning_state']['reading']['bundle'])
-        choice = next(item for item in financial_reporting_period_choices(task, bundle['views'])
-                      if item['period']=='2026年半年度')
-        spec = copy.deepcopy(next(item for item in task['reasoning_state']['rejected_extraction']['proposed_specs']
-                                  if item['id']=='tq_ocf_reason'))
+
+        task, bundle, excerpts, _, choice = retained_period_proposal()
+        before = fingerprint(task)
+        spec = excerpts[0]
         spec['period'] = choice['period']
         spec['reporting_period_basis'] = copy.deepcopy(choice['basis'])
         self.assertNotIn(choice['basis']['part'],
                          (spec['record_locator']['part'], spec['record_locator']['period_part']))
         for view in bundle['views']:
-            if view['id']==choice['basis']['artifact_id']:
-                view['parts'] = [part for part in view['parts'] if part['locator']!=choice['basis']['part']]
-        # Isolate the per-anchor boundary. The full, unmodified real bundle is
-        # independently exercised above; this deliberately edited bundle is
-        # not represented as a valid reading receipt.
+            if view['id'] == choice['basis']['artifact_id']:
+                view['parts'] = [part for part in view['parts'] if part['locator'] != choice['basis']['part']]
+        # Exercise the anchor check separately from the earlier reading-signature check.
         with patch('researchhelper.source_reader.validate_reading'):
             with self.assertRaises(ReadingAnchorError) as error:
                 validate_read_specs(task, [spec], bundle)
         self.assertEqual(error.exception.diagnostic['field'], 'reporting_period_basis')
-        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(fingerprint(task), before)
 
     def test_multi_original_prompt_keeps_each_sources_period_choices_and_version(self):
         batch = importlib.import_module((__package__+'.' if __package__ else '')+'test_original_batch_protocol')
