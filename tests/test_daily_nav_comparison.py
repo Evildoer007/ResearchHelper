@@ -96,7 +96,7 @@ class DailyNavComparisonTests(unittest.TestCase):
         old = next(item for item in knowledge.catalog() if item['id'] == 'rh_k_nav_premium')
         self.assertEqual(old['version'], 1)
 
-    def test_rendering_keeps_two_original_values_as_a_table_not_a_fake_path(self):
+    def test_rendering_keeps_two_original_values_in_a_table_on_one_valuation_day(self):
         records = copy.deepcopy(self.records)
         records['price']['value'], records['nav']['value'] = 1.02, 1
         calculation = dict(id='synthetic_daily', method=METHOD, inputs={'price':1.02,'nav':1},
@@ -104,6 +104,9 @@ class DailyNavComparisonTests(unittest.TestCase):
             output=calculate(METHOD, dict(price=1.02, nav=1), self.parameters))
         figure = research_figures(dict(evidence=list(records.values()), calculations=[calculation]))['synthetic_daily']
         self.assertEqual(figure['presentation'], 'table')
+        self.assertEqual(figure['categories'], ['收盘价', '该估值日官方单位净值'])
+        self.assertEqual(figure['groups'][0]['indices'], [0, 1])
+        self.assertEqual(figure['periods'], ['2026-06-30'])
         self.assertEqual([row['value'] for row in figure['rows']], [1.02, 1])
         self.assertIn('2026-06-30', figure['basis'])
         self.assertIn('<mfrac>', METHOD_NOTATION[METHOD][1])
