@@ -101,9 +101,15 @@ class DraftArgumentStructureTests(unittest.TestCase):
         content = compose(task); before = canonical(content)
         figures = logic_figure_plan(content)
         self.assertTrue(any(spec.get('coverage_kind') == 'mechanism' for spec in figures))
-        self.assertTrue(any(spec.get('coverage_kind') == 'numeric' for spec in figures))
+        self.assertFalse(any(spec.get('coverage_kind') == 'numeric' for spec in figures))
         for profile in ('standard', 'detailed'):
-            tree = html.document_fromstring(design(content, ROOT, profile=profile)['html'])
+            rendered = design(content, ROOT, profile=profile)
+            tree = html.document_fromstring(rendered['html'])
+            if profile == 'standard':
+                reading = tree.get_element_by_id('logic-1')
+                self.assertEqual(rendered['document']['figure_coverage']['logic-1']['status'], 'numeric_text')
+                self.assertEqual(set(reading.xpath('.//*[@data-calculation-ref]/@data-calculation-ref')), {'A1', 'A2'})
+                self.assertFalse(reading.xpath('.//table'))
             main = tree.xpath('//main')[0].text_content()
             for sentence in report['logics'][0]['argument'].values():
                 self.assertIn(sentence, main)
