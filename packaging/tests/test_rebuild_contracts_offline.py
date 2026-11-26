@@ -217,25 +217,70 @@ class RuntimeTests(unittest.TestCase):
         self.assertFalse(result["theses"])
 
     def test_arbitrary_host_research_reuses_engine(self):
-        task = self.agent.create("核查原文公开事实", entry="事件", intent="验证观点", cutoff=CUTOFF)
-        item = evidence("h1", "合成事件", "原文定义已核验。")
-        host_result = {"evidence": [item], "answers": {"q1": {"answer": "已确认原文定义。", "refs": ["h1"]}},
-                       "theses": [{"title": "原文定义已确认", "judgment": "支持", "support": ["h1"], "counter": [],
-                                   "investment_meaning": "仅核查事实，不形成投资机会。", "limitation": "合成材料"}]}
-        result = self.agent.start(task["id"], host_result)
-        self.assertEqual(result["status"], "已完成")
+        question = '核查合成事件原文中的定义。'
+        task = self.agent.create(question, entry='事件', intent='验证观点', objects=['合成事件'], cutoff=CUTOFF,
+            questions=[dict(id='q1', question=question, kind='fact')])
+        text = '合成原文，仅用于软件核对。原文定义已核验。发布日期2026年7月19日。'
+        task = self.agent.add_material(task['id'], 'definition.txt', text.encode())
+        original = task['materials'][0]
+        anchor = dict(kind='material', artifact_id=original['id'], snapshot_hash=original['snapshot_hash'],
+                      part='段落1', quote=text)
+        spec = dict(id='h1', artifact_id=original['id'], object='合成事件', record_locator=dict(part='段落1'),
+            text='原文定义已核验。', period='2026-07-19', nature='已实现事实', unit='不适用',
+            question_ids=['q1'], published_at='2026-07-19', publication=dict(at='2026-07-19',
+                precision='日', timezone='Asia/Shanghai', certainty='已确认', basis='合成原件日期', basis_ref=anchor),
+            review=dict(question_ids=['q1'], allowed_natures=['已实现事实'],
+                        conditions=['只核对合成原文'], reason='逐字定位本任务原件'))
+        result = self.agent.start(task['id'], dict(evidence_specs=[spec],
+            answers={'q1': dict(answer='原文定义已核验。', refs=['h1'])}))
+        self.assertEqual(result['status'], '已完成', result.get('gaps'))
+        self.assertFalse(result['fixture'])
+        self.assertEqual(result['evidence'][0]['snapshot_hash'], original['snapshot_hash'])
+        self.assertEqual(result['questions'][0]['answer'], spec['text'])
+        self.assertTrue(result['delivery'])
+        self.assertEqual(result['ledger']['used']['model_calls'], 0)
+        self.assertEqual(result['ledger']['used']['data_requests'], 0)
 
     def test_host_calculation_is_not_fixture_dependent(self):
-        task = self.agent.create("比较两只基金的已披露年费率", entry="ETF", intent="比较对象", cutoff=CUTOFF)
-        fixture = get_case("etf")
-        records = fixture["evidence"]
-        host = {"evidence": records, "calculations": [fixture["calculation"]], "theses": fixture["claims"],
-                "answers": {"q1": {"answer": "费用差为-0.4个百分点，不代表收益优势。", "refs": [e["id"] for e in records]}}}
-        result = self.agent.start(task["id"], host)
-        self.assertEqual(result["status"], "已完成", result.get("error"))
-        self.assertFalse(result["synthetic"])
-        self.assertAlmostEqual(result["calculations"][0]["output"]["value"], -.4)
-        self.assertIn("费用差为-0.4", self.agent.export(task["id"])["html"])
+        method = 'fee_difference_v2'
+        question = '比较两份合成规则的管理费年费率，不推断收益。'
+        task = self.agent.create(question, entry='ETF', intent='比较对象', cutoff=CUTOFF,
+            objects=['ETF-A', 'ETF-B'], questions=[dict(id='q1', question=question,
+                                                      kind='comparison', method_needs=[method])])
+        specifications = []
+        for ident, fund, value in [('fee_a', 'ETF-A', .2), ('fee_b', 'ETF-B', .6)]:
+            text = f'合成规则，仅用于软件检查。{fund}，{fund}份额，2026年度规则。管理费按基金资产净值计提，年费率为{value}%/年。发布于2026-07-19。'
+            task = self.agent.add_material(task['id'], ident + '.txt', text.encode())
+            original = task['materials'][-1]
+            anchor = dict(kind='material', artifact_id=original['id'], snapshot_hash=original['snapshot_hash'], part='段落1', quote=text)
+            context = dict(fund_id=fund, share_class=fund+'份额', period='2026年度规则',
+                           fee_basis='net_assets', rate_period='annual', metric='management_fee')
+            specifications.append(dict(id=ident, artifact_id=original['id'], object=fund,
+                record_locator=dict(part='段落1'), text=text, period='2026年度规则', nature='合同政策条款',
+                question_ids=['q1'], raw_token=str(value), raw_value=value, value=value,
+                raw_unit='%/年', unit='%/年', conversion_factor=1, published_at='2026-07-19',
+                publication=dict(at='2026-07-19', precision='日', timezone='Asia/Shanghai', certainty='已确认', basis='原件日期', basis_ref=anchor),
+                calculation_context=context, calculation_context_basis={key: copy.deepcopy(anchor) for key in context},
+                review=dict(question_ids=['q1'], allowed_natures=['合同政策条款'], conditions=['仅比较同类同期间年费率'], reason='逐项定位原值与计费口径')))
+        host = dict(evidence_specs=specifications,
+            calculations=[dict(id='fees', method=method, inputs=dict(fee_a='fee_a', fee_b='fee_b'),
+                parameters=dict(unit='%/年', fee_kind='management_fee', period='2026年度规则'), question_ids=['q1'])],
+            answers={'q1': dict(refs=['fee_a', 'fee_b'], calculation_refs=['fees'], numeric_segments=dict(answer=[
+                dict(text='管理年费率差为'), dict(source='calculation', ref='fees', path='value', format='signed', digits=2),
+                dict(text='，不代表收益优势。')]))})
+        result = self.agent.start(task['id'], host)
+        self.assertEqual(result['status'], '已完成', result.get('gaps'))
+        self.assertFalse(result['fixture'])
+        calculation = result['calculations'][0]
+        self.assertEqual(calculation['method'], method)
+        self.assertAlmostEqual(calculation['output']['value'], -.4)
+        self.assertEqual(calculation['inputs'], dict(fee_a=.2, fee_b=.6))
+        self.assertEqual(len(calculation['input_versions']), 2)
+        report = self.agent.export(task['id'])
+        self.assertIn('管理年费率差为-0.4', report['html'])
+        self.assertEqual(report['content']['calculations'], result['calculations'])
+        self.assertEqual(result['ledger']['used']['model_calls'], 0)
+        self.assertEqual(result['ledger']['used']['data_requests'], 0)
 
     def test_report_rejects_cross_version_calculation_and_thesis(self):
         original = self.run_case("etf")
