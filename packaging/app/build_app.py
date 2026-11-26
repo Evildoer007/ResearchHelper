@@ -224,6 +224,8 @@ def macos(output=None, *, pdf_renderer=None):
     progress('App 4/5', '校验并复制同系列原生图标')
     shutil.copyfile(icons['icns'], resources / "ResearchHelper.icns")
     shutil.copyfile(icons['png'], resources / "ResearchHelperDock.png")
+    shutil.copyfile(icons['dark_icns'], resources / "ResearchHelper-dark.icns")
+    shutil.copyfile(icons['dark_png'], resources / "ResearchHelperDockDark.png")
     info = {"CFBundleName": "ResearchHelper", "CFBundleDisplayName": "ResearchHelper", "CFBundleIdentifier": "io.researchhelper.app",
             "CFBundleExecutable": "ResearchHelper", "CFBundlePackageType": "APPL", "CFBundleVersion": VERSION,
             "CFBundleShortVersionString": VERSION, "CFBundleIconFile": "ResearchHelper.icns", "NSHighResolutionCapable": True,
