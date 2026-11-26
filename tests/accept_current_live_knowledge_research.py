@@ -39,7 +39,7 @@ def selected_candidate():
 def verify_definition(task, report):
     """Verify the required answer, not just appended knowledge in HTML."""
     from researchhelper.contracts import fingerprint
-    from researchhelper.knowledge import ENTRIES
+    from researchhelper.knowledge import RETAINED_VERSIONS
     assert task['question'] == QUESTION and task['entry'] == 'ETF'
     assert task['status'] == '已完成'
     required = [item for item in task['questions'] if item['required']]
@@ -47,17 +47,33 @@ def verify_definition(task, report):
     assert task['questions'][0]['question'] == QUESTION
     assert not any(task.get(name) for name in ('source_records', 'materials', 'evidence', 'calculations', 'theses', 'tracking'))
     knowledge = next(item for item in task['knowledge']['entries'] if item['id'] == 'rh_k_etf_measures')
-    original = next(item for item in ENTRIES if item['id'] == knowledge['id'] and item['version'] == knowledge['version'])
+    original = RETAINED_VERSIONS.get((knowledge['id'], knowledge['version']))
     # Identity/version/hash must be authentic; a successful parser is not approval.
-    assert fingerprint(knowledge) == fingerprint(original)
+    assert original and fingerprint(knowledge) == fingerprint(original)
     combined = '\n'.join(item['answer'] for item in required)
     assert all(token in combined for token in ('市场价格', '单位净值', '总回报', '分配'))
     assert all(item.get('answer_scope') == 'general_definition' for item in required)
     assert all(knowledge['id'] in item.get('knowledge_needs', []) for item in required)
     assert knowledge['content'] in combined and knowledge['conditions'] in combined
-    assert combined in report or all(item['answer'] in report for item in required)
+    from lxml import html as dom
+    document = dom.document_fromstring(report)
+    papers = document.xpath('//main')
+    assert len(papers) == 1, '报告须有唯一正文'
+    paper = papers[0]
+    assert not paper.xpath('ancestor-or-self::*[@hidden or @aria-hidden="true"]'), '正文不可隐藏'
+    for node in paper.xpath('.//script|.//style|.//template|.//*[@hidden or @aria-hidden="true"]'):
+        if node.getparent() is not None:
+            node.getparent().remove(node)
+    normalize = lambda text: ''.join(text.split())
+    visible = normalize(paper.text_content())
+    for item in required:
+        sections = paper.xpath('.//article[@data-question-ref=$ident]', ident=item['id'])
+        assert sections and all(normalize(knowledge[field]) in normalize(sections[0].text_content())
+            for field in ('content', 'conditions', 'counterexample')), '必要答案须完整显示在正文'
+    assert normalize(knowledge['content']) in visible
     sources = [knowledge['source_reference'], *knowledge.get('additional_source_references', [])]
-    assert len(sources) >= 2 and all('href="' + source['url'] + '"' in report for source in sources)
+    links = set(document.xpath('//a[@href]/@href'))
+    assert len(sources) >= 2 and all(source['url'] in links for source in sources)
     assert not any(token in report for token in ('衍生品产品推荐', '合成示例'))
     return {'knowledge_id': knowledge['id'], 'knowledge_version': knowledge['version'],
             'knowledge_sha256': fingerprint(knowledge), 'public_source_count': len(sources),
