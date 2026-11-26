@@ -27,24 +27,32 @@ class NativeLaunchSequenceTests(unittest.TestCase):
             self.assertNotIn(operation, body)
 
     def test_validated_handshake_precedes_window_and_single_login_navigation(self):
-        body = function_body(self.source, "func startBackend()")
+        body = function_body(self.source, "func startBackend(")
         steps = [
-            'let address = message?["url"] as? String',
-            'url.scheme == "http", url.host == "127.0.0.1", url.port != nil',
-            "self.runtimeURL = url", "self.startupTimer?.invalidate()",
+            "try process.run()",
+            "ResearchHelperBackendStartup.decode",
+            "case .ready(let url)",
+            "guard process.isRunning",
+            "self.runtimeURL = url", "self.startupTimer?.invalidate()", "self.startupTimer = nil",
             'URLQueryItem(name: "app_startup", value: UUID().uuidString)',
             "self.window.makeKeyAndOrderFront(nil)",
-            "NSApp.activate(ignoringOtherApps: true)", "self.webView.load(",
+            "NSApp.activate(ignoringOtherApps: true)", "self.webView.load(URLRequest(url: launchURL?.url ?? url))",
         ]
         positions = [body.index(step) for step in steps]
         self.assertEqual(positions, sorted(positions))
-        self.assertEqual(body.count("self.webView.load("), 1)
+        self.assertEqual(body.count("self.webView.load(URLRequest(url: launchURL?.url ?? url))"), 1)
+        self.assertLess(body.index("if self.backendRecoveryPort != nil"),
+                        body.index('URLQueryItem(name: "app_startup"'))
         self.assertIn("!self.failed, !self.quitting", body)
+        self.assertIn("case .rejected(let message)", body)
+        self.assertIn("if let origin = self.runtimeURL", body[:body.index("try process.run()")])
 
     def test_timeout_and_early_errors_remain_visible_and_terminable(self):
-        startup = function_body(self.source, "func startBackend()")
+        startup = function_body(self.source, "func startBackend(")
         self.assertIn("withTimeInterval: 25", startup)
-        self.assertIn("self.stopBackend()", startup)
+        self.assertIn('self.backendStartupFailed("本地研究服务启动超时', startup)
+        recovery = function_body(self.source, "private func backendStartupFailed(")
+        self.assertLess(recovery.index("stopBackend()"), recovery.index("fail(message)"))
         for error in ("App资源不存在", "内置研究运行组件不存在", "内置运行组件无法启动",
                       "本地研究服务启动超时", "本地服务未返回有效启动状态"):
             self.assertIn(error, startup)
