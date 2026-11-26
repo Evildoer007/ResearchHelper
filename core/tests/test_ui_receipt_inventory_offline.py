@@ -21,8 +21,11 @@ class BrowserReceiptInventoryTests(unittest.TestCase):
         target.write_text(json.dumps({'status':status,'checks':[f'check-{i}' for i in range(count)]}))
 
     def run_reader(self):
-        program="import {browserProofs,summarizeProofs} from './tests/ui_receipts.mjs';console.log(JSON.stringify(summarizeProofs(await browserProofs(process.argv[1]))));"
-        return subprocess.run([NODE,'--input-type=module','-e',program,str(self.base)],
+        reader=ROOT/'products/app/tests/ui_receipts.mjs'
+        program=("import {pathToFileURL} from 'node:url';"
+            "const {browserProofs,summarizeProofs}=await import(pathToFileURL(process.argv[1]));"
+            "console.log(JSON.stringify(summarizeProofs(await browserProofs(process.argv[2]))));")
+        return subprocess.run([NODE,'--input-type=module','-e',program,str(reader),str(self.base)],
             cwd=ROOT,capture_output=True,text=True,timeout=15)
 
     def test_settings_proof_is_counted_and_identical_pointers_are_not(self):
