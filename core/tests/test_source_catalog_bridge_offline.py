@@ -95,27 +95,12 @@ class SourceCatalogBridgeTests(unittest.TestCase):
         self.assertFalse(model.outputs)
 
     def test_initial_directory_fixture_uses_no_metadata_extraction(self):
-        # Retain every old original/PDF, review, budget and saving assertion.
-        # Only remove the now-unused empty directory extraction response and
-        # update the number of real model dispatches from five to four.
-        import hashlib
-        from pathlib import Path
-        path = Path(filing_fixture.__file__)
-        before = path.read_bytes()
-        source = before.decode()
-        old_queue = 'outputs = [plan, {"evidence_specs": []},'
-        old_count = 'self.assertEqual(result["ledger"]["used"]["model_calls"], 5)'
-        self.assertEqual(source.count(old_queue), 1)
-        self.assertEqual(source.count(old_count), 1)
-        source = source.replace(old_queue, 'outputs = [plan,').replace(old_count,
-            'self.assertEqual(result["ledger"]["used"]["model_calls"], 4)')
-        namespace = {"__file__": str(path), "__name__": "catalog_bridge_fixture"}
-        exec(compile(source, str(path) + "[metadata phase fixture]", "exec"), namespace)
-        fixture = namespace["FilingWorkflowTests"]()
-        fixture.setUp()
+        # The canonical fixture now exercises the current four-call workflow.
+        # Do not rewrite a retained test's source or its assertions at runtime.
+        fixture = filing_fixture.FilingWorkflowTests()
         self.addCleanup(fixture.doCleanups)
+        fixture.setUp()
         fixture.test_model_selects_retained_directory_and_delivers_actual_pdf_fact()
-        self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), hashlib.sha256(before).hexdigest())
 
     def test_tampered_directory_is_not_executable_progress(self):
         record = self.catalog()
