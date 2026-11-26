@@ -7,7 +7,7 @@ from unittest.mock import patch
 from tests import ROOT
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, fingerprint
-from researchhelper.draft_sources import observations, source_context, source_issues, writing_context
+from researchhelper.draft_sources import SCOPE_VERSION, observations, source_context, source_issues, writing_context
 from researchhelper.engine import ResearchAgent
 
 POLICY='draft_quote_scope_version'
@@ -58,6 +58,22 @@ class DraftSequenceScopeTests(unittest.TestCase):
                          table=dict(ths_pe_ttm_stock=[98765,99999,21])))
         self.assertEqual([r['value'] for r in observations(self.task)],[21])
 
+    def test_separate_fields_on_the_same_dates_do_not_conflict(self):
+        self.task[POLICY] = SCOPE_VERSION
+        self.params['indipara'].append(dict(indicator='ths_pb_latest_stock',indiparams=[]))
+        days = ['2026-10-29','2026-10-30']
+        record = self.source(
+            dict(thscode='600519.SH',time=days,table=dict(ths_pe_ttm_stock=[20,21])),
+            dict(thscode='600519.SH',time=days,table=dict(ths_pb_latest_stock=[5,6])),
+            dict(thscode='600519.SH',time=['20261029'],table=dict(ths_pe_ttm_stock=[98765])),
+            dict(thscode='600519.SH',time=['2026-10-30'],table=dict(thscode=['600036.SH'],ths_pe_ttm_stock=[99999])),
+        )
+        facts = observations(self.task)
+        self.assertEqual([(row['period'],row['raw_value'],row['locator']['table']) for row in facts],
+            [('2026-10-30',21,0),('2026-10-29',5,1),('2026-10-30',6,1)])
+        self.assertTrue(source_issues(self.task)[0]['partial'])
+        self.assertEqual(record['hash'],fingerprint(record['snapshot']))
+
     def test_cutoff_applies_independently_of_the_requested_window(self):
         self.task['cutoff']='2026-10-29T23:00:00+08:00'
         self.source(dict(thscode='600519.SH',time=['2026-10-29','2026-10-30'],table=dict(ths_pe_ttm_stock=[20,98765])))
@@ -81,7 +97,7 @@ class DraftSequenceScopeTests(unittest.TestCase):
 
     def test_unknown_policy_or_boolean_cannot_silently_select_another_reader(self):
         self.source(dict(thscode='600519.SH',time=['2026-10-29'],table=dict(ths_pe_ttm_stock=[20])))
-        for value in (True,3,'2'):
+        for value in (True,SCOPE_VERSION+1,'2'):
             with self.subTest(value=value),self.assertRaises(ContractError):
                 observations(dict(self.task,**{POLICY:value}))
 
@@ -100,7 +116,7 @@ class DraftSequenceScopeTests(unittest.TestCase):
             agent=ResearchAgent(archive,ROOT,offline=True,draft_first=True)
             try:
                 self.task=agent.create('核对600519.SH已取得的PE读数',objects=['600519.SH'],cutoff=self.task['cutoff'])
-                self.assertEqual(self.task[POLICY],2)
+                self.assertEqual(self.task[POLICY],SCOPE_VERSION)
                 self.source(dict(thscode='600519.SH',time=['2026-10-29','2026-10-30','2026-11-02'],
                                  table=dict(ths_pe_ttm_stock=[20,21,98765],unexpected=[99999,99999,99999])))
                 retained=deepcopy(self.task['source_records']);archive.save(self.task)
