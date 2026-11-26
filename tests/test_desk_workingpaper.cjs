@@ -31,4 +31,51 @@ const draft={theses:[],draft_report:{conclusion:'不重复报告结论',logics:[
 html=render(draft,ctx);assert.match(html,/data-reading-key="draft-logic:0"/);assert.match(html,/有待检验/);assert.match(html,/未关联的取数/);
 assert.equal((html.match(/data-observation="draft:D1"/g)||[]).length,1);assert.equal((html.match(/data-observation="draft:D2"/g)||[]).length,1);assert.match(html,/>10<\/span>/);assert.match(html,/>20<\/span>/);
 assert.doesNotMatch(html,/不重复报告结论|策略逻辑/);assert.doesNotMatch(html,/已通过核验|已核验/);
-console.log('workingpaper: 5 scenarios passed');
+const originals={id:'DOC',version:2,materials:[
+  {id:'same',task_id:'DOC',research_version:2},{id:'previous',task_id:'DOC',research_version:1},{id:'foreign',task_id:'OTHER',research_version:2},
+],draft_report:{facts:[],logics:[{title:'合作条件',analysis:'项目需先完成验收。',source_refs:['same','same','previous','foreign']}]}};
+const frozen=JSON.stringify(originals);
+html=render(originals,ctx);
+assert.match(html,/引用原件/);
+assert.equal((html.match(/data-source="same"/g)||[]).length,1);
+assert.match(html,/data-source="same" data-source-task="DOC" data-source-version="2"/);
+assert.match(html,/previous、foreign未找到对应记录/);
+assert.doesNotMatch(html,/data-source="previous"|data-source="foreign"|<h3>数据对照/);
+assert.equal(JSON.stringify(originals),frozen);
+
+const withValue=structuredClone(originals);
+withValue.draft_report.logics[0].data_refs=['D1'];
+withValue.draft_report.facts=[{id:'D1',label:'验收项目数',raw_value:1,artifact_id:'same',period:'2026',unit:'项'}];
+html=render(withValue,ctx);
+assert.match(html,/data-draft-source="D1"/);
+assert.doesNotMatch(html,/data-source="same"|引用原件/);
+
+const excerpt={id:'TEXT',version:1,questions:[{id:'Q',question:'核对条款',answer:'原件载明须完成验收。',status:'已回答',refs:['E']}],
+  evidence:[{id:'E',text:'须完成验收',artifact_id:'A',record_locator:{part:'P1'}}],materials:[{id:'A',task_id:'TEXT',research_version:1}]};
+html=render(excerpt,ctx);
+assert.match(html,/<h3>材料摘录<\/h3>/);
+assert.match(html,/data-source="A" data-source-evidence="E" data-source-task="TEXT" data-source-version="1"/);
+assert.doesNotMatch(render({...excerpt,materials:[]},ctx),/data-source="A"/);
+const missing={id:'NAV',version:1,source_records:[{id:'A',source:'ifind',operation:'date_sequence'}],
+  draft_report:{facts:[{id:'D1',field:'ths_unit_nvnf_fund',axis_role:'time',raw_value:null,artifact_id:'A',period:'2026-10-14'},
+    {id:'D2',field:'ths_unit_nvnf_fund',axis_role:'time',raw_value:'--',artifact_id:'A',period:'2026-10-15'}],
+  logics:[{title:'净值记录',data_refs:['D1']}]}};
+html=render(missing,ctx);
+assert.match(html,/2026\.10\.14/);
+assert.equal((html.match(/data-draft-source="D1"/g)||[]).length,1);
+assert.equal((html.match(/data-draft-source="D2"/g)||[]).length,1);
+assert.doesNotMatch(html,/paper-excerpt|材料摘录/);
+
+const publicPaper={id:'PUBLIC',version:1,source_records:[{id:'A',task_id:'PUBLIC',research_version:1,
+  kind:'material',snapshot_hash:'frozen',snapshot:{parts:[{locator:'段落2',text:'𠮷符号。须备案。其余正文。'}]}}],
+  draft_report:{facts:[],logics:[{title:'公开原文',source_refs:['A'],document_excerpts:[
+    {source_ref:'A',snapshot_hash:'frozen',part_index:0,start:4,end:8}]}]}};
+html=render(publicPaper,ctx);
+assert.match(html,/<q>须备案。<\/q>/);
+assert.match(html,/data-draft-excerpt=".*?" data-source-task="PUBLIC" data-source-version="1"/);
+assert.match(html,/A，段落2/);
+assert.doesNotMatch(html,/其余正文|引用原件/);
+const moved=structuredClone(publicPaper);
+moved.source_records[0].snapshot_hash='changed';
+assert.doesNotMatch(render(moved,ctx),/须备案/);
+console.log('workingpaper: 10 scenarios passed');
