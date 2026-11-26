@@ -19,7 +19,6 @@ class CompletedArgumentFormatRecoveryTests(unittest.TestCase):
         self.fixture = fixture.ArgumentSupportWorkflowTests()
         self.fixture.setUp()
         self.addCleanup(self.fixture.doCleanups)
-        self.addCleanup(self.fixture.tearDown)
         self.task = self.fixture.task
         self.task.update(status='运行中', run_mode='model', argument_submission_recovery_version=1)
         self.task['ledger']['used'].update(model_calls=6, seconds=100)
@@ -137,7 +136,7 @@ class CompletedArgumentFormatRecoveryTests(unittest.TestCase):
             task = copy.deepcopy(self.task)
             if change=='closed': task['status']='部分完成'
             if change=='margin': task['ledger']['used']['seconds']=598
-            if change=='marker': task['reasoning_state']['argument_submission_recovery']={'status':'已派发'}
+            if change=='marker': task.setdefault('reasoning_state', {})['argument_submission_recovery']={'status':'已派发'}
             event = self.failure(task)
             attempt = dict(review_hash=support.review_request(task,self.proposal)['review_hash'])
             with self.subTest(change=change):
