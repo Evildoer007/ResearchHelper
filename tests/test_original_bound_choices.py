@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from tests import ROOT, test_original_number_references as fixtures
+from tests.legacy_replay_fixtures import ETF_CLOSE, ETF_NAV, ETF_VALUATION_DATE, listed_etf_task
 from researchhelper import original_choices as choices
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, calculation_context_contract, validate_calculation_context
@@ -29,12 +30,14 @@ class OriginalBoundChoiceTests(unittest.TestCase):
         self.wire = dict(version=5, binding_ref=self.found['binding_ref'], selections=[])
         price = copy.deepcopy(self.fixture.wire['selections'][0])
         price.pop('additional_contexts', None)
-        price['context_refs'] = {field:self.ref(field) for field in ('fund_id', 'share_class')}
+        price_shape = next(variant['properties'] for variant in self.schema['properties']['selections']['items']['anyOf']
+            if variant['properties']['kind']['enum'] == ['api'])
+        price['context_refs'] = {field:self.ref(field) for field in price_shape['context_refs']['properties']}
         nav = copy.deepcopy(self.fixture.wire['selections'][1])
         for field in ('number_ref', 'text_span', 'period', 'unit', 'unit_span', 'contexts', 'observation_anchor'):
             nav.pop(field, None)
         nav.update(kind='nav', number_ref=next(ident for ident, item in self.found['numbers'].items()
-            if item['raw_token'] == '2.3272'), unit_ref=next(iter(self.found['units'])),
+            if item['raw_token'] == ETF_NAV), unit_ref=next(iter(self.found['units'])),
             context_refs={field:self.ref(field) for field in ('fund_id', 'share_class', 'currency', 'valuation_date')})
         self.wire['selections'] = [price, nav]
 
@@ -58,9 +61,9 @@ class OriginalBoundChoiceTests(unittest.TestCase):
         specs = self.decode()['evidence_specs']
         facts = [candidate_evidence(self.task, next(s for s in self.task['source_records'] if s['id'] == spec['artifact_id']), spec)
                  for spec in specs]
-        self.assertEqual([item['value'] for item in facts], [2.344, 2.3272])
+        self.assertEqual([item['value'] for item in facts], [ETF_CLOSE, float(ETF_NAV)])
         validate_calculation_context(choices.METHOD, dict(price=facts[0], nav=facts[1]),
-            dict(unit='元', currency='CNY', price_kind='close', nav_kind='official', valuation_date='2026-06-30'),
+            dict(unit='元', currency='CNY', price_kind='close', nav_kind='official', valuation_date=ETF_VALUATION_DATE),
             context_contract=calculation_context_contract(self.task, choices.METHOD))
         self.assertEqual((self.task, self.views, self.wire), before)
         self.assertFalse(self.task['calculations'])
@@ -90,7 +93,8 @@ class OriginalBoundChoiceTests(unittest.TestCase):
     def test_changed_task_or_view_cannot_reuse_old_choices(self):
         task = dict(self.task, input_hash='changed')
         with self.assertRaises(ContractError): self.decode(task=task)
-        views = copy.deepcopy(self.views); views[1]['parts'][0]['text'] += '\nchanged'
+        views = copy.deepcopy(self.views)
+        next(view for view in views if view['kind']=='filing')['parts'][0]['text'] += '\nchanged'
         with self.assertRaises(ContractError): self.decode(views=views)
 
     def test_prompt_preserves_all_sources_and_explains_choices_are_not_approval(self):
@@ -105,12 +109,13 @@ class OriginalBoundChoiceTests(unittest.TestCase):
                 self.assertEqual(before['text'], ''.join(line[1] for line in after['indexed_lines']))
 
     def test_report_without_trading_code_does_not_get_an_invented_share_class(self):
-        path = ROOT / 'result/acceptance/one-sentence-research-rpshkcym/task.json'
-        before = path.read_bytes(); task = json.loads(before); task['nav_original_choice_version'] = 1
+        task = listed_etf_task(has_trading_code=False)
+        task.update(nav_original_choice_version=1, original_number_reference_version=1)
+        before = copy.deepcopy(task)
         found = choices.catalogue(task, extractable_source_views(task))
         self.assertTrue(found['numbers'])
         self.assertFalse(any(item['field'] == 'share_class' for item in found['contexts'].values()))
-        self.assertEqual(path.read_bytes(), before)
+        self.assertEqual(task, before)
 
     def test_legacy_and_unrelated_methods_keep_their_existing_grammar(self):
         legacy = dict(self.task); legacy.pop(choices.POLICY)
@@ -158,7 +163,7 @@ class OriginalBoundChoiceTests(unittest.TestCase):
             with patch.object(service, '_request_bytes', return_value=json.dumps(reply).encode()) as request:
                 result, receipt = model_object(service, self.task, 'extract', payload, PHASE_FIELDS['extract'])
             request.assert_called_once()
-            self.assertEqual(result['evidence_specs'][1]['raw_token'], '2.3272')
+            self.assertEqual(result['evidence_specs'][1]['raw_token'], ETF_NAV)
             self.assertEqual(receipt['output_protocol'], 'strict_original_spans_v1')
 
     def test_actual_responses_transport_decodes_bound_choices(self): self.transport(True)
