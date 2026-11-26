@@ -5,7 +5,8 @@ message still crosses the ordinary model, phase and evidence validators.
 """
 import json
 
-from .contracts import ContractError
+from .contracts import DuplicateJSONField, unique_json_object
+from .transport import TransportFailure
 
 PROTOCOL='deepseek_sse_v1'
 MAX_WIRE_BYTES=16*1024*1024
@@ -33,7 +34,7 @@ class DeepSeekStream:
 
     def reject(self,code='invalid_stream_response'):
         self.record['failure_code']=code
-        raise ContractError('模型流式响应未完整通过核验，不采用片段或自动重试')
+        raise TransportFailure(code, '模型流式响应未完整通过核验，不采用片段或自动重试')
 
     def progress(self):
         metrics={key:self.record[key] for key in DIAGNOSTIC_FIELDS}
@@ -88,8 +89,12 @@ class DeepSeekStream:
         if self.events>MAX_EVENTS:self.reject('stream_too_many_events')
         self.record['stream_events']=self.events
         try:
-            payload=json.loads(data.decode('utf-8'),parse_constant=_nonfinite_number)
-        except (UnicodeError,ValueError):self.reject('invalid_stream_encoding')
+            payload=json.loads(data.decode('utf-8'),parse_constant=_nonfinite_number,
+                               object_pairs_hook=unique_json_object)
+        except DuplicateJSONField:
+            self.reject('duplicate_response_field')
+        except (ValueError, RecursionError):
+            self.reject('invalid_stream_encoding')
         if not isinstance(payload,dict) or 'error' in payload:self.reject('stream_provider_error')
         for key in ('id','model'):
             value=payload.get(key)
