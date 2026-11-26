@@ -1,7 +1,5 @@
 """Actual retained bytes and hostile lineage variants; never resume a study."""
 import copy
-import hashlib
-import json
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -9,37 +7,44 @@ from unittest.mock import patch
 from tests import ROOT
 from researchhelper.analyzer import ResearchAnalyzer
 from researchhelper.archive import ResearchArchive
-from researchhelper.contracts import ContractError, fingerprint
+from researchhelper.contracts import ContractError
 from researchhelper.engine import ResearchAgent
 from researchhelper.knowledge import ResearchKnowledge
 from researchhelper.evidence import (candidate_code_references, candidate_evidence,
-    direct_code_reference, validate_provenance, CANDIDATE_CODE_LIMITATION,
-    snapshot_record, _record_current_acquisition)
+    direct_code_reference, validate_provenance, CANDIDATE_CODE_LIMITATION)
 from researchhelper.output_schema import api_extraction_output_schema, decode_api_extraction_output, _matches
 from researchhelper.planning import input_fingerprint
 from researchhelper.reasoning import evidence_contract, extractable_source_views
 from researchhelper.reports import compose
 
-RETAINED = ROOT/'result/acceptance/autonomous-data-phase-rs5b197h/task.json'
+from tests.market_observation_fixtures import (INDEX_CAPTURES, append_index_member_replay,
+    append_simulated_ifind_response, close_price_proposals, read_captures)
 
 
 class CandidateCodeObservationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.original_hash = hashlib.sha256(RETAINED.read_bytes()).hexdigest()
+        cls.original = INDEX_CAPTURES.read_bytes()
+        cls.samples = read_captures(cls.original, grouped=True)
 
     @classmethod
     def tearDownClass(cls):
-        if hashlib.sha256(RETAINED.read_bytes()).hexdigest() != cls.original_hash:
-            raise AssertionError('Closed index study was changed')
+        if INDEX_CAPTURES.read_bytes() != cls.original:
+            raise AssertionError('Retained index capture was changed')
 
     def setUp(self):
-        self.task = json.loads(RETAINED.read_text())
-        self.task['candidate_code_observation_version'] = 1
-        self.task['input_hash'] = input_fingerprint(self.task)
-        self.quote = self.task['source_records'][1]
-        self.spec = copy.deepcopy(self.task['host_result']['evidence_specs'][0])
-        self.reference = candidate_code_references(self.task, self.quote)[0]
+        with tempfile.TemporaryDirectory(prefix='rh-retained-index-') as folder:
+            agent = ResearchAgent(ResearchArchive(folder), ROOT, offline=True, require_argument_support=True)
+            try:
+                self.task = agent.create('核对上证50在2026年10月16日的成分名单及样本当日收盘价。',
+                    entry='指数', research_mode='current')
+            finally:
+                agent.close_runtime()
+        self.quote = append_index_member_replay(self.task, self.samples)
+        self.spec = close_price_proposals(self.task, self.quote)[0]
+        references = candidate_code_references(self.task, self.quote)
+        self.assertEqual(len(references), 1)
+        self.reference = references[0]
         self.spec['candidate_code_reference'] = self.reference
 
     def candidate(self):
@@ -47,7 +52,7 @@ class CandidateCodeObservationTests(unittest.TestCase):
 
     def test_raw_quote_keeps_value_unit_unknown_publication_and_no_name_mapping(self):
         item = self.candidate()
-        self.assertEqual((item['raw_value'], item['value'], item['raw_unit'], item['unit']), (1258.62, 1258.62, '元', '元'))
+        self.assertEqual((item['raw_value'], item['value'], item['raw_unit'], item['unit']), (1329, 1329, '元', '元'))
         self.assertIsNone(item['published_at'])
         self.assertEqual(item['object'], '600519.SH')
         self.assertEqual(item['identity']['mode'], 'candidate_provider_observation')
@@ -201,17 +206,10 @@ class CandidateCodeObservationTests(unittest.TestCase):
         payload = dict(errorcode=0, tables=[dict(table={
             '股票代码': ['600519.SH', '600519.SH'] if name_conflict else ['600519.SH'],
             '股票简称': ['贵州茅台', '另一名称'] if name_conflict else ['贵州茅台']})])
-        def retain(operation, params, response):
-            record = snapshot_record(task, 'ifind', operation, params, response)
-            event = dict(kind='data_requests', status='成功', batch=task['batch'],
-                fingerprint=record['request_hash'], transport_isolated=True,
-                network_request_started=True, network_worker_reaped=True)
-            task['ledger']['dispatches'].append(event)
-            _record_current_acquisition(task, record, event)
-            task['source_records'].append(record)
-            return record
-        retain('smart_stock_picking', dict(searchstring='消费行业股票', searchtype='stock'), payload)
-        quote = retain('cmd_history_quotation', self.quote['parameters'], self.quote['snapshot'])
+        append_simulated_ifind_response(task, 'smart_stock_picking',
+            dict(searchstring='消费行业股票', searchtype='stock'), payload)
+        quote = append_simulated_ifind_response(task, 'cmd_history_quotation',
+            self.quote['parameters'], self.quote['snapshot'])
         return task, quote
 
     def test_discovery_rows_use_the_same_explicit_observation_not_user_declaration(self):
