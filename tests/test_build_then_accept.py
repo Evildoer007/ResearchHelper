@@ -1,6 +1,8 @@
 """Build ordering, failed acceptance, isolation and actual offline report flow."""
+from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import patch
 import json,os,sys,threading,unittest
 from tests import ROOT
@@ -54,15 +56,75 @@ class BuildThenAcceptTests(unittest.TestCase):
         self.assertNotIn('one-sentence-research',acceptance.SKILL_WORKER)
         self.assertNotIn('DataSettings',acceptance.SKILL_WORKER)
     def test_all_app_cases_and_formats_with_an_isolated_offline_service(self):
+        from io import BytesIO
+        from pypdf import PdfReader
+        from researchhelper import artifact_exporter
         from researchhelper.service import make_server
+        from source_snapshot import digest
+
         with TemporaryDirectory() as folder:
             server=make_server(Path(folder)/'store',ROOT,offline=True,authentication=True,runtime_configurable=True,preset_accounts=True)
             worker=threading.Thread(target=server.serve_forever,daemon=True);worker.start()
             try:
-                rows=acceptance.accept_app_reports('http://127.0.0.1:'+str(server.server_port))
+                documents=Path(folder)/'html'
+                rows=acceptance.accept_app_reports('http://127.0.0.1:'+str(server.server_port), documents)
                 self.assertEqual([r['case'] for r in rows],list(acceptance.CASES));self.assertTrue(all(len(r['exports'])==10 for r in rows))
+                self.assertTrue(all(set(row['profile_dataset_sha256']) == set(acceptance.PROFILES) for row in rows))
+                acceptance.verify_report_parity(rows, rows)
+                source=documents/'etf.html'
+                with patch.object(artifact_exporter, 'sys', SimpleNamespace(platform='win32')):
+                    pdf, frozen=artifact_exporter.convert_saved_html(source, 'pdf', expected_sha256=digest(source))
+                self.assertEqual(frozen['conversion_engine'], 'reportlab')
+                self.assertEqual(acceptance.dataset_hash(frozen), rows[1]['profile_dataset_sha256']['standard'])
+                self.assertGreater(len(PdfReader(BytesIO(pdf)).pages), 0)
             finally:
                 server.shutdown();server.server_close();worker.join(timeout=3)
             self.assertFalse(worker.is_alive())
+
+    def test_windows_release_binds_both_report_profiles_and_the_same_skill(self):
+        from build_all import verify_release_binding
+        from shared_payload import runtime_identity
+        from source_snapshot import digest
+
+        identity = runtime_identity(ROOT)
+        matrix = [dict(case=case, dataset_sha256='a' * 64,
+            profile_dataset_sha256={'standard':'b' * 64,'detailed':'a' * 64},
+            exports=[dict(profile=profile,format=format,bytes=1,sha256='c' * 64)
+                     for profile in acceptance.PROFILES for format in acceptance.FORMATS])
+            for case in acceptance.CASES]
+        app = dict(runtime=identity,version=identity['version'],platform='windows',architecture='x64',
+            installer_sha256='d' * 64,installer_verified=True,webview2_prerequisite_verified=True,
+            report_acceptance=dict(version=1,status='passed',dataset_parity=True,fixtures_only=True,
+                app_reports=deepcopy(matrix),skill_reports=deepcopy(matrix),skill_sha256='e' * 64))
+        with TemporaryDirectory() as folder:
+            payload = Path(folder).resolve()
+            release = dict(runtime=identity,version=identity['version'],platform='windows',architecture='x64',
+                artifacts={'setup': {'sha256':'d' * 64},'skill': {'sha256':'e' * 64}},component_manifests={})
+
+            def bind(component, content):
+                file = payload / (component+'.json')
+                file.write_text(json.dumps(content))
+                release['component_manifests'][component] = dict(path=str(file),sha256=digest(file))
+
+            for component in ('skill','demo'):
+                bind(component,dict(runtime=identity,version=identity['version']))
+            bind('app',app)
+            verify_release_binding(release,payload,'windows',source_root=ROOT)
+
+            for problem in ('missing','other-skill','standard-only-difference','missing-csv'):
+                with self.subTest(problem=problem):
+                    modified = deepcopy(app)
+                    reports = modified['report_acceptance']
+                    if problem == 'missing':
+                        modified.pop('report_acceptance')
+                    elif problem == 'other-skill':
+                        reports['skill_sha256'] = 'f' * 64
+                    elif problem == 'standard-only-difference':
+                        reports['skill_reports'][0]['profile_dataset_sha256']['standard'] = 'f' * 64
+                    else:
+                        reports['app_reports'][1]['exports'].pop()
+                    bind('app',modified)
+                    with self.assertRaises(RuntimeError):
+                        verify_release_binding(release,payload,'windows',source_root=ROOT)
 
 if __name__=='__main__':unittest.main()
