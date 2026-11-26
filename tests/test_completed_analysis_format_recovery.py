@@ -1,26 +1,25 @@
 """One fresh submission for a known complete JSON failure, not network retry."""
 import copy
-import json
-from pathlib import Path
 import socket
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock,patch
 
+from tests.legacy_replay_fixtures import financial_task
+from researchhelper.argument_support import VERSION
 from researchhelper.contracts import ContractError,charge
 from researchhelper.engine import ResearchAgent
 from researchhelper.model import ModelCompletionError
 
-ROOT=Path(__file__).resolve().parents[1]
-RETAINED=ROOT/'result/acceptance/one-sentence-research-dy_uoz24/task.json'
-
-
 class CompletedAnalysisFormatRecoveryTests(unittest.TestCase):
     def setUp(self):
-        self.original=RETAINED.read_bytes();self.task=json.loads(self.original)
+        self.task = financial_task()
+        self.task['argument_support_contract'] = VERSION
         self.task['ledger']['used'].update(model_calls=6,seconds=200)
-        for key in ('final_delivery','numeric_resubmission'):
-            self.task['reasoning_state'].pop(key,None)
+        self.task['ledger']['dispatches'].append(dict(kind='model_calls', batch=self.task['batch'],
+            research_phase='analyze', status='失败', failure_code='structured_output_rejected',
+            provider_completion_status='completed', response_body_complete=True, finish_reason='stop',
+            structured_output_diagnostic=dict(json_error='expected_comma')))
         self.agent=ResearchAgent.__new__(ResearchAgent)
         self.agent.model=SimpleNamespace(supports_final_delivery=lambda:True,reason_final_analysis=lambda:None)
         self.agent._save_model_checkpoint=Mock()
@@ -33,11 +32,9 @@ class CompletedAnalysisFormatRecoveryTests(unittest.TestCase):
         guard=patch.object(socket.socket,'connect',side_effect=AssertionError('No network'))
         guard.start();self.addCleanup(guard.stop)
 
-    def tearDown(self):self.assertEqual(RETAINED.read_bytes(),self.original)
-
     def recover(self):return self.agent._recover_completed_analysis_format(self.task)
 
-    def test_actual_complete_json_failure_is_eligible_without_reopening_study(self):
+    def test_complete_json_failure_is_eligible(self):
         issue=self.agent._completed_analysis_format_issue(self.task)
         self.assertEqual(issue['json_error'],'expected_comma')
         self.assertFalse(issue['original_text_retained']);self.assertFalse(issue['automatic_repair'])
