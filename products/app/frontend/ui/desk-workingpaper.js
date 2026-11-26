@@ -8,16 +8,26 @@ global.RHDeskViews.workingpaper=function(task,ctx){
  const scoped=items=>D.scope(items,task);
  const {esc}=ctx,p=text=>text?'<p>'+esc(text)+'</p>':'';
  const questions=new Map(scoped(task.questions).map(item=>[item.id,item])),evidence=new Map(scoped(task.evidence).map(item=>[item.id,item])),usedQuestions=new Set(),usedFacts=new Set();
+ const originals=new Map(D.records(task).map(record=>[record.id,record]));
+ const excerpt=item=>'<div class="paper-excerpt">'+p(item.fact.text||item.raw||item.label)+
+  D.sourceCitation(originals.get(item.artifact),task,ctx,item)+'</div>';
+ const evidenceDisplay=(items,options)=>{
+  const groups=D.groups(items,task),tabular=new Set(groups.flatMap(group=>group.items.map(item=>item.key)));
+  return {data:groups.map(group=>D.grid(group,task,ctx,options)).join(''),
+   excerpts:items.filter(item=>!tabular.has(item.key)).map(excerpt).join(''),
+   sources:D.sourceNotes(items.filter(item=>tabular.has(item.key)),task,ctx)};
+ };
  const paper=D.paper(task),entries=[];
  if(scoped(paper?.logics).length){
   scoped(paper.logics).forEach((logic,index)=>{
-   const calculations=scoped(paper.calculations).filter(item=>list(logic.calculation_refs).includes(item.id));
-   const ids=new Set([...D.draftDataRefs(logic),...calculations.flatMap(item=>list(item.data_refs))]);ids.forEach(id=>usedFacts.add(id));
-   const facts=D.draftFacts(task).filter(item=>ids.has(item.id));
-   const missing=[...ids].filter(id=>!facts.some(item=>item.id===id)).concat(list(logic.calculation_refs).filter(id=>!calculations.some(item=>item.id===id)));
+   const {facts,calculations,sources,missing}=D.draftEvidence(task,logic);
+   facts.forEach(row=>usedFacts.add(row.id));
    const knowledgeEntries=D.knowledgeEntries(task,logic);
    const theory=knowledgeEntries.length?ctx.knowledgeView({entries:knowledgeEntries},{showPurpose:false}):'';
-   entries.push({kind:'draft',index,title:logic.title||'研究判断',displayHeading:logic.display_heading,judgment:logic.implication,analysis:p(logic.analysis),theory,notes:list(logic.reference_notes).filter(note=>typeof note==='string'),risk:logic.risk,items:D.observations(facts),calculations,missing});
+   const selectedQuotes=D.draftExcerpts(logic,sources);
+   const quotations=selectedQuotes.map(row=>D.draftExcerptHTML(row,task,ctx)).join('');
+   const cited=new Set(selectedQuotes.map(row=>row.record.id));
+   entries.push({kind:'draft',index,title:logic.title||'研究判断',displayHeading:logic.display_heading,judgment:logic.implication,analysis:p(logic.analysis),quotations,theory,notes:list(logic.reference_notes).filter(note=>typeof note==='string'),risk:logic.risk,items:D.observations(facts),calculations,sources:sources.filter(row=>!cited.has(row.id)),missing});
   });
  }
  {
@@ -39,9 +49,12 @@ global.RHDeskViews.workingpaper=function(task,ctx){
  const mixedKinds=new Set(entries.map(entry=>entry.kind)).size>1;
  const nav=entries.length>1?'<nav class="paper-navigation" aria-label="底稿内容">'+entries.map((entry,index)=>'<button type="button" data-paper-target="paper-logic-'+index+'" title="'+esc(entry.title)+'"><span>'+String(index+1)+'</span><span class="paper-navigation-title">'+esc(entry.title)+'</span></button>').join('')+'</nav>':'';
  const articles=entries.map((entry,index)=>{
-  const groups=D.groups(entry.items,task),data=groups.map(group=>D.grid(group,task,ctx,{compact:true})).join('');
+  const {data,excerpts,sources}=evidenceDisplay(entry.items,{compact:true});
   const roles=entry.kind==='thesis'?['support','counter'].map(role=>{const items=entry.items.filter(item=>entry[role].includes(item.fact.id));return items.length?'<section class="paper-evidence-role"><h3>'+(role==='support'?'支持证据':'反证证据')+'</h3>'+items.map(item=>p(item.fact.text||item.label)).join('')+D.sourceNotes(items,task,ctx)+'</section>':'';}).join(''):'';
-  const excerpts=entry.items.filter(item=>!D.numeric(item)).map(item=>'<div class="paper-excerpt">'+p(item.fact.text||item.raw||item.label)+'</div>').join('');
+  const linked=new Set(entry.items.map(item=>item.artifact));
+  const documents=list(entry.sources).filter(record=>!linked.has(record.id));
+  const citations=documents.length?'<section class="paper-originals"><h3>引用原件</h3><ul>'+
+   documents.map(record=>'<li>'+D.sourceCitation(record,task,ctx)+'</li>').join('')+'</ul></section>':'';
   const methods=entry.calculations.map(calc=>D.calcButton(calc,task,ctx,entry.kind==='draft')).join('');
   const status=entry.kind==='thesis'&&entry.entry.judgment?ctx.statusTag(entry.entry.judgment):'';
   const sharedHeading=entry.kind==='draft'&&typeof entry.displayHeading==='string'&&entry.displayHeading;
@@ -49,13 +62,17 @@ global.RHDeskViews.workingpaper=function(task,ctx){
   const theory=entry.theory?'<details class="paper-theory desk-disclosure"><summary>理论依据</summary>'+entry.theory+'</details>':'';
   const analysis=entry.analysis?'<section class="paper-reasoning"><h3>分析依据</h3>'+entry.analysis+'</section>':'';
   const missing=(entry.missing?.length?'<p class="paper-unlinked">'+esc('引用'+entry.missing.join('、')+'未找到对应记录。')+'</p>':'')+list(entry.notes).map(note=>'<p class="paper-unlinked">'+esc(note)+'</p>').join('');
-  const basis=data||excerpts||methods?'<aside class="paper-basis" aria-label="'+esc(entry.title)+'的数据与计算">'+(data||excerpts?'<section><h3>数据对照</h3>'+data+excerpts+'</section>':'')+(methods?'<section class="paper-calculations"><h3>计算结果</h3>'+methods+'</section>':'')+D.sourceNotes(entry.items,task,ctx)+missing+'</aside>':missing;
+  const basis=data||excerpts||methods||citations?'<aside class="paper-basis" aria-label="'+esc(entry.title)+'的依据">'+
+   (data||excerpts?'<section><h3>'+(data?'数据对照':'材料摘录')+'</h3>'+data+excerpts+'</section>':'')+
+   (methods?'<section class="paper-calculations"><h3>计算结果</h3>'+methods+'</section>':'')+
+   citations+sources+missing+'</aside>':missing;
   const footer=entry.risk?'<section class="paper-validation"><h3>风险与限制</h3>'+p(entry.risk)+'</section>':'';
-  return '<article class="paper-argument" id="paper-logic-'+index+'" tabindex="-1" data-reading-key="'+esc(entry.kind==='draft'?'draft-logic:'+entry.index:entry.kind+':'+entry.entry.id)+'"'+(entry.kind==='thesis'?' data-desk-thesis="'+esc(entry.entry.id)+'"':'')+' aria-labelledby="paper-title-'+index+'">'+title+'<div class="paper-layout"><div class="paper-narrative">'+(entry.judgment?'<p class="paper-judgment">'+esc(entry.judgment)+'</p>':'')+analysis+theory+roles+'</div>'+basis+'</div>'+footer+'</article>';
+  return '<article class="paper-argument" id="paper-logic-'+index+'" tabindex="-1" data-reading-key="'+esc(entry.kind==='draft'?'draft-logic:'+entry.index:entry.kind+':'+entry.entry.id)+'"'+(entry.kind==='thesis'?' data-desk-thesis="'+esc(entry.entry.id)+'"':'')+' aria-labelledby="paper-title-'+index+'">'+title+'<div class="paper-layout"><div class="paper-narrative">'+(entry.judgment?'<p class="paper-judgment">'+esc(entry.judgment)+'</p>':'')+analysis+(entry.quotations||'')+theory+roles+'</div>'+basis+'</div>'+footer+'</article>';
  }).join('');
  const remaining=paper?D.draftFacts(task).filter(item=>!usedFacts.has(item.id)):[];
- const remainingItems=D.observations(remaining);
- const extra=remaining.length?'<details class="paper-supplement desk-disclosure"><summary>'+(entries.length?'未关联的取数':'已取得的数据')+'</summary>'+D.groups(remainingItems,task).map(group=>D.grid(group,task,ctx)).join('')+remainingItems.filter(item=>!D.numeric(item)).map(item=>'<div class="paper-excerpt">'+p(item.fact.text||item.raw||item.label)+D.sourceNotes([item],task,ctx)+'</div>').join('')+D.sourceNotes(remainingItems.filter(D.numeric),task,ctx)+'</details>':'';
+ const remainingView=remaining.length?evidenceDisplay(D.observations(remaining)):null;
+ const extra=remainingView?'<details class="paper-supplement desk-disclosure"><summary>'+(entries.length?'未关联的取数':'已取得的数据')+'</summary>'+
+  remainingView.data+remainingView.excerpts+remainingView.sources+'</details>':'';
  const usedCalculations=new Set(entries.filter(entry=>entry.kind==='draft').flatMap(entry=>entry.calculations.map(calc=>calc.id)));
  const otherCalculations=scoped(paper?.calculations).filter(calc=>!usedCalculations.has(calc.id));
  const calculationSupplement=otherCalculations.length?'<details class="paper-supplement desk-disclosure"><summary>未关联的计算</summary>'+otherCalculations.map(calc=>D.calcButton(calc,task,ctx,true)).join('')+'</details>':'';
@@ -65,6 +82,13 @@ global.RHDeskViews.workingpaper=function(task,ctx){
  const corrections=list(task.report_corrections).filter(item=>item.task_id===task.id&&item.version===(task.delivery?.version??task.version)&&typeof item.reason==='string'&&item.reason.trim());
  const correctionNotes=corrections.length?'<section class="paper-corrections" aria-label="报告更正"><h3>报告更正</h3><ol>'+corrections.map(item=>'<li>'+p(item.reason)+'</li>').join('')+'</ol></section>':'';
  const empty=!entries.length&&!remaining.length&&!otherCalculations.length?'<div class="empty"><h2>底稿尚未形成</h2><p>研究形成后，在这里对照判断与依据。</p></div>':'';
- return '<section class="desk-view desk-workingpaper desk-workingpaper--notebook" aria-label="研究底稿"><header class="desk-view-heading paper-notebook-heading"><h2>研究底稿</h2>'+(entries.length?'<span class="desk-view-meta">'+entries.length+'条判断</span>':'')+'</header>'+correctionNotes+nav+articles+extra+calculationSupplement+unadopted+notice+empty+'</section>';
+ const summary=[task.version>1?'版本'+esc(task.version):'',entries.length?entries.length+'条判断':''].filter(Boolean).join('，');
+ const selection=task.research_methods;
+ const methods=selection?.binding?.id===task.id&&selection.binding.version===task.version&&selection.binding.input_hash===task.input_hash
+  ?list(selection.methods):[];
+ const usedMethods=methods.length?'<details class="desk-disclosure paper-research-methods" data-reading-key="research-methods"><summary>匹配的研究方法</summary><ul>'
+  +methods.map(row=>'<li><strong>'+esc(row.title)+'</strong><span>版本'+esc(row.version)+' · '+esc(row.reason)+'</span></li>').join('')
+  +'</ul></details>':'';
+ return '<section class="desk-view desk-workingpaper desk-workingpaper--notebook" aria-label="研究底稿"><header class="desk-view-heading paper-notebook-heading"><h2>研究底稿</h2>'+(summary?'<span class="desk-view-meta">'+summary+'</span>':'')+'</header>'+usedMethods+correctionNotes+nav+articles+extra+calculationSupplement+unadopted+notice+empty+'</section>';
 };
 })(window);
