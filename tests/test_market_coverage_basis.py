@@ -7,20 +7,38 @@ from tests import ROOT
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, fingerprint, missing_evidence_requirements
 from researchhelper.engine import ResearchAgent
-from researchhelper.market_calendar import BASIS_POLICY, NEED_SCOPE, covered_need_ids, scope_basis
+from researchhelper.market_calendar import BASIS_POLICY, FUNCTION, NEED_SCOPE, covered_need_ids, scope_basis
 from researchhelper.planning import input_fingerprint, normalize_questions, question_specs
 from researchhelper.reasoning import analysis_contract
 from researchhelper.argument_support import review_request, review_messages
 from researchhelper.output_schema import planning_output_schema
 from researchhelper.reports import compose
-
-SOURCE = ROOT / 'result/acceptance/one-sentence-research-2v83rmi9/task.json'
+from tests.test_market_calendar_coverage import append_calendar_fixture_record
 
 
 class MarketCoverageBasisTests(unittest.TestCase):
     def setUp(self):
-        self.original = SOURCE.read_bytes()
-        self.task = json.loads(self.original)
+        folder = tempfile.TemporaryDirectory(prefix='calendar-scope-')
+        self.addCleanup(folder.cleanup)
+        agent = ResearchAgent(ResearchArchive(folder.name), ROOT, offline=True, require_argument_support=True)
+        self.addCleanup(agent.close_runtime)
+        question = '核对600519.SH区间收盘价及交易日覆盖'
+        self.task = agent.create(question, entry='个股', objects=['600519.SH'], research_mode='current',
+            questions=[dict(id='q1', kind='fact', question=question,
+                evidence_needs=['实际收盘价', '独立交易日历核对报价日期覆盖'])])
+        self.task.update(synthetic=True, knowledge=dict(entries=[]))
+        self.task.pop(BASIS_POLICY)
+        self.task['input_hash'] = input_fingerprint(self.task)
+        self.days = ['2026-08-03','2026-08-04','2026-08-05','2026-08-06','2026-08-07','2026-08-10']
+        dates = dict(startdate=self.days[0], enddate=self.days[-1])
+        append_calendar_fixture_record(self.task, 'cmd_history_quotation', dict(**dates, codes='600519.SH',
+            indicators='close', functionpara=dict(Currency='RMB', CPS='1', Fill='Omit')),
+            dict(errorcode=0, tables=[dict(thscode='600519.SH',time=self.days,
+                table=dict(close=[100,105,110,115,120,117]))]))
+        append_calendar_fixture_record(self.task, 'get_trade_dates',
+            dict(**dates, marketcode='212001', functionpara=copy.deepcopy(FUNCTION)),
+            dict(errorcode=0, tables=dict(time=self.days)))
+        self.original = json.dumps(self.task)
         self.task[BASIS_POLICY] = 1
         self.question = self.task['questions'][0]
         self.calendar_need = self.question['evidence_needs'][1]
@@ -28,7 +46,7 @@ class MarketCoverageBasisTests(unittest.TestCase):
         self.task['input_hash'] = input_fingerprint(self.task)
 
     def tearDown(self):
-        self.assertEqual(SOURCE.read_bytes(), self.original)
+        self.assertEqual(self.task['source_records'], json.loads(self.original)['source_records'])
 
     def test_explicit_calendar_need_uses_actual_query_source_and_original_dates(self):
         basis = scope_basis(self.task)
@@ -37,7 +55,7 @@ class MarketCoverageBasisTests(unittest.TestCase):
         panel = basis['panels'][0]
         self.assertEqual(panel['query_source']['source'], 'ifind')
         self.assertEqual(panel['calendar_source']['operation'], 'get_trade_dates')
-        self.assertEqual(len(panel['calendar_original_dates']), 21)
+        self.assertEqual(panel['calendar_original_dates'], self.days)
         self.assertEqual(panel['calendar_original_dates'], panel['calendar_dates'])
 
     def test_no_keyword_inference_for_untyped_need(self):
@@ -51,9 +69,8 @@ class MarketCoverageBasisTests(unittest.TestCase):
         self.assertEqual([item['text'] for item in missing], [self.question['evidence_needs'][0]])
 
     def test_price_excerpt_cannot_claim_typed_calendar_requirement(self):
-        rows = copy.deepcopy(self.task['evidence'])
-        for item in rows:
-            item['applicability_review']['evidence_need_ids'] = {'q1': [fingerprint(self.calendar_need)]}
+        rows = [dict(question_ids=['q1'], text='收盘价117元', value=117,
+            applicability_review=dict(evidence_need_ids={'q1': [fingerprint(self.calendar_need)]}))]
         missing = missing_evidence_requirements(self.question, rows)
         self.assertIn(self.calendar_need, [item['text'] for item in missing])
 
@@ -80,11 +97,12 @@ class MarketCoverageBasisTests(unittest.TestCase):
         # not reclassify the closed study's needs and reuse its old approvals.
         task = json.loads(self.original)
         task[BASIS_POLICY] = 1
+        task['input_hash'] = input_fingerprint(task)
         analysis = analysis_contract(task)
         basis = scope_basis(task)
         self.assertEqual(analysis['market_coverage_scope_basis'], basis)
         self.assertEqual(analysis['execution']['market_coverage_basis_hash'], fingerprint(basis))
-        proposal = task['argument_support_reviews'][-1]['proposal']
+        proposal = dict(answers={'q1':dict(answer='按独立交易日历核对报价日期。', refs=[])}, theses=[])
         request = review_request(task, proposal)
         self.assertEqual(request['scope']['market_coverage_scope_basis'], basis)
         self.assertIn('get_trade_dates', json.dumps(review_messages(request, use_reference_units=True)))
