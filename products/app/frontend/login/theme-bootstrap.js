@@ -18,12 +18,21 @@
   } catch { /* Storage is optional during the unauthenticated first paint. */ }
   const systemDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
   const preferredTheme = preference === "auto" ? (systemDark ? "dark" : "light") : preference;
+  const syncFavicon = (theme) => {
+    const link = document.querySelector('link[rel="icon"]');
+    if (!link) return;
+    const current = link.getAttribute("href") || "app-icon.svg";
+    link.href = current.replace(/[^/]*$/, theme === "dark" ? "app-icon-dark.svg" : "app-icon.svg");
+  };
   root.dataset.themePref = preference;
   root.dataset.theme = root.dataset.themeScope === "fixed-light" ? "light" : preferredTheme;
+  syncFavicon(preferredTheme);
   // The standalone workspace uses this classic script without a module graph.
   // Let the full login controller own changes once it has initialized.
   window.matchMedia?.("(prefers-color-scheme: dark)").addEventListener("change", (event) => {
     if (window.ResearchHelperTheme || root.dataset.themePref !== "auto") return;
-    root.dataset.theme = root.dataset.themeScope === "fixed-light" ? "light" : event.matches ? "dark" : "light";
+    const theme = event.matches ? "dark" : "light";
+    root.dataset.theme = root.dataset.themeScope === "fixed-light" ? "light" : theme;
+    syncFavicon(theme);
   });
 })();
