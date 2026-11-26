@@ -19,7 +19,7 @@ from researchhelper.evidence import (
 )
 
 
-def synthetic_pdf(text=True):
+def synthetic_pdf(text=True, *, statement="Synthetic filing only."):
     writer = PdfWriter()
     page = writer.add_blank_page(width=300, height=300)
     if text:
@@ -27,7 +27,7 @@ def synthetic_pdf(text=True):
                                  NameObject('/BaseFont'): NameObject('/Helvetica')})
         page[NameObject('/Resources')] = DictionaryObject({NameObject('/Font'): DictionaryObject({NameObject('/F1'): font})})
         stream = DecodedStreamObject()
-        stream.set_data(b'BT /F1 12 Tf 20 250 Td (Synthetic filing only.) Tj ET')
+        stream.set_data(b'BT /F1 12 Tf 20 250 Td (' + statement.encode('ascii') + b') Tj ET')
         page[NameObject('/Contents')] = writer._add_object(stream)
     output = io.BytesIO()
     writer.write(output)
@@ -151,28 +151,24 @@ class FilingAcquisitionTests(unittest.TestCase):
                 self.assertTrue(record['catalog_entries'][0]['gaps'])
                 self.assertTrue(record['catalog_entries'][0]['downloadable'])
                 self.assertIsNone(record['catalog_entries'][0]['published_at'])
-                self.transport()
+                anchor = 'Published on 2026-09-29.'
+                self.transport(payload=synthetic_pdf(statement=anchor))
                 filing = self.collector.external(self.task, 'ifind', 'filing_original', self.selection(record), {})
                 self.task['source_records'].append(filing)
                 spec = {'id': 'e1', 'object': '600000.SH', 'published_at': '2026-09-30', 'period': self.row['reportDate'],
-                        'nature': '已实现事实', 'unit': '不适用', 'record_locator': {'part': '第1页'}, 'text': 'Synthetic filing only.', 'value': None}
+                        'nature': '已实现事实', 'unit': '不适用', 'record_locator': {'part': '第1页'}, 'text': anchor, 'value': None}
                 with self.assertRaises(ContractError):
                     candidate_evidence(self.task, filing, spec)
                 spec['publication'] = {'basis_ref': {'artifact_id': filing['id'], 'snapshot_hash': filing['hash'],
                                                     'kind': 'directory', 'field': 'published_at'}}
                 with self.assertRaises(ContractError):
                     candidate_evidence(self.task, filing, spec)
-                # A parser fixture isolates the publication-anchor contract;
-                # real PDF parsing is separately exercised above and below.
-                parsed = copy.deepcopy(filing['snapshot']['material'])
-                parsed['parts'] = [{'locator': '第1页', 'text': '合成原件，发布2026-09-29。'}]
-                filing['snapshot']['material'] = parsed
-                filing['hash'] = fingerprint(filing['snapshot'])
-                spec.update(published_at='2026-09-29', text='合成原件，发布2026-09-29。')
                 spec['publication'] = {'basis_ref': {'artifact_id': filing['id'], 'snapshot_hash': filing['hash'],
-                    'kind': 'material', 'part': '第1页', 'quote': spec['text']}}
-                with patch('researchhelper.evidence.extract_material', return_value=parsed):
-                    candidate = candidate_evidence(self.task, filing, spec)
+                    'kind': 'material', 'part': '第1页', 'quote': anchor}}
+                with self.assertRaises(ContractError):
+                    candidate_evidence(self.task, filing, spec)
+                spec['published_at'] = '2026-09-29'
+                candidate = candidate_evidence(self.task, filing, spec)
                 self.assertEqual(candidate['source_check'], '通过')
                 self.assertEqual(candidate['applicability_check'], '待核验')
 
@@ -228,6 +224,10 @@ class FilingAcquisitionTests(unittest.TestCase):
         self.assertLessEqual(factory.call_args.kwargs['timeout'], 30)
         spec = {'id': 'e1', 'object': '600000.SH', 'published_at': self.row['ctime'], 'period': self.row['reportDate'],
                 'nature': '已实现事实', 'unit': '不适用', 'record_locator': {'part': '第1页'}, 'text': 'Synthetic filing only.', 'value': None}
+        with self.assertRaisesRegex(ContractError, '首次公开时间缺少原始来源定位'):
+            candidate_evidence(self.task, filing, spec)
+        spec['publication'] = {'basis_ref': {'artifact_id': filing['id'], 'snapshot_hash': filing['hash'],
+                                             'kind': 'directory', 'field': 'published_at'}}
         candidate = candidate_evidence(self.task, filing, spec)
         self.assertEqual(candidate['source_check'], '通过')
         self.assertEqual(candidate['applicability_check'], '待核验')
