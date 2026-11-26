@@ -14,6 +14,7 @@ import re
 
 from .contracts import ContractError, canonical, fingerprint
 from .material_parser import verified_material
+from .pdf_material import pdf_reparse_replacements
 from .reasoning import original_sources, source_views
 
 READER_VERSION = 2
@@ -396,7 +397,9 @@ def _material(record):
 def _verify_original_text(record):
     material = _material(record)
     if material.get("status") != "已解析":
-        if material.get("parts"):
+        parts = material.get("parts", [])
+        if not isinstance(parts, list) or any(not isinstance(part, dict) or not isinstance(part.get("text"), str)
+                                              or part["text"].strip() for part in parts):
             raise ContractError("解析受限原件不能附带可读正文")
         return
     try:
@@ -415,10 +418,12 @@ def catalog(task, artifact_ids=None, *, offset=0, limit=24):
     if type(offset) is not int or offset < 0 or type(limit) is not int or not 1 <= limit <= 24:
         raise ContractError("原件目录分页范围无效")
     records = _records(task, artifact_ids)
+    retired = pdf_reparse_replacements(task)
     items = []
     for record in records[offset:offset + limit]:
         material = _material(record)
-        parts = material.get("parts", [])
+        replacement = retired.get(record['id'])
+        parts = [] if replacement else material.get("parts", [])
         item = {key: copy.deepcopy(record[key]) for key in ("id", "kind", "source", "content_version")}
         item.update(snapshot_hash=record.get("snapshot_hash", record["hash"]),
                     name=material.get("name", record.get("operation", "留存原件")),
@@ -429,9 +434,11 @@ def catalog(task, artifact_ids=None, *, offset=0, limit=24):
         item['reading_spans'] = [{'part': p['locator'], 'start': 0,
                                   'end': min(len(p['text']), MAX_SPAN)}
                                  for p in parts[:12] if p['text']]
-        if material.get('limitation'):
+        if replacement:
+            item.update(superseded_by=replacement, parse_limitation='已有可读的新摘录，旧摘录保留于原件记录。')
+        elif material.get('limitation'):
             item['parse_limitation'] = material['limitation']
-        if record['kind'] in ('material', 'filing'):
+        if record['kind'] in ('material', 'filing') and not replacement:
             item['request_binding'] = {'artifact_id': record['id'], 'snapshot_hash': item['snapshot_hash']}
             if type(task.get('original_period_selection_version')) is int and task['original_period_selection_version'] == 1:
                 from .financial_sources import original_period_anchors
@@ -720,7 +727,7 @@ def _try_read_expansion(item, expansion, prepared, views):
     return True
 
 
-def read(task, requests, expected_binding, artifact_ids=None, *, reader_version=None):
+def read(task, requests, expected_binding, artifact_ids=None, *, reader_version=None, prefer_current_pdf=True):
     """Select bounded spans and expose exact omissions without changing the archive."""
     reader_version = reader_version_for(task) if reader_version is None else reader_version
     if type(reader_version) is not int or reader_version not in SUPPORTED_READER_VERSIONS:
@@ -739,9 +746,11 @@ def read(task, requests, expected_binding, artifact_ids=None, *, reader_version=
     records = _records(task, artifact_ids)
     selection = _validate_selection(task, requests, expected_binding, records)
     by_id = {r["id"]: r for r in records}
+    full = {v["id"]: v for v in source_views(task, prefer_current_pdf=prefer_current_pdf) if v["id"] in by_id}
+    retired = {ident: view['superseded_by'] for ident, view in full.items() if 'superseded_by' in view}
     for selected in selection:
-        _verify_original_text(by_id[selected["artifact_id"]])
-    full = {v["id"]: v for v in source_views(task) if v["id"] in by_id}
+        if selected["artifact_id"] not in retired:
+            _verify_original_text(by_id[selected["artifact_id"]])
     views, coverage, limitations = [], [], []
     mixed_atomic = _mixed_atomic_enabled(task)
     atomic_ids = ({view['id'] for view in _mixed_atomic_views(task, records, list(full.values()))}
@@ -771,7 +780,7 @@ def read(task, requests, expected_binding, artifact_ids=None, *, reader_version=
         view = copy.deepcopy(full[record["id"]])
         parts = view.pop("parts")
         view["parts"] = []
-        request = selections.get(record["id"])
+        request = None if record["id"] in retired else selections.get(record["id"])
         method_terms=financial_reader_terms(task) if profile>=3 and request else []
         if profile>=4 and request:method_terms=fee_reader_terms(task)+method_terms
         concept_terms=concept_reader_queries(concept_rule,parts) if request else []
@@ -897,6 +906,9 @@ def read(task, requests, expected_binding, artifact_ids=None, *, reader_version=
                  "hit_counts": item["counts"], "candidate_counts": {k: len(v) for k, v in item["candidates"].items()},
                  "provided_candidate_counts": item["included_hits"]}
         coverage.append(entry)
+        if record['id'] in retired:
+            entry['superseded_by'] = retired[record['id']]
+            limitations.append((view.get('name') or '留存原件') + '已有可读的新摘录，旧摘录未进入本次读取。')
         if item.get('financial_data_groups'):
             entry['financial_data_reading'] = dict(version=1, financial_approval=False, completeness_approved=False,
                 groups=[dict(field=group['field'],parts=group['parts'],read_in_full=all(
@@ -941,6 +953,8 @@ def read(task, requests, expected_binding, artifact_ids=None, *, reader_version=
     bundle = {"schema": "researchhelper.source-reading", "reader_version": reader_version,
               "binding": binding(task), "selection": selection, "artifact_ids": [r["id"] for r in records],
               "views": views, "coverage": coverage, "limitations": limitations}
+    if retired:
+        bundle['pdf_reparse_selection'] = 1
     if mixed_atomic:
         bundle['mixed_atomic_api_reading'] = dict(version=1,
             allowed_artifact_ids=[record['id'] for record in records],
@@ -962,8 +976,12 @@ def read(task, requests, expected_binding, artifact_ids=None, *, reader_version=
 def validate_reading(task, bundle):
     if not isinstance(bundle, dict) or bundle.get("binding") != binding(task):
         raise ContractError("读取记录不属于当前任务、版本或输入")
+    policy = bundle.get('pdf_reparse_selection')
+    if policy is not None and (type(policy) is not int or policy != 1):
+        raise ContractError('PDF摘录选择版本未登记')
+    # Pre-existing receipts remain replayable against their original snapshots.
     rebuilt = read(task, bundle.get("selection"), bundle["binding"], bundle.get("artifact_ids"),
-                   reader_version=bundle.get('reader_version'))
+                   reader_version=bundle.get('reader_version'), prefer_current_pdf=policy == 1)
     if rebuilt != bundle:
         raise ContractError("读取范围、摘录或覆盖记录与原件不一致")
 
@@ -975,8 +993,12 @@ def retained_reading(task, reading_hash):
     matches = [record for record in task.get('source_readings', []) if record.get('reading_hash') == reading_hash]
     if len(matches) != 1:
         raise ContractError('宿主读取记录不存在、不唯一或不属于当前任务')
-    validate_reading(task, matches[0])
-    return copy.deepcopy(matches[0])
+    bundle = matches[0]
+    validate_reading(task, bundle)
+    retired = pdf_reparse_replacements(task)
+    if any(view['id'] in retired for view in bundle['views']):
+        raise ContractError('同一PDF已有可读的新摘录，请按原件目录读取新版。')
+    return copy.deepcopy(bundle)
 
 
 def validate_read_specs(task, specs, bundle):
