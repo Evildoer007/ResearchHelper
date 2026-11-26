@@ -12,6 +12,13 @@
   }
 
   const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  const exchangeEtfFields = {
+    etf_daily_quotes: {etf_exchange_close:'收盘价（元/份）',etf_exchange_turnover:'成交额（元）'},
+    etf_nav_history: {etf_exchange_nav:'单位净值（元/份）'},
+  };
+  const exchangeEtf = record => record.source==='official'&&Object.hasOwn(exchangeEtfFields,record.operation);
+  const eventIndexHistory = record => record.source==='official'&&
+    ['hsi_close_history','mainland_index_close_history'].includes(record.operation);
   const rawText = value => value === undefined ? '未提供' : value === null ? 'null' :
     typeof value === 'object' ? (Array.isArray(value) ? '非标量：数组，共'+value.length+'项，内容未展开' : '非标量：对象，内容未展开') : String(value);
 
@@ -26,7 +33,7 @@
     const records=Array.isArray(relatedRecords)?relatedRecords:[];
     const originalFor=entry=>{
       if(typeof record.task_id!=='string'||record.research_version!==version)return null;
-      return records.find(item=>item.source==='official'&&item.operation==='release_original'&&item.kind==='material'&&
+      return [...records].reverse().find(item=>item.source==='official'&&item.operation==='release_original'&&item.kind==='material'&&
         item.task_id===record.task_id&&item.research_version===version&&item.parameters?.catalog_id===record.id&&
         item.parameters?.release_id===entry.id&&item.snapshot?.official_origin?.id===entry.id&&
         item.snapshot?.status==='已解析'&&typeof item.id==='string'&&item.id);
@@ -41,7 +48,8 @@
       body.innerHTML=filtered.map(entry=>{
         const original=originalFor(entry);
         return '<tr><th scope="row">'+escapeHTML(entry.title)+'</th><td>'+(original?
-          '<button type="button" class="text" data-source="'+escapeHTML(original.id)+'" aria-label="查看原文：'+escapeHTML(entry.title)+'">查看原文</button>':'尚未下载')+'</td></tr>';
+          '<button type="button" class="text" data-source="'+escapeHTML(original.id)+'" data-source-task="'+escapeHTML(record.task_id)+
+          '" data-source-version="'+escapeHTML(version)+'" aria-label="查看原文：'+escapeHTML(entry.title)+'">查看原文</button>':'尚未下载')+'</td></tr>';
       }).join('');
       feedback.textContent=!rows.length?'本页未留存目录条目，不代表没有相关发布。':!filtered.length?'未找到匹配标题，请调整关键词。':
         '显示'+filtered.length+'/'+rows.length+'条，目录覆盖未核验。';
@@ -68,38 +76,141 @@
   function apiTables(record) {
     const snapshot = record.snapshot;
     if (!isObject(snapshot)) return null;
-    if (record.source === 'tinyshare') {
+    if (record.source === 'tinyshare' || record.source==='official'&&record.operation==='etf_pcf') {
       if (!Array.isArray(snapshot.data)) return null;
-      return [{name:'数据',length:snapshot.data.length,row:index => snapshot.data[index]}];
+      return [{name:'数据',length:snapshot.data.length,malformed:snapshot.data.some(row=>!isObject(row)),row:index => snapshot.data[index]}];
     }
-    if (record.source !== 'ifind' || !Array.isArray(snapshot.tables)) return null;
-    return snapshot.tables.map((table,index) => {
-      const columns = isObject(table?.table) ? Object.entries(table.table) : null;
-      const arrays = columns?.filter(([,value]) => Array.isArray(value)) || [];
-      return {name:'表' + (index + 1) + (typeof table?.thscode === 'string' ? ' ' + table.thscode : ''),
-        malformed:!columns || columns.some(([,value]) => !Array.isArray(value)) ||
-          new Set(arrays.map(([,values])=>values.length)).size>1,
-        length:arrays.reduce((length,[,values]) => Math.max(length,values.length),0),
-        row:position => columns && Object.fromEntries([
-          ...(Object.hasOwn(table,'thscode')?[['thscode',table.thscode]]:[]),
-          ...(Object.hasOwn(table,'time')||Object.hasOwn(snapshot,'time')?
-            [['time',Array.isArray(table.time??snapshot.time) ? (table.time??snapshot.time)[position] : (table.time??snapshot.time)]]:[]),
-          ...columns.map(([name,values]) => [name,Array.isArray(values) ? values[position] : values])])};
+    if(exchangeEtf(record)){
+      if(!Array.isArray(snapshot.rows)||snapshot.code!==record.parameters?.ts_code)return null;
+      const daily=record.operation==='etf_daily_quotes',labels=exchangeEtfFields[record.operation];
+      return [{name:daily?'ETF日行情':'ETF单位净值',length:snapshot.rows.length,
+        malformed:snapshot.rows.some(row=>!isObject(row)||typeof row.day!=='string'||!Number.isInteger(row.row)),
+        row:index=>{
+          const row=snapshot.rows[index];
+          if(!isObject(row))return null;
+          return daily ? {'证券代码':snapshot.code,'交易日':row.day,
+            [labels.etf_exchange_close]:row.close,[labels.etf_exchange_turnover]:row.turnover} :
+            {'证券代码':snapshot.code,'估值日':row.day,[labels.etf_exchange_nav]:row.nav};
+        }}];
+    }
+    if(eventIndexHistory(record)){
+      if(!Array.isArray(snapshot.rows))return null;
+      return [{name:'价格指数收盘',length:snapshot.rows.length,
+        malformed:snapshot.rows.some(row=>!isObject(row)||typeof row.date!=='string'||typeof row.close!=='string'),
+        row:index=>{
+          const row=snapshot.rows[index];
+          return isObject(row)?{'指数代码':row.code,'交易日':row.date,'收盘点位':row.close}:null;
+        }}];
+    }
+    if(record.source==='official'&&record.operation==='index_file'){
+      const rows=snapshot.parsed?.members;
+      if(!Array.isArray(rows))return null;
+      return [{name:typeof snapshot.parsed.sheet==='string'?snapshot.parsed.sheet:'成分记录',
+        length:rows.length,malformed:rows.some(row=>!isObject(row)),row:index=>rows[index]}];
+    }
+    if(record.source==='official'&&record.operation==='index_catalog'){
+      if(!Array.isArray(snapshot.entries))return null;
+      return [{name:'文件目录',length:snapshot.entries.length,malformed:snapshot.entries.some(row=>!isObject(row)),row:index=>snapshot.entries[index]}];
+    }
+    if (record.source !== 'ifind') return null;
+    const filing = record.operation==='report_query';
+    const roots = filing ? ['tables','data'].filter(key=>Object.hasOwn(snapshot,key)) : ['tables'];
+    if (roots.length!==1 || !Array.isArray(snapshot[roots[0]])) return null;
+    const rows=snapshot[roots[0]];
+    if(filing && rows.every(value=>!isObject(value?.table)))
+      return [{name:'公告目录',length:rows.length,malformed:rows.some(row=>!isObject(row)),row:index=>rows[index]}];
+    const market=['cmd_history_quotation','date_sequence'].includes(record.operation);
+    return rows.map((table,index) => {
+      if(filing && !isObject(table?.table))
+        return {name:'目录项'+(index+1),length:1,malformed:!isObject(table),row:()=>table};
+      // EDB stores aligned columns directly on the table, with one series ID.
+      // Market and financial APIs retain their nested column layout.
+      const economic = record.operation === 'edb_service' && isObject(table) && !Object.hasOwn(table,'table');
+      const columns = economic ? Object.entries(table).filter(([name])=>name!=='id') :
+        isObject(table?.table) ? Object.entries(table.table) : null;
+      const identifier = economic ? (Array.isArray(table.id)&&table.id.length===1 ? table.id[0] : table.id) : table?.thscode;
+      const ownTime=isObject(table)&&Object.hasOwn(table,'time');
+      const time=ownTime?table.time:snapshot.time;
+      const dated=market&&ownTime&&Array.isArray(time);
+      const singleDayQuote=dated&&time.length===1&&record.operation==='cmd_history_quotation';
+      const arrays=[],unbound=[];
+      for(const [name,value] of columns||[]){
+        if(Array.isArray(value))arrays.push([name,value]);
+        else if(singleDayQuote&&(value===null||typeof value==='string'||Number.isFinite(value)))arrays.push([name,[value]]);
+        else unbound.push([name,value]);
+      }
+      const lengths=arrays.map(([,value])=>value.length);
+      if(dated&&columns)lengths.push(time.length);
+      return {name:'表' + (index + 1) + (typeof identifier === 'string' ? ' ' + identifier : ''),
+        malformed:!columns || unbound.length>0 || new Set(lengths).size>1 ||
+          (economic && (typeof identifier!=='string'||!Array.isArray(table.time)||!Array.isArray(table.value))),
+        length:lengths.reduce((length,size)=>Math.max(length,size),0),
+        unbound,
+        context:position => [
+          ...(economic ? [['id',identifier]] : Object.hasOwn(table,'thscode')?[['thscode',table.thscode]]:[]),
+          ...(!economic&&(ownTime||Object.hasOwn(snapshot,'time'))?[['time',Array.isArray(time)?time[position]:time]]:[])],
+        row:position => columns && Object.fromEntries(arrays.map(([name,values])=>[name,values[position]]))};
     });
+  }
+
+  function apiLocation(record,locator,tables){
+    if(eventIndexHistory(record)){
+      if(!Array.isArray(record.snapshot?.rows)||locator.field!=='close')return null;
+      const row=record.snapshot.rows.findIndex(item=>item?.table===locator.table&&item?.row===locator.row);
+      return row>=0?{table:0,row,field:'收盘点位'}:null;
+    }
+    const single=record.source==='tinyshare'||record.source==='official';
+    const position={table:single?0:locator.table,row:locator.row,field:locator.field};
+    if(single&&locator.table!==undefined&&locator.table!==0)return null;
+    if(locator.kind==='exchange_etf_trading_cell'&&record.source==='official'){
+      if(exchangeEtf(record)){
+        const fields=exchangeEtfFields[record.operation];
+        if(!Object.hasOwn(fields,locator.field)||!Array.isArray(record.snapshot?.rows))return null;
+        position.row=record.snapshot.rows.findIndex(row=>row?.row===locator.row);
+        position.field=fields[locator.field];
+      }else if(record.operation==='etf_pcf'&&locator.field==='etf_exchange_nav'){
+        position.field='unit_nav';
+      }else return null;
+    }
+    if(record.source==='official'&&record.operation==='index_file'){
+      const parsed=record.snapshot?.parsed;
+      if(Object.hasOwn(locator,'member')){
+        if(Object.hasOwn(locator,'row')||Object.hasOwn(locator,'sheet')||Object.hasOwn(locator,'column'))return null;
+        position.row=locator.member;
+      }else if(Object.hasOwn(locator,'excel_row')){
+        const matches=(parsed?.members||[]).map((row,index)=>row?.excel_row===locator.excel_row?index:-1).filter(index=>index>=0);
+        if(matches.length!==1||Object.hasOwn(locator,'row'))return null;
+        position.row=matches[0];
+      }else{
+        if(locator.sheet!==parsed?.sheet||!Number.isInteger(locator.row)||locator.row<1)return null;
+        position.row=locator.row-1;
+        const member=parsed?.members?.[position.row];
+        if(locator.field!=='weight'||locator.column!==member?.weight_column||member?.excel_row!==locator.row+1)return null;
+      }
+    }
+    if(!Number.isInteger(position.table)||position.table<0||!tables?.[position.table]||
+       !Number.isInteger(position.row)||position.row<0||position.row>=tables[position.table].length)return null;
+    return position;
   }
 
   function apiStatus(record,tables) {
     const snapshot=record.snapshot;
     if (snapshot === undefined || snapshot === null) return '未保留原始快照，不能补造原值。';
     if (!isObject(snapshot)) return '返回结构异常：快照不是已登记的对象结构。';
-    const code=record.source==='ifind'?snapshot.errorcode:snapshot.code;
+    const code=exchangeEtf(record)?undefined:record.source==='ifind'?snapshot.errorcode:snapshot.code;
     if ((typeof code === 'number'||typeof code === 'string') && code !== 0 && code !== '0')
       return '业务失败，具体原因待按接口定义核查。';
+    const invalidLocations=record.catalog_coverage?.invalid_location_count;
+    if (record.source==='ifind' && record.operation==='report_query' && record.catalog_status==='部分成功待核验'
+        && Number.isInteger(invalidLocations) && invalidLocations>0 && Array.isArray(record.catalog_entries))
+      return '目录保留'+record.catalog_entries.length+'条可解析记录，另有'+invalidLocations+'处结构问题。';
     if ((code !== undefined && typeof code !== 'number' && typeof code !== 'string') || !tables || tables.some(table=>table.malformed) ||
         (record.source==='tinyshare'&&snapshot.data.some(row=>!isObject(row))))
       return '返回结构异常，不能作为已核验数据。';
     if(record.status==='返回结构异常')return '响应范围或结构未通过核验，原始记录仅供核对。';
     if (!tables.some(table=>table.length)) return '接口返回为空，未保留数据行。';
+    if(exchangeEtf(record))return '交易所快照已留存。';
+    if(eventIndexHistory(record))return '行情快照已留存。';
     return code===undefined ? '业务返回码未提供，原值待核验。' : '业务成功，原值待核验。';
   }
 
@@ -124,24 +235,46 @@
     return messages.length?'<p class="source-boundary source-boundary-issues" role="status">'+messages.map(escapeHTML).join(' ')+'</p>':'';
   }
 
-  function apiViewer(container,record,version,locator) {
+  function apiFieldRow(name,value,label=name,focused=false){
+    return '<tr'+(focused?' class="source-field-target" aria-label="证据定位字段"':'')+'><th scope="row" title="'+escapeHTML(name)+'">'+
+      escapeHTML(label)+(focused?'（定位字段）':'')+'</th><td>'+escapeHTML(rawText(value))+'</td></tr>';
+  }
+
+  function apiFieldTable(label,rows){
+    return '<div class="table-wrap" tabindex="0" aria-label="'+escapeHTML(label)+'"><table><thead><tr><th scope="col">字段</th>'+
+      '<th scope="col">原值</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+
+  function apiViewer(container,record,version,locator,initialTable=0) {
     const tables=apiTables(record),snapshot=isObject(record.snapshot)?record.snapshot:{};
     const message=snapshot.errmsg??snapshot.msg;
     const hasMessage=message!==undefined&&message!==null&&(typeof message!=='string'||message.trim()!=='');
-    let tableIndex=0,rowIndex=0;
+    let tableIndex=initialTable,rowIndex=0;
     const hasLocator=locator && Object.keys(locator).length>0;
     let invalid='';
+    const position=hasLocator?apiLocation(record,locator,tables):null;
     if(hasLocator){
-      tableIndex=record.source==='tinyshare' ? 0 : locator.table;
-      rowIndex=locator.row;
-      if (!Number.isInteger(tableIndex)||tableIndex<0||!tables?.[tableIndex]||
-          !Number.isInteger(rowIndex)||rowIndex<0||rowIndex>=tables[tableIndex].length||
-          (record.source==='tinyshare'&&locator.table!==undefined&&locator.table!==0)) invalid='来源定位无效：表或行不存在，未跳转到其他行。';
-      else if(locator.field!==undefined && (typeof locator.field!=='string'||!Object.hasOwn(tables[tableIndex].row(rowIndex)||{},locator.field)))
-        invalid='来源定位无效：指定字段不存在，未跳转到其他字段。';
+      if(!position)invalid='来源定位无效：表或行不存在，未跳转到其他行。';
+      else{
+        tableIndex=position.table;rowIndex=position.row;
+        const cells=tables[tableIndex].row(rowIndex);
+        if(position.field!==undefined&&(typeof position.field!=='string'||!Object.hasOwn(cells||{},position.field)||cells[position.field]===undefined))
+          invalid='来源定位无效：指定字段不存在，未跳转到其他字段。';
+      }
     }
-    const boundary=record.source==='ifind'&&record.operation==='edb_service'
-      ? '宏观原始序列。指标含义、单位、首次公开时间与修订版本未核验，不用于计算或投资判断。'
+    const firstReadable=tables?.findIndex(table=>table.length||table.unbound?.length)??-1;
+    const boundary=record.source==='official'&&record.operation==='etf_pcf'
+      ? '净值按估值日展示，清单公告日单独保留。'
+      : exchangeEtf(record) ? '交易所留存值，按原交易日或估值日显示。'
+      : eventIndexHistory(record) ? '按价格指数所在地的交易日显示收盘读数。'
+      : record.source==='official'&&record.operation==='index_file'
+      ? '成分记录保留原始权重和工作表行号，未重新归一化。'
+      : record.source==='official'&&record.operation==='index_catalog'
+      ? '文件目录用于定位原件，不代表历史成分或权重。'
+      : record.source==='ifind'&&record.operation==='report_query'
+      ? '公告目录用于定位原件，正文和首发时间须另行核对。'
+      : record.source==='ifind'&&record.operation==='edb_service'
+      ? '宏观原始序列。统计所属期与修订时间分别保留，不能代替首次公开时间。'
       : record.source==='ifind'&&record.operation==='data_pool'
       ? '指数原始名单。成分资格、完整性、权重及历史可得性未核验。'
       : record.source==='ifind'&&record.operation==='smart_stock_picking'&&record.financial_query_contract?.query_kind==='object_discovery'
@@ -151,18 +284,16 @@
       : '原始接口快照，浏览不批准证据，也不改变研究结论。';
     container.innerHTML='<p class="source-boundary">'+escapeHTML(boundary)+'</p>'+
       financialQueryIssues(record)+
+      (record.source==='official'&&record.operation==='etf_pcf'?'<dl class="source-api-summary"><dt>净值所属日</dt><dd>'+escapeHTML(snapshot.exchange_origin?.valuation_date||'未记录')+'</dd><dt>清单公告日</dt><dd>'+escapeHTML(snapshot.exchange_origin?.announcement_date||'未记录')+'</dd></dl>':'')+
       '<dl class="source-api-summary"><dt>获取时间</dt><dd>'+obtainedTime(record.obtained_at)+'</dd><dt>业务状态</dt><dd>'+escapeHTML(apiStatus(record,tables))+
       '</dd>'+(hasMessage?'<dt>接口消息</dt><dd>'+escapeHTML(rawText(message))+'</dd>':'')+'</dl>'+
       (record.source==='tinyshare'&&['income','cashflow'].includes(record.operation)?'<p class="source-boundary">单位、币种及历史版本未核验；报告期不等于公告日。此处仅展示原值，不作计算。</p>':'')+
       '<p class="source-api-feedback" role="status" aria-live="polite">'+escapeHTML(invalid)+'</p>'+
-      (invalid&&tables?.some(table=>table.length)?'<button type="button" data-source-browse>浏览留存记录</button>':'')+
+      (invalid&&firstReadable>=0?'<button type="button" data-source-browse>浏览留存记录</button>':'')+
       (!invalid&&tables?.length?'<div class="source-navigation source-api-navigation">'+
       (tables.length>1?'<label for="source-table">表<select id="source-table" data-choice aria-label="选择原始表">'+tables.map((table,index)=>'<option value="'+index+'">'+escapeHTML(table.name)+'</option>').join('')+'</select></label>':'')+
       '<button type="button" data-source-row="previous">上一行</button><label for="source-row">行<input id="source-row" type="number" min="1" inputmode="numeric" aria-describedby="source-api-location"></label><button type="button" data-source-row="next">下一行</button></div><p id="source-api-location" class="source-location" aria-live="polite"></p><div class="source-api-fields"></div>':'')+metadata(record,version);
-    if(invalid){container.querySelector('[data-source-browse]')?.addEventListener('click',()=>{
-      const firstTable=tables.findIndex(table=>table.length);
-      apiViewer(container,record,version,{table:firstTable,row:0});
-    });return;}
+    if(invalid){container.querySelector('[data-source-browse]')?.addEventListener('click',()=>apiViewer(container,record,version,{},firstReadable));return;}
     if(!tables?.length)return;
     const input=container.querySelector('#source-row'),select=container.querySelector('#source-table'),feedback=container.querySelector('.source-api-feedback');
     function render(){
@@ -173,13 +304,19 @@
       container.querySelector('[data-source-row="previous"]').disabled=rowIndex===0||!table.length;
       container.querySelector('[data-source-row="next"]').disabled=rowIndex+1>=table.length;
       const fields=container.querySelector('.source-api-fields');
-      fields.innerHTML=!table.length?'<p>当前表为空，未返回数据行。</p>':!isObject(cells)?'<p>返回结构异常：当前行不是字段对象。</p>':
-        '<div class="table-wrap" tabindex="0" aria-label="原始接口字段"><table><thead><tr><th scope="col">字段</th><th scope="col">原值</th></tr></thead><tbody>'+Object.entries(cells).map(([name,value])=>{
-          const focused=hasLocator&&tableIndex===(record.source==='tinyshare'?0:locator.table)&&rowIndex===locator.row&&name===locator.field;
+      if(!table.length)fields.innerHTML='<p>当前表没有可逐行浏览的数据。</p>';
+      else if(!isObject(cells))fields.innerHTML='<p>返回结构异常：当前行不是字段对象。</p>';
+      else{
+        const context=(table.context?.(rowIndex)||[]).map(([name,value])=>apiFieldRow(name,value,Object.hasOwn(cells,name)?'表级'+name:name));
+        const rows=Object.entries(cells).map(([name,value])=>{
+          const focused=position&&tableIndex===position.table&&rowIndex===position.row&&name===position.field;
           const suppliedLabel=record.source==='ifind'&&record.operation==='data_pool'?record.snapshot?.outParams?.[name]:null;
-          const label=typeof suppliedLabel==='string'&&suppliedLabel.trim()?suppliedLabel:name;
-          return '<tr'+(focused?' class="source-field-target" aria-label="证据定位字段"':'')+'><th scope="row" title="'+escapeHTML(name)+'">'+escapeHTML(label)+(focused?'（定位字段）':'')+'</th><td>'+escapeHTML(rawText(value))+'</td></tr>';
-        }).join('')+'</tbody></table></div>';
+          return apiFieldRow(name,value,typeof suppliedLabel==='string'&&suppliedLabel.trim()?suppliedLabel:name,focused);
+        });
+        fields.innerHTML=apiFieldTable('原始接口字段',context.concat(rows).join(''));
+      }
+      if(table.unbound?.length)fields.insertAdjacentHTML('beforeend','<details class="source-metadata source-unbound-fields"><summary>未对齐字段</summary>'+
+        apiFieldTable('未对齐的原始字段',table.unbound.map(([name,value])=>apiFieldRow(name,value)).join(''))+'</details>');
     }
     container.querySelectorAll('[data-source-row]').forEach(button=>button.addEventListener('click',()=>{rowIndex+=button.dataset.sourceRow==='next'?1:-1;feedback.textContent='';render()}));
     input.addEventListener('change',()=>{const value=Number(input.value);if(!Number.isInteger(value)||value<1||value>tables[tableIndex].length){input.setAttribute('aria-invalid','true');feedback.textContent='请输入1至'+tables[tableIndex].length+'的行号。';return}rowIndex=value-1;feedback.textContent='';render()});
@@ -191,9 +328,12 @@
 
   function metadata(record, version) {
     const snapshot=isObject(record.snapshot)?record.snapshot:{};
-    const code=record.source==='ifind'?snapshot.errorcode:snapshot.code;
+    const code=exchangeEtf(record)?undefined:record.source==='ifind'?snapshot.errorcode:snapshot.code;
+    const origin=record.retained_from_version;
+    const retained=record.research_version===version&&Number.isSafeInteger(origin)&&origin>0&&origin<version;
     return '<details class="source-metadata"><summary>内容版本与指纹</summary>' +
       '<dl><dt>研究版本</dt><dd>' + escapeHTML(version) + '</dd>' +
+      (retained?'<dt>沿用自研究版本</dt><dd>'+escapeHTML(origin)+'</dd>':'')+
       (code!==undefined?'<dt>业务返回码</dt><dd>'+escapeHTML(rawText(code))+'</dd>':'')+
       '<dt>内容版本</dt><dd>' + escapeHTML(record.content_version ?? '未记录') + '</dd>' +
       '<dt>内容指纹</dt><dd>' + escapeHTML(record.snapshot_hash || record.hash || '未记录') + '</dd>' +
@@ -293,8 +433,8 @@
     const boundary = String(material.extract_version || '').startsWith('html-')
       ? '静态HTML原文，未执行脚本。动态内容与显示状态未核验。'
       : '原件解析文本，浏览不等于已核验。图片与版面未包含在文本中。';
-    const layoutLimitation=parts.some(part=>part.pdf_layout_limited)&&typeof material.limitation==='string'?material.limitation:'';
-    container.innerHTML = '<p class="source-boundary">' + escapeHTML(boundary+layoutLimitation) + '</p>' +
+    const pdfLimitation=parts.some(part=>part.pdf_layout_limited||part.pdf_text_limited)&&typeof material.limitation==='string'?material.limitation:'';
+    container.innerHTML = '<p class="source-boundary">' + escapeHTML(boundary+pdfLimitation) + '</p>' +
       '<form class="source-search"><label class="sr-only" for="source-query">检索原件正文</label>' +
       '<input id="source-query" type="search" maxlength="80" placeholder="检索原文" autocomplete="off">' +
       '<button type="submit">查找</button><button type="button" data-source-find="previous" disabled>上一处</button>' +
@@ -322,7 +462,8 @@
         const markedEnd = Math.min(localHit + needle.length, excerpt.length);
         textNode.innerHTML = escapeHTML(excerpt.slice(0,localHit)) + '<mark>' +
           escapeHTML(excerpt.slice(localHit,markedEnd)) + '</mark>' + escapeHTML(excerpt.slice(markedEnd));
-      } else textNode.textContent = excerpt || '此页或段落未提取到文字。';
+      } else textNode.textContent = excerpt || (parts[partIndex].pdf_text_limited
+        ? '本页文字编码无法可靠读取。' : '此页或段落未提取到文字。');
       position.value = String(partIndex + 1);
       position.removeAttribute('aria-invalid');
       locationNode.textContent = parts[partIndex].locator + '，位置' + (partIndex + 1) + '/' + parts.length +
