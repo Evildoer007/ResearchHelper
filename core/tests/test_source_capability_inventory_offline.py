@@ -7,6 +7,7 @@ from researchhelper.contracts import ContractError, budget, fingerprint
 from researchhelper.evidence import (CAPABILITIES, FIELD_REGISTRY, IDENTITY_REQUEST_REGISTRY,
     FILING_REQUEST_REGISTRY, EvidenceCollector, data_request_contract, extract_material, snapshot_record)
 from researchhelper.financial_sources import FINANCIAL_REQUEST_REGISTRY
+from researchhelper import evidence as adapters
 from researchhelper.reasoning import source_views
 
 
@@ -18,7 +19,11 @@ class SourceCapabilityInventoryTests(unittest.TestCase):
         self.task["input_hash"] = fingerprint({"question": self.task["question"], "objects": self.task["objects"]})
 
     def test_public_operations_exactly_match_implemented_registries(self):
-        expected = set(FIELD_REGISTRY) | set(IDENTITY_REQUEST_REGISTRY) | set(FILING_REQUEST_REGISTRY) | set(FINANCIAL_REQUEST_REGISTRY)
+        expected = set().union(*(getattr(adapters, name) for name in (
+            'FIELD_REGISTRY', 'IDENTITY_REQUEST_REGISTRY', 'FILING_REQUEST_REGISTRY',
+            'FINANCIAL_REQUEST_REGISTRY', 'ECONOMIC_REQUEST_REGISTRY', 'SERIES_REQUEST_REGISTRY',
+            'INDEX_REQUEST_REGISTRY', 'FINANCIAL_QUERY_REGISTRY', 'IFIND_METADATA_REGISTRY',
+            'CALENDAR_REQUEST_REGISTRY', 'OFFICIAL_REQUEST_REGISTRY')))
         actual = [source + "." + operation["operation"] for source, capability in CAPABILITIES.items()
                   for operation in capability["registered_operations"]]
         self.assertEqual(set(actual), expected)
@@ -36,14 +41,14 @@ class SourceCapabilityInventoryTests(unittest.TestCase):
         collector = EvidenceCollector(offline=False)
         before = copy.deepcopy(self.task)
         with patch("researchhelper.evidence.urllib.request.urlopen") as transport:
-            for item in CAPABILITIES["ifind"]["documented_only"]:
+            for item in [*CAPABILITIES["ifind"]["documented_only"], {"operation": "unregistered_fixture_only"}]:
                 with self.subTest(operation=item["operation"]), self.assertRaisesRegex(ContractError, "未登记"):
                     collector.external(self.task, "ifind", item["operation"], {}, {"access_token": "FAKE_TOKEN"})
         transport.assert_not_called()
         self.assertEqual(self.task, before)
 
     def test_documented_only_cannot_create_a_new_registered_snapshot(self):
-        for item in CAPABILITIES["ifind"]["documented_only"]:
+        for item in [*CAPABILITIES["ifind"]["documented_only"], {"operation": "unregistered_fixture_only"}]:
             with self.subTest(operation=item["operation"]), self.assertRaisesRegex(ContractError, "未登记"):
                 snapshot_record(self.task, "ifind", item["operation"], {}, {"errorcode": 0, "tables": []})
 
@@ -53,7 +58,12 @@ class SourceCapabilityInventoryTests(unittest.TestCase):
         planned = {item["source"] + "." + item["operation"] for item in tools}
         public = {source + "." + item["operation"] for source, capability in CAPABILITIES.items()
                   for item in capability["registered_operations"]}
-        self.assertEqual(public, planned)
+        required = (set(FIELD_REGISTRY) | set(IDENTITY_REQUEST_REGISTRY) | set(FILING_REQUEST_REGISTRY)
+                    | set(FINANCIAL_REQUEST_REGISTRY)) - {'official.index_file', 'official.etf_pcf'}
+        self.assertTrue(required.issubset(planned))
+        self.assertTrue(planned.issubset(public))
+        self.assertTrue({'official.index_file', 'official.etf_pcf'}.isdisjoint(planned))
+        self.assertEqual(len(planned), len(tools))
         self.assertEqual(self.task, before)
 
     def test_financial_records_remain_raw_only_without_approval_or_credentials(self):
@@ -86,7 +96,11 @@ class SourceCapabilityInventoryTests(unittest.TestCase):
         self.assertEqual(views[0]["raw_response"], snapshot)
         self.assertEqual(views[0]["operation"], "basic_data_service")
         self.assertEqual(self.task, before)
-        self.assertNotIn("basic_data_service", CAPABILITIES["ifind"]["endpoints"])
+        # Registering the adapter must not upgrade an old raw-only record.
+        self.assertIn("basic_data_service", CAPABILITIES["ifind"]["endpoints"])
+        self.assertNotIn("source_receipt", self.task["source_records"][0])
+        self.assertNotIn("applicability_receipt", self.task["source_records"][0])
+        self.assertFalse(self.task.get("evidence"))
 
 
 if __name__ == "__main__":
