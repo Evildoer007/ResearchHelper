@@ -8,6 +8,9 @@ from researchhelper.artifact_exporter import export_report,data_rows
 from researchhelper.report_designer import design
 from researchhelper.contracts import canonical,ContractError
 from pypdf import PdfReader
+from tests.native_pdf_text import pdf_text_key
+
+CHARTS_BY_LOGIC = {"logic-1": 2, "logic-2": 1, "logic-3": 0}
 
 CONTENT=ROOT/'result/acceptance/one-sentence-research-vgjkyxq9/report.json'
 
@@ -22,7 +25,11 @@ class PublicationDeliveryTests(unittest.TestCase):
         self.assertGreater(len(detailed['document']['blocks']),len(standard['document']['blocks']))
         for profile in [standard,detailed]:
             self.assertTrue('report-toc' in profile['html'],'报告应使用券商样例的小目录');self.assertTrue('210mm' in profile['html'])
-            self.assertEqual(len([b for b in profile['document']['blocks'] if b['kind']=='chart']),3)
+            coverage=profile['document']['figure_coverage']
+            self.assertEqual({key: row['figures'] for key,row in coverage.items()}, CHARTS_BY_LOGIC)
+            self.assertEqual(coverage['logic-3']['status'], 'numeric_table')
+            self.assertEqual(len([block for block in profile['document']['blocks'] if block['kind']=='chart']),
+                             sum(CHARTS_BY_LOGIC.values()))
             for logic in self.content['draft']['logics']:self.assertIn(logic['analysis'],profile['html'])
             for risk in self.content['draft']['risks']:self.assertIn(risk,profile['html'])
     def test_five_real_files_without_network_and_exact_source_sidecars(self):
@@ -33,12 +40,15 @@ class PublicationDeliveryTests(unittest.TestCase):
                 self.assertEqual(json.loads(path.with_suffix('.json').read_text()),self.content)
                 if format=='pdf':
                     reader=PdfReader(path);self.assertGreater(len(reader.pages),0)
-                    text=''.join(page.extract_text() for page in reader.pages);self.assertIn('核心结论',text);self.assertIn('营业收入',text)
+                    text=pdf_text_key(''.join(page.extract_text() for page in reader.pages))
+                    self.assertIn('核心结论',text);self.assertIn('营业收入',text)
                     self.assertTrue(all(abs(float(page.mediabox.width)-595.276)<1 for page in reader.pages))
                 if format=='docx':
                     with zipfile.ZipFile(path) as archive:
                         xml=archive.read('word/document.xml').decode();self.assertIn('oMath',xml)
-                        self.assertIn('<m:f>',xml);self.assertEqual(len([n for n in archive.namelist() if n.startswith('word/media/')]),3)
+                        self.assertIn('<m:f>',xml)
+                        self.assertEqual(len([name for name in archive.namelist() if name.startswith('word/media/')]),
+                                         sum(CHARTS_BY_LOGIC.values()))
                 if format=='xlsx':
                     from openpyxl import load_workbook
                     book=load_workbook(path,data_only=False);self.assertEqual(book['研究数据'].max_row,11)
@@ -73,7 +83,7 @@ class PublicationDeliveryTests(unittest.TestCase):
     def test_csv_and_workbook_do_not_execute_source_strings(self):
         content=json.loads(CONTENT.read_text());content['draft']['facts'][0]['label']='=2+2'
         from researchhelper.artifact_exporter import _tabular
-        self.assertIn("'=2+2",_tabular(content,'csv').decode('utf-8-sig'))
+        self.assertIn(r"\=2+2",_tabular(content,'csv').decode('utf-8-sig'))
         from openpyxl import load_workbook
         book=load_workbook(io.BytesIO(_tabular(content,'xlsx')));self.assertEqual(book.active['B2'].data_type,'s')
     def test_legacy_html_export_is_not_overwritten_by_new_formats(self):
