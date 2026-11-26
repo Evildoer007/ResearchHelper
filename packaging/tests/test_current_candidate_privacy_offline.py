@@ -3,13 +3,15 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
+import tempfile
 import unittest
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'maintenance'))
-from candidate_acceptance import selected_candidate, verify_candidate
+from candidate_acceptance import selected_candidate, verify_candidate, verify_mounted_bundle
 PRIVATE_FILES = {'config.local.json', 'model-settings.json', 'source-settings.json',
                  'execution-policy.json', 'local-account.json', 'local-sessions.json',
                  'passwords.json', '.env'}
@@ -23,11 +25,33 @@ def allowed(relative):
             and not {'__pycache__', '.local', 'installation-backups', 'demo-backups', 'live-connectivity'}.intersection(path.parts))
 
 
-@unittest.skipUnless(os.environ.get('RESEARCHHELPER_CANDIDATE_RECEIPT'), 'Requires an explicitly built candidate')
+@unittest.skipUnless(os.environ.get('RESEARCHHELPER_CURRENT_RECEIPT') or os.environ.get('RESEARCHHELPER_CANDIDATE_RECEIPT'),
+                     'Requires an explicitly built candidate')
 class CurrentCandidatePrivacyTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.candidate = verify_candidate(selected_candidate(ROOT), ROOT)
+        current = os.environ.get('RESEARCHHELPER_CURRENT_RECEIPT')
+        if current:
+            sys.path.insert(0, str(ROOT/'packaging'))
+            from build_current import verify_current_build
+
+            cls.candidate = verify_current_build(current, ROOT)
+            if cls.candidate['platform'] != 'macos':
+                raise unittest.SkipTest('Requires a macOS image')
+            workspace = tempfile.TemporaryDirectory(prefix='rh-package-privacy-', dir=ROOT/'result/acceptance')
+            cls.addClassCleanup(workspace.cleanup)
+            mount = Path(workspace.name)/'disk'
+            mount.mkdir()
+            subprocess.run(['/usr/bin/hdiutil','attach',cls.candidate['artifacts']['dmg']['path'],
+                            '-readonly','-nobrowse','-noautoopen','-mountpoint',str(mount)],
+                           check=True,capture_output=True,timeout=60)
+            cls.addClassCleanup(subprocess.run, ['/usr/bin/hdiutil','detach',str(mount)],
+                                check=True,capture_output=True,timeout=60)
+            cls.bundle = mount/'ResearchHelper.app'
+            verify_mounted_bundle(cls.bundle, cls.candidate)
+        else:
+            cls.candidate = verify_candidate(selected_candidate(ROOT), ROOT)
+            cls.bundle = Path(cls.candidate['payload'])/'ResearchHelper.app'
         cls.payload = Path(cls.candidate['payload'])
 
     def test_skill_zip_is_complete_and_private_runtime_files_are_absent(self):
@@ -47,7 +71,7 @@ class CurrentCandidatePrivacyTests(unittest.TestCase):
             self.assertTrue(allowed(name), name)
 
     def test_app_manifest_and_vendor_licenses_match(self):
-        bundle = self.payload / 'ResearchHelper.app'
+        bundle = self.bundle
         manifest = json.loads((self.payload / 'app-manifest.json').read_text())
         actual = {file.relative_to(bundle).as_posix() for file in bundle.rglob('*') if file.is_file()}
         self.assertEqual(actual, set(manifest['files']))
@@ -89,7 +113,7 @@ class CurrentCandidatePrivacyTests(unittest.TestCase):
 
     def test_packaged_icons_are_exact_approved_bytes(self):
         from PIL import Image
-        resources = self.payload / 'ResearchHelper.app/Contents/Resources'
+        resources = self.bundle / 'Contents/Resources'
         for extension, filename in (('icns', 'ResearchHelper.icns'), ('png', 'ResearchHelperDock.png')):
             expected = ROOT / ('assets/icons/researchhelper-app-icon-tile-light.' + extension)
             self.assertEqual((resources / filename).read_bytes(), expected.read_bytes())
