@@ -4,15 +4,29 @@
   const account = document.querySelector("#login-account");
   const launchUrl = new URL(location.href);
   const startupToken = launchUrl.searchParams.get("app_startup");
+  const demoStartup = splash?.hasAttribute("data-demo-startup");
   const motionPreference = matchMedia("(prefers-reduced-motion: reduce)");
   const reducedMotion = motionPreference.matches;
-  const shielded = [
+  const shielded = (demoStartup ? [
+    document.querySelector("[data-workspace-shell]"),
+  ] : [
     document.querySelector(".login-wrap"),
     document.querySelector(".login-theme"),
-  ].filter(Boolean);
+  ]).filter(Boolean);
 
-  const mountReferenceAnimation = () => {
+  const mountReferenceAnimation = (onSettled) => {
     const stage = splash?.querySelector?.(".login-splash__stage");
+    const inlineLogo = stage?.querySelector("template")?.content.querySelector("svg");
+
+    const showFallback = () => {
+      if (inlineLogo) {
+        const fallback = document.importNode(inlineLogo, true);
+        fallback.setAttribute("class", "login-splash__fallback-logo");
+        stage.append(fallback);
+      }
+      splash.classList.add("is-fallback");
+    };
+
     const canEnhance = stage
       && typeof stage.append === "function"
       && typeof document.createElement === "function"
@@ -20,15 +34,15 @@
       && typeof window.Path2D === "function"
       && typeof window.AbortController === "function"
       && typeof window.requestAnimationFrame === "function"
-      && typeof window.fetch === "function";
+      && (inlineLogo || typeof window.fetch === "function");
     if (!canEnhance) {
-      splash?.classList.add("is-fallback");
+      showFallback();
       return { stop() {} };
     }
 
     const logoAsset = "/login/wordmark.svg";
-    const startMs = 516;
-    const flyMs = 960;
+    const startMs = 110;
+    const flyMs = 560;
     const stagger = .5;
     const particleStep = 2;
     const canvas = document.createElement("canvas");
@@ -48,12 +62,14 @@
       assembled = true;
       splash.classList.add("is-assembled");
       canvas.classList.add("is-settled");
+      const animations = stage.getAnimations?.({ subtree: true }) ?? [];
+      Promise.allSettled(animations.map((animation) => animation.finished)).then(() => {
+        if (!stopped) onSettled();
+      });
     };
 
-    const prepareLogo = (svgText) => {
-      const parsed = new DOMParser().parseFromString(svgText, "image/svg+xml");
-      if (parsed.querySelector("parsererror")) throw new Error("Invalid packaged logo");
-      const imported = document.importNode(parsed.documentElement, true);
+    const prepareLogo = (element) => {
+      const imported = document.importNode(element, true);
       imported.removeAttribute("width");
       imported.removeAttribute("height");
       imported.removeAttribute("role");
@@ -62,16 +78,14 @@
       imported.setAttribute("aria-hidden", "true");
 
       const disc = imported.querySelector("#researchhelper-disc");
-      const arc = imported.querySelector("#researchhelper-arc");
-      const ink = ["payoff", "dot-0", "dot-1", "dot-2", "dot-3"]
+      const ink = ["payoff", "dot-start", "dot-end", "axis"]
         .map((name) => imported.querySelector(`#researchhelper-${name}`));
       const wordResearch = imported.querySelector("#researchhelper-word-research");
       const wordHelper = imported.querySelector("#researchhelper-word-helper");
       const rule = imported.querySelector("#researchhelper-rule rect");
-      if (![disc, arc, ...ink, wordResearch, wordHelper, rule].every(Boolean)) throw new Error("Incomplete packaged logo");
+      if (![disc, ...ink, wordResearch, wordHelper, rule].every(Boolean)) throw new Error("Incomplete packaged logo");
       disc.setAttribute("class", "login-splash__reference-disc");
       ink.forEach((node) => node.setAttribute("class", "login-splash__reference-ink"));
-      arc.setAttribute("class", "login-splash__reference-arc");
       wordResearch.id = "login-reference-word-option";
       wordHelper.id = "login-reference-word-helper";
       const wordColor = root.dataset.theme === "dark" ? "#E8EAED" : "#252525";
@@ -267,10 +281,10 @@
       canvas.remove();
       logo?.remove();
       splash.classList.remove("has-reference-animation", "is-assembled");
-      splash.classList.add("is-fallback");
+      showFallback();
     };
 
-    fetch(logoAsset, {
+    const wordmark = inlineLogo ? Promise.resolve(inlineLogo) : fetch(logoAsset, {
       cache: "force-cache",
       credentials: "same-origin",
       signal: loadController.signal,
@@ -279,7 +293,14 @@
         if (!response.ok) throw new Error("Packaged logo unavailable");
         return response.text();
       })
-      .then((svgText) => activate(prepareLogo(svgText)))
+      .then((svgText) => {
+        const parsed = new DOMParser().parseFromString(svgText, "image/svg+xml");
+        if (parsed.querySelector("parsererror")) throw new Error("Invalid packaged logo");
+        return parsed.documentElement;
+      });
+
+    wordmark
+      .then((element) => activate(prepareLogo(element)))
       .catch((error) => {
         if (error?.name !== "AbortError") fallback();
       });
@@ -308,11 +329,13 @@
     window.__volIn?.();
   };
 
-  const revealLogin = () => {
+  const revealSurface = () => {
     root.classList.remove("login-boot");
     setInteractive(true);
-    requestSurface();
-    document.querySelector(".login-wrap")?.classList.add("is-revealing");
+    if (!demoStartup) {
+      requestSurface();
+      document.querySelector(".login-wrap")?.classList.add("is-revealing");
+    }
   };
 
   if (startupToken) {
@@ -320,39 +343,45 @@
     history.replaceState({}, "", `${launchUrl.pathname}${launchUrl.search}`);
   }
 
-  if (!startupToken || reducedMotion || !splash) {
+  if ((!startupToken && !demoStartup) || reducedMotion || !splash) {
     splash?.remove();
-    revealLogin();
+    revealSurface();
     account?.focus({ preventScroll: true });
     return;
   }
 
   setInteractive(false);
   root.classList.add("login-boot");
-  const referenceAnimation = mountReferenceAnimation();
   let finished = false;
-  let timer = 0;
+  let holdTimer = 0;
+  const referenceAnimation = mountReferenceAnimation(() => {
+    holdTimer = setTimeout(finish, 300);
+  });
   const finish = () => {
     if (finished) return;
     finished = true;
     referenceAnimation.stop();
-    clearTimeout(timer);
+    clearTimeout(holdTimer);
+    clearTimeout(fallbackTimer);
+    clearTimeout(watchdogTimer);
     document.removeEventListener("keydown", finish);
     splash.removeEventListener("click", finish);
     motionPreference.removeEventListener?.("change", onMotionChange);
     splash.classList.add("is-leaving");
-    revealLogin();
+    revealSurface();
     // Focus once at release, never after the user has moved to another field.
     if (!document.activeElement || document.activeElement === document.body || splash.contains(document.activeElement)) {
       account?.focus({ preventScroll: true });
     }
     if (motionPreference.matches) splash.remove();
-    else setTimeout(() => { splash.remove(); }, 470);
+    else setTimeout(() => { splash.remove(); }, 180);
   };
 
   const onMotionChange = () => { if (motionPreference.matches) finish(); };
 
-  timer = setTimeout(finish, 2200);
+  const fallbackTimer = setTimeout(() => {
+    if (!splash.classList.contains("has-reference-animation")) finish();
+  }, 760);
   document.addEventListener("keydown", finish);
   splash.addEventListener("click", finish);
   motionPreference.addEventListener?.("change", onMotionChange);
@@ -360,5 +389,5 @@
   // The launch screen is never allowed to become a permanent application
   // state.  This independent watchdog still releases the login page if a
   // browser timer is throttled while the WebKit window is being activated.
-  setTimeout(finish, 3120);
+  const watchdogTimer = setTimeout(finish, 1660);
 })();
