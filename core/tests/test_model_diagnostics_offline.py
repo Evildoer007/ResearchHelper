@@ -124,9 +124,19 @@ class ModelDiagnosticsTests(unittest.TestCase):
             with self.subTest(endpoint=endpoint, model=model):
                 self.settings.save({"endpoint": endpoint, "model": model, "api_key": self.secret})
                 task = self.task()
-                with patch("researchhelper.model.urllib.request.urlopen", return_value=io.BytesIO(self.payload())) as transport:
-                    self.service.reason(task, [])
+                streaming = endpoint == "https://api.deepseek.com/chat/completions" and model in {"deepseek-flash", "deepseek-v4-pro"}
+                response = io.BytesIO(self.payload())
+                if streaming:
+                    frame = {"id": "diagnostic-stream", "model": model, "choices": [{"index": 0,
+                        "delta": {"role": "assistant", "content": "{}"}, "finish_reason": "stop"}],
+                        "usage": {"total_tokens": 1}}
+                    response = io.BytesIO(b"data: " + json.dumps(frame).encode() + b"\n\ndata: [DONE]\n\n")
+                    response.headers = {"Content-Type": "text/event-stream"}
+                with patch("researchhelper.model.urllib.request.urlopen", return_value=response) as transport:
+                    self.assertEqual(self.service.reason(task, []), "{}")
+                transport.assert_called_once()
                 request = json.loads(transport.call_args.args[0].data)
+                self.assertEqual(request.get("stream", False), streaming)
                 self.assertEqual(request["max_tokens"], expected)
                 self.assertNotIn("thinking", request)
                 self.assertNotIn("reasoning_effort", request)
