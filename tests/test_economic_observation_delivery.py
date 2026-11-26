@@ -10,7 +10,8 @@ from researchhelper.evidence import api_cell_choices, expand_api_cell_selections
 from researchhelper.knowledge import ResearchKnowledge
 from researchhelper.output_schema import api_extraction_output_schema, decode_api_extraction_output
 from researchhelper.reasoning import extractable_source_views, validate_model_specs
-from researchhelper.reports import compose, render, check_content
+from researchhelper.report_designer import design
+from researchhelper.reports import compose, check_content
 from researchhelper.visual import economic_observation_figures
 
 _prefix = __package__+'.' if __package__ else ''
@@ -114,10 +115,15 @@ class EconomicObservationDeliveryTests(unittest.TestCase):
     def test_partial_report_is_rendered_without_folding_or_mutating_its_content(self):
         before = fingerprint(self.content)
         resources = Path(os.environ.get('RESEARCHHELPER_IFIND_METADATA_RESOURCES', fixture.ROOT))
-        page = render(self.content, resources)
+        result = design(self.content, resources)
+        page = result['html']
         self.assertIn('rh-economic-observations-1', page)
         self.assertIn('研究分析尚未完成', page)
         self.assertNotIn('<details', page)
+        doc = result['document']
+        chart, = (block['spec'] for block in doc['blocks'] if block['kind'] == 'chart')
+        self.assertEqual(doc['visual_sources'][chart['target']], chart)
+        self.assertEqual(chart['auto_visual']['data']['values'], [0.2, 1.3, 1, 1.2, 1.2, 1, 0.5, 0.8, 0.9])
         self.assertEqual(fingerprint(self.content), before)
 
     def test_uncited_or_legacy_content_does_not_inherit_the_statistical_chart(self):
