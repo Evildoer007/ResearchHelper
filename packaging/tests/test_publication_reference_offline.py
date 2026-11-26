@@ -144,7 +144,19 @@ class PublicationReferenceTests(unittest.TestCase):
         self.agent.archive.save(task)
         self.agent._extract_model_sources(task)
         contract = evidence_contract(task)
-        self.assertEqual(host.payload['evidence_contract'], contract)
+        projected=host.payload['evidence_contract']
+        for field in ('binding','sources','question_ids','question_requirements',
+                      'publication_fields','publication_reference_contract','publication_candidate_contract',
+                      'compact_material_publication','current_original_rule'):
+            self.assertEqual(projected[field],contract[field],field)
+        self.assertNotIn('api_candidate_contract',projected)
+        self.assertEqual(host.payload['untrusted_sources'],source_views(task))
+        for source in projected['sources']:
+            self.assertEqual(source['publication_required_fields'],MATERIAL_FIELDS)
+            self.assertEqual(source['publication_reading_fields'],['part','quote'])
+            self.assertTrue(all(all(candidate['basis_ref'][key]==value
+                for key,value in source['publication_fixed_fields'].items())
+                for candidate in source['publication_candidates']))
         spec = importlib.util.spec_from_file_location('reference_skill', ROOT / 'core/session.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
