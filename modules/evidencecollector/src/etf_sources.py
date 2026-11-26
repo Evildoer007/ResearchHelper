@@ -17,7 +17,7 @@ import time
 import urllib.error
 from urllib.parse import urlencode, urlsplit
 
-from .contracts import ContractError, fingerprint, market_date
+from .contracts import ContractError, DuplicateJSONField, fingerprint, market_date, unique_json_object
 
 POLICY = 'official_etf_pcf_version'
 OPERATION = 'etf_pcf'
@@ -70,7 +70,7 @@ def request_shapes(task):
     return [dict(source='official', operation=OPERATION, qualified_id_for_lookup_only=QUALIFIED,
         parameter_keys=['ts_code'], available_parameter_sets=[dict(ts_code=code) for code in codes],
         credential_required=False, raw_only=False, numeric_fields=['unit_nav'],
-        selection_rule='iFinD优先。此渠道用于核对ETF净值所属日、上市份额与单位，须显式选择，不自动换源。',
+        selection_rule='iFinD优先。可按问题选用上交所清单核对净值所属日、份额与单位。当前沪市ETF的最新净值遇到iFinD限额时，报告注明公开清单来源。',
         limitation='仅取得站点实际返回的最近一份清单；不能请求历史日期。NAV属于PRE_TRADING_DAY，不能用TRADING_DAY代替，也不证明历史当时可得。')]
 
 
@@ -88,7 +88,9 @@ def parse_snapshot(payload, code, cutoff):
     if not isinstance(payload, bytes) or not payload or len(payload) > MAX_BYTES:
         raise ContractError('ETF清单原始字节为空或超出2MB')
     try:
-        response = json.loads(payload.decode('utf-8-sig'))
+        response = json.loads(payload.decode('utf-8-sig'), object_pairs_hook=unique_json_object)
+    except DuplicateJSONField:
+        raise
     except (UnicodeError, ValueError):
         raise ContractError('ETF清单没有返回可解析JSON，不把登录页或错误页作为原文') from None
     rows = response.get('result') if isinstance(response, dict) else None
@@ -276,7 +278,7 @@ def has_api_share_context(task, views):
         if (record.get('id') not in ids or record.get('source') != 'ifind'
                 or record.get('operation') != 'cmd_history_quotation'):
             continue
-        for cell in api_cell_candidates(record, 64)['cells']:
+        for cell in api_cell_candidates(record, 64, task=task)['cells']:
             if share_context_choices(task, record, cell['proposal_fields']['record_locator'],
                     cell['source_metadata']['provider_code'], allowed_ids=ids):
                 return True
