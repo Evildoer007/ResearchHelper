@@ -8,8 +8,53 @@ from __future__ import annotations
 
 import copy
 import re
+from datetime import date, time
 
-from .contracts import ContractError, DOCUMENT_CONTENT_INTENT, ENTRIES, INTENTS, METHOD_REGISTRY, canonical, fingerprint, methods_for_task
+from .contracts import ContractError, DOCUMENT_CONTENT_INTENT, ENTRIES, INTENTS, METHOD_REGISTRY, canonical, fingerprint, methods_for_task, timepoint
+
+
+QUESTION_ARGUMENT_POLICY = 'question_driven_arguments_version'
+
+
+_CUTOFF_CLAUSE = re.compile(
+    r'(?:^|[，,。；;\n])\s*(?:请\s*)?(?:'
+    r'(?:把|将)?(?:本次)?研究截止(?:时点|时间|日期)\s*(?:[:：]|改为|改到|设为|为)\s*(?P<setting>[^，,。；;！？\n]*)'
+    r'|以\s*(?P<chosen>[^，,。；;！？\n]{1,80}?)\s*为(?:本次)?研究截止(?:时点|时间|日期)'
+    r'|截至\s*(?P<asof>[^，,。；;！？\n]{1,80}?)\s*[，,]\s*'
+    r'(?=(?:仅|只)(?:使用|用|基于|依据)当时(?:已)?(?:可知|可得|公开))'
+    r')'
+)
+_CUTOFF_DATE = re.compile(
+    r'(?P<beijing>北京时间)?\s*(?P<day>[0-9]{4}(?:-[0-9]{1,2}-[0-9]{1,2}|年[0-9]{1,2}月[0-9]{1,2}日))'
+    r'(?:(?:T|\s*)(?P<clock>[0-9]{1,2}(?::[0-9]{2}(?::[0-9]{2})?|[时点](?:[0-9]{1,2}分)?))'
+    r'\s*(?P<offset>Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])?)?'
+)
+
+
+def declared_research_cutoff(question):
+    """Read explicit research boundaries without treating observation dates as cutoffs."""
+    cutoff = None
+    for clause in _CUTOFF_CLAUSE.finditer(question):
+        text = next(value for value in clause.groups() if value is not None)
+        parsed = _CUTOFF_DATE.fullmatch(text.strip().replace('：', ':'))
+        try:
+            if parsed is None:
+                raise ValueError
+            day = date(*(int(part) for part in re.findall(r'[0-9]+', parsed['day'])))
+            candidate = day.isoformat()
+            if parsed['clock']:
+                parts = [int(part) for part in re.findall(r'[0-9]+', parsed['clock'])]
+                hour, minute, second = (parts + [0, 0])[:3]
+                offset = parsed['offset'] or '+08:00'
+                if parsed['beijing'] and offset != '+08:00':
+                    raise ValueError
+                candidate += 'T' + time(hour, minute, second).isoformat() + offset
+        except ValueError:
+            raise ContractError('问题中的研究截止时点无效。可填写北京时间2026年10月16日14:00。') from None
+        if cutoff is not None and timepoint(cutoff) != timepoint(candidate):
+            raise ContractError('问题中有不同的研究截止时点，请明确本次采用哪一个。')
+        cutoff = candidate
+    return cutoff
 
 QUESTION_KINDS = ("fact", "comparison", "mechanism", "investment")
 DIRECT_KINDS = {"fact", "comparison"}
@@ -20,6 +65,8 @@ PRESERVED_SCALAR_FIELDS = ("question", "required", "kind", "group", "answer_scop
 PRESERVED_LIST_FIELDS = ("dependencies", "evidence_needs", "method_needs", "knowledge_needs")
 IDENTIFIER = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,63}\Z")
 CONVERSATION_CONTEXT_LIMIT = 12000
+CONVERSATION_ROUND_LIMIT = 50
+CONVERSATION_CONTEXT_VERSION = 3
 RESEARCH_BRIEF_VERSION = 1
 PLANNING_LIMITATION_GUIDANCE_VERSION = 3
 CALCULATION_OBLIGATION_VERSION = 1
@@ -163,12 +210,88 @@ def conversation_context(task):
     if task.get("input_hash") != input_fingerprint(task):
         raise ContractError("追问上下文与登记输入不一致，请重新读取当前版本")
     parent = value.get("parent_binding", {})
-    if (value.get("version") != 1 or value.get("usage") != "reference_resolution_only"
+    version = value.get('version')
+    if (type(version) is not int or version not in (1, 2, CONVERSATION_CONTEXT_VERSION)
+            or value.get("usage") != "reference_resolution_only" or not isinstance(parent, dict)
             or parent.get("task_id") != task.get("parent")
-            or not isinstance(parent.get("research_version"), int)
+            or type(parent.get("research_version")) is not int or parent['research_version'] < 1
             or not isinstance(parent.get("input_hash"), str)):
         raise ContractError("追问上下文父版本绑定无效")
+    if version >= 2 and (
+            not isinstance(value.get('thread_id'), str) or not value['thread_id']
+            or value['thread_id'] != task.get('thread_id')
+            or value.get('scope_relation') not in ('continue', 'compare', 'replace')):
+        raise ContractError('追问上下文不属于当前对话或研究范围')
+    round_number = value.get('round_number')
+    if version >= 3 and ('round_number' not in value or round_number is not None and (
+            type(round_number) is not int or not 2 <= round_number <= CONVERSATION_ROUND_LIMIT)):
+        raise ContractError('追问轮次格式无效')
     return copy.deepcopy(value)
+
+
+def conversation_excerpt(text, limit, *, include_hash=True):
+    """Keep the longest original prefix within a serialized character budget."""
+    low, high = 0, min(len(text), limit)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(canonical(text[:middle])) <= limit:
+            low = middle
+        else:
+            high = middle - 1
+    result = dict(text=text[:low], omitted_characters=len(text)-low)
+    if include_hash:
+        result['full_text_hash'] = fingerprint(text)
+    return result
+
+
+def model_conversation_context(task, *, include_prior_findings=True):
+    """Project conversation history for the stage consuming it."""
+    from .draft_sources import historical_structured_scope
+    context = conversation_context(task)
+    if context is None:
+        return None
+    context.pop('security_name_queries', None)
+    historical = historical_structured_scope(task) or (
+        context['version'] >= 2 and task.get('research_mode') == 'historical')
+    if not historical and include_prior_findings:
+        return context
+    context.pop('previous_answer', None)
+    if focus := context.get('focus'):
+        fields = ('round', 'logic_indices')
+        if not historical:
+            fields += ('status', 'source', 'omitted_logic_count', 'omitted_round_count')
+
+        subjects = set()
+        if not historical:
+            from .evidence import declared_security_codes
+            from .economic_sources import declared_economic_indicators
+            from .subject_scope import subject_key
+            subjects = {subject_key(code) for code in declared_security_codes(task) + declared_economic_indicators(task)}
+
+        def reference(item):
+            selected = {key: item[key] for key in fields if key in item}
+            # Match the current declared scope before suggesting an old field.
+            if subjects:
+                metrics = []
+                several_logics = len(item.get('logic_indices', [])) > 1
+                for logic in item.get('logics', []):
+                    for metric in logic.get('observed_metrics', []):
+                        if subject_key(metric['subject']) in subjects:
+                            projected = dict(subject=metric['subject'], field=metric['field'])
+                            if several_logics:
+                                projected['logic_index'] = logic['index']
+                            metrics.append(projected)
+                if metrics:
+                    selected['observed_metrics'] = metrics
+            return selected
+
+        selected = reference(focus)
+        if references := focus.get('references'):
+            selected['references'] = [reference(item) for item in references]
+        if historical:
+            selected['status'] = 'historical_reference_only'
+        context['focus'] = selected
+    return context
 
 
 def question_contract(task=None):
@@ -353,6 +476,11 @@ def question_specs(task):
     return [{key: copy.deepcopy(q[key]) for key in QUESTION_FIELDS if key in q} for q in task["questions"]]
 
 
+def question_driven_arguments(task):
+    version = task.get(QUESTION_ARGUMENT_POLICY)
+    return type(version) is int and version == 1 and task.get('draft_question_scope_version') == 2
+
+
 def research_outline_contract(task):
     """Shared writing guidance, never additional evidence or approval."""
     version = task.get('research_outline_version')
@@ -375,7 +503,15 @@ def research_outline_contract(task):
 
 
 def _direct_question_kind(task):
+    from .economic_sources import direct_economic_readout, direct_economic_scope
+    from .intraday_quotes import question_request as intraday_question_request
+    from .market_calendar import direct_liquidity_scope
+
     required = [question for question in task.get('questions', []) if question.get('required', True)]
+    if direct_economic_readout(task) or direct_economic_scope(task) or intraday_question_request(task, direct=True):
+        return 'fact'
+    if direct_liquidity_scope(task):
+        return 'comparison' if re.search(r'比较|对比|对照', task['question']) else 'fact'
     if not required or any(question.get('kind') not in DIRECT_KINDS for question in required):
         return None
     return 'comparison' if any(question['kind'] == 'comparison' for question in required) else 'fact'
@@ -405,8 +541,11 @@ def draft_research_scope(task):
     initial_default = (task.get('question_origin') == 'default' and task.get('plan_version', 1) == 1
         and task.get('intent') == '综合研究' and len(required) == 1
         and required[0].get('question') == task.get('question') and required[0].get('kind') == 'investment')
-    if initial_default:
-        mode = 'by_question'
+    if initial_default and mode != 'fact':
+        from .market_calendar import stated_direct_market_day
+
+        mode = 'fact' if version == 2 and stated_direct_market_day(task, for_report=True) else 'by_question'
+    from .knowledge import GENERAL_DEFINITION_SCOPE, draft_definitions_enabled
     questions = []
     for question in task.get('questions', []):
         row = {key: question[key] for key in ('id', 'kind', 'required') if key in question}
@@ -417,19 +556,36 @@ def draft_research_scope(task):
         for key in ('evidence_needs', 'method_needs'):
             if question.get(key):
                 row[key] = list(question[key])
+        if draft_definitions_enabled(task) and question.get('answer_scope') == GENERAL_DEFINITION_SCOPE:
+            row['answer_scope'] = question['answer_scope']
         questions.append(row)
-    allowed = ['fact', 'comparison'] + (['mechanism'] if version == 2 else []) + ['research']
-    rule = ('questions中的investment只是初始默认分类，按原问题决定核对、比较、机制解释或研究，不默认扩展为投资建议。'
-            if initial_default else '按照必要问题的实际类型取证与写作，不用可选问题扩大主问题范围。')
-    if version == 1 and initial_default:
-        rule = 'questions中的investment只是初始默认分类，按原问题决定核对、比较或研究，不默认扩展为投资建议。'
+    allowed = [mode]
+    rule = '按照必要问题的实际范围取证与写作，不用可选问题扩大主问题范围。'
+    if mode == 'by_question':
+        allowed = ['fact', 'comparison'] + (['mechanism'] if version == 2 else []) + ['research']
+        descriptions = '核对、比较、机制解释或研究' if version == 2 else '核对、比较或研究'
+        rule = f'questions中的investment只是初始默认分类，按原问题决定{descriptions}，不默认扩展为投资建议。'
+    elif initial_default:
+        from .economic_sources import direct_economic_readout
+
+        allowed = ['fact'] if direct_economic_readout(task) else ['fact', 'comparison']
+        rule = '逐项回答所问标的、指标与日期的读数。缺少读数时列明缺项。'
     if mode == 'mechanism':
         rule += '本次回答变化的可能机制、传导条件与竞争解释；同期变动不是因果证据，不自动增加投资机会或买卖判断。'
+    from .subject_scope import excluded_subjects, scope_question
+    excluded = excluded_subjects(task)
+    if excluded:
+        rule += 'excluded_subjects为本轮排除对象，按其余范围取证和写报告。'
+    active = scope_question(task)
+    subject_request = {}
+    if active != task['question']:
+        subject_request['active_question'] = active.strip(' ，,。；;！？?!\n')
+        rule += 'active_question保留本轮有效的提问。原文中的否定、排除及引用仍供理解，不采用其中未选定的对象和期间。'
     return dict(version=version, mode=mode, questions=questions,
         question_scope_is_default=initial_default,
-        allowed_report_scopes=allowed if initial_default else [mode],
+        allowed_report_scopes=allowed,
         changes_question_obligations=False, extra_model_calls=0,
-        rule=rule)
+        rule=rule, **subject_request, **({'excluded_subjects': excluded} if excluded else {}))
 
 
 def draft_research_context(task, limit=5000):
@@ -535,8 +691,16 @@ def plan_preservation_contract(task):
 
 def input_fingerprint(task):
     adopted = {key: task[key] for key in ("question", "entry", "intent", "objects", "cutoff")}
+    if 'subject_scope' in task:
+        adopted['subject_scope'] = task['subject_scope']
     if "research_mode" in task:
         adopted["research_mode"] = task["research_mode"]
+    from .parallel_study import POLICY as PARALLEL_POLICY
+
+    if PARALLEL_POLICY in task:
+        adopted[PARALLEL_POLICY] = task[PARALLEL_POLICY]
+        adopted['parallel_questions'] = [{key: row[key] for key in ('id', 'question', 'group', 'kind', 'required')}
+                                         for row in task['questions']]
     if 'series_batch_version' in task:
         adopted['series_batch_version'] = task['series_batch_version']
     if 'source_capability_roadmap_version' in task:
@@ -551,26 +715,82 @@ def input_fingerprint(task):
         adopted['research_outline_version'] = task['research_outline_version']
     if 'hk_code_alias_version' in task:
         adopted['hk_code_alias_version'] = task['hk_code_alias_version']
+    if 'draft_client_copy_version' in task:
+        adopted['draft_client_copy_version']=task['draft_client_copy_version']
+    if 'draft_reading_version' in task:
+        adopted['draft_reading_version'] = task['draft_reading_version']
+    if 'market_observation_selection_version' in task:
+        adopted['market_observation_selection_version']=task['market_observation_selection_version']
+    if 'draft_stated_latest_version' in task:
+        adopted['draft_stated_latest_version'] = task['draft_stated_latest_version']
     if 'draft_quote_scope_version' in task:
         adopted['draft_quote_scope_version'] = task['draft_quote_scope_version']
+    if 'draft_quote_interval_endpoints_version' in task:
+        adopted['draft_quote_interval_endpoints_version'] = task['draft_quote_interval_endpoints_version']
+    if 'draft_nav_interval_version' in task:
+        adopted['draft_nav_interval_version'] = task['draft_nav_interval_version']
+    if 'draft_disclosure_scope_version' in task:
+        adopted['draft_disclosure_scope_version'] = task['draft_disclosure_scope_version']
+    if 'draft_excerpt_location_version' in task:
+        adopted['draft_excerpt_location_version'] = task['draft_excerpt_location_version']
+    if 'draft_financial_period_gap_version' in task:
+        adopted['draft_financial_period_gap_version'] = task['draft_financial_period_gap_version']
+    if 'draft_stated_financial_version' in task:
+        adopted['draft_stated_financial_version'] = task['draft_stated_financial_version']
+    if 'draft_historical_original_version' in task:
+        adopted['draft_historical_original_version'] = task['draft_historical_original_version']
+    if 'draft_historical_daily_version' in task:
+        adopted['draft_historical_daily_version'] = task['draft_historical_daily_version']
     if 'draft_source_reader_version' in task:
         adopted['draft_source_reader_version'] = task['draft_source_reader_version']
+    from .economic_sources import CATALOGUE_READOUT_POLICY
+    from .event_market import MAINLAND_POLICY
+    from .intraday_quotes import POLICY as INTRADAY_POLICY
+    from .knowledge import DRAFT_DEFINITION_POLICY
+    from .market_calendar import LATEST_SESSION_CALCULATION_POLICY, LIQUIDITY_POLICY, NAMED_INDEX_MARKET_POLICY
+    from .market_series import NAV_SOURCE_POLICY
+    for policy in ('draft_economic_period_coverage_version', 'direct_economic_acquisition_version',
+                   'draft_index_weight_scope_version',
+                   DRAFT_DEFINITION_POLICY, NAV_SOURCE_POLICY, NAMED_INDEX_MARKET_POLICY,
+                   LATEST_SESSION_CALCULATION_POLICY, MAINLAND_POLICY, CATALOGUE_READOUT_POLICY,
+                   INTRADAY_POLICY, LIQUIDITY_POLICY):
+        if policy in task:
+            adopted[policy] = task[policy]
+    market_refreshes = (task.get('update_from') or {}).get('market_refreshes')
+    if market_refreshes:
+        adopted['market_refreshes_hash'] = fingerprint(market_refreshes)
+    financial_refreshes = (task.get('update_from') or {}).get('financial_refreshes')
+    if financial_refreshes:
+        adopted['financial_refreshes_hash'] = fingerprint(financial_refreshes)
+    economic_refreshes = (task.get('update_from') or {}).get('economic_refreshes')
+    if economic_refreshes:
+        adopted['economic_refreshes_hash'] = fingerprint(economic_refreshes)
+    if 'draft_tinyshare_reader_version' in task:
+        adopted['draft_tinyshare_reader_version'] = task['draft_tinyshare_reader_version']
     if 'draft_direct_scope_version' in task:
         adopted['draft_direct_scope_version'] = task['draft_direct_scope_version']
     if 'draft_question_scope_version' in task:
         adopted['draft_question_scope_version'] = task['draft_question_scope_version']
+    if question_driven_arguments(task):
+        adopted[QUESTION_ARGUMENT_POLICY] = task[QUESTION_ARGUMENT_POLICY]
+    if 'draft_tracking_version' in task:
+        adopted['draft_tracking_version'] = task['draft_tracking_version']
+    if 'draft_comparison_version' in task:
+        adopted['draft_comparison_version'] = task['draft_comparison_version']
+        if type(task['draft_comparison_version']) is int and task['draft_comparison_version'] == 1 and task.get('update_from'):
+            adopted['draft_comparison_baseline_hash'] = fingerprint(task['update_from'].get('report_comparison_basis'))
     # Preserve hashes for older tasks without conversational context.
     if "conversation_context" in task:
         adopted["conversation_context"] = task["conversation_context"]
     # Address rejection is an extraction-only policy, already included in
     # the extraction digest. It must not invalidate research/source identity.
-    for policy in ('request_schema_sharing_version', 'review_revision_readiness_version', 'registered_source_reading_version',
+    for policy in ('official_source_expansion_version', 'request_schema_sharing_version', 'review_revision_readiness_version', 'registered_source_reading_version',
                    'api_need_compatibility_version', 'discovery_planned_scope_version', 'financial_batch_query_version', 'semantic_query_encoding', 'financial_batch_followup_version',
                    'progressive_financial_acquisition_version', 'declared_reading_capacity_version', 'official_catalogue_pagination_version', 'independent_original_selections_version',
-                   'index_weight_evidence_version', 'analysis_input_presentation_version',
+                   'index_weight_evidence_version', 'analysis_input_presentation_version', 'draft_industry_sample_version',
                    'review_choice_delivery_version', 'identity_candidate_lookup_version',
                    'name_candidate_observation_version', 'original_number_catalogue_capacity_version',
-                   'original_explicit_unit_reference_version', 'acquisition_reading_intent_version',
+                   'original_explicit_unit_reference_version', 'original_quantity_qualifier_version', 'acquisition_reading_intent_version',
                    'financial_acquisition_route_version', 'original_duration_anchor_version', 'catalogue_alternative_version', 'typed_evidence_needs_version', 'typed_observation_contract_version', 'typed_numeric_selection_version', 'required_numeric_completion_version', 'original_observation_reference_version', 'shared_original_dates_version', 'source_extraction_batches_version', 'source_extraction_id_choices_version', 'official_index_sources_version'):
         if policy in task:
             adopted[policy] = task[policy]
