@@ -27,6 +27,6 @@ NuGet恢复仅允许已有缓存，不设远端源，不清空缓存或自动下
 
 构建需要检查包内后端、离线案例、默认账户与临时安装物。临时安装不创建快捷方式、卸载注册或启动原生窗口。安装器未签名；代码或离线单元测试通过，不代表Windows编译、安装、SmartScreen或原生界面通过。
 
-当前主机是macOS，无Windows、.NET或Inno实机环境。Windows入口、原生壳和构建链已实现；Windows安装包尚未构建或实机验收。保留旧macOS安装版及两份demo，不以新源码覆盖已有冻结交付。
+当前主机是macOS。用隔离的.NET 8 SDK和本地缓存的WebView2依赖完成Windows x64壳交叉编译，编译0警告、0错误。Windows安装包、WebView2实机和系统打印对话框仍待验收。实机验收应从标准报告、详细报告及自选图表分别发起打印，确认预览正文和图表对应所选版本。[交叉编译及离线验收](../result/acceptance/windows-report-print-20261112/verification.json)
 
 2026年10月12日新增OH源码对照，14个共用方法和基础配置一致，30项离线检查通过windows-source-z999qu0s，绑定170732-659716候选。未修改生产C#，不把源码对照提升为Windows编译或安装通过。两项目Windows均缺少macOS式页面恢复；详见[Windows壳对齐记录](OH_ALIGNMENT_STATUS.md)。
