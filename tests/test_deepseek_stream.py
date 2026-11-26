@@ -68,6 +68,16 @@ class StreamTests(unittest.TestCase):
         self.assertNotIn('usage',payload)
         self.assertNotIn('usage',record)
 
+    def test_repeated_stream_fields_stop_before_accepting_content_or_usage(self):
+        for data in (
+            b'data: {"choices":[],"choices":[{"index":0,"delta":{"content":"PRIVATE_STREAM"},"finish_reason":"stop"}]}\n\n',
+            b'data: {"choices":[{"index":0,"delta":{"content":"PRIVATE_STREAM","content":"{}"},"finish_reason":"stop"}]}\n\n',
+        ):
+            with self.subTest(body_length=len(data)), self.assertRaises(TransportFailure) as rejected:
+                self.parse(wire(data))
+            self.assertEqual(rejected.exception.code, 'duplicate_response_field')
+            self.assertNotIn('PRIVATE_STREAM', str(rejected.exception))
+
     def test_comments_and_crlf_are_supported(self):
         data=b': keep-alive\r\n\r\n'+wire(frame({'content':'{}'},'stop')).replace(b'\n',b'\r\n')
         payload,_=self.parse(data,width=3)
