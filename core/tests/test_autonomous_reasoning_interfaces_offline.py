@@ -22,6 +22,7 @@ class AutonomousInterfaceTests(unittest.TestCase):
         self.addCleanup(folder.cleanup)
         # A trusted test launcher chooses this policy. Browser requests cannot.
         self.server = make_server(folder.name, ROOT, offline=False)
+        self.server.agent.draft_first = False  # Explicit retained three-phase controller.
         self.server.agent.model.settings.save({"endpoint": "https://example.invalid/model", "model": "fabricated-fixture-model",
                                                 "api_key": "fabricated-only-credential"})
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -49,6 +50,8 @@ class AutonomousInterfaceTests(unittest.TestCase):
         return self.post(f"/api/tasks/{task['id']}/material", {"name": "policy.txt", "base64": base64.b64encode(text.encode()).decode()})
 
     def test_user_input_and_attachment_reach_three_phase_model_path_and_frozen_report(self):
+        from tests.test_autonomous_supplement_interfaces_offline import mock_host_review
+        mock_host_review(self, self.server.agent)
         self.assertFalse(self.bootstrap["offline"])
         self.assertFalse(self.bootstrap["model_settings"]["offline"])
         task = self.task()
