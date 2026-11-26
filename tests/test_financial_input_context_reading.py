@@ -53,7 +53,8 @@ class FinancialInputContextReadingTests(unittest.TestCase):
             agent=ResearchAgent(ResearchArchive(Path(directory)),ROOT,offline=True,require_argument_support=True)
             try:
                 task=agent.create('核对合成公司报表',research_mode='current')
-                self.assertEqual(task['financial_input_reading_priority_version'],2)
-                old=copy.deepcopy(task);old['financial_input_reading_priority_version']=1
-                self.assertNotEqual(input_fingerprint(old),task['input_hash'])
+                self.assertEqual(task['financial_input_reading_priority_version'],3)
+                for version in (1,2):
+                    old=copy.deepcopy(task);old['financial_input_reading_priority_version']=version
+                    self.assertNotEqual(input_fingerprint(old),task['input_hash'])
             finally:agent.close_runtime()
