@@ -1,4 +1,4 @@
-"""Post-build acceptance against the explicit DMG and independent Skill ZIP.
+"""Offline report acceptance shared by the macOS and Windows deliveries.
 
 Uses shipped synthetic cases, not old QA snapshots, credentials, models or
 supplier APIs. Native windows and the production research Store stay closed.
@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import math
+import re
 import shutil
 from pathlib import Path
 import subprocess
@@ -25,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES = ('mechanism', 'etf', 'value')
 PROFILES = ('standard', 'detailed')
 FORMATS = ('html', 'pdf', 'docx', 'xlsx', 'csv')
+LOCAL_HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def document(text, profile):
@@ -62,7 +64,7 @@ class AppClient:
             headers.update({'Content-Type': 'application/json', 'X-ResearchHelper-Token': self.token})
         request = urllib.request.Request(self.base + route, headers=headers,
             data=json.dumps(payload).encode() if payload is not None else None)
-        with urllib.request.urlopen(request, timeout=20) as response:
+        with LOCAL_HTTP.open(request, timeout=20) as response:
             cookie = response.headers.get('Set-Cookie')
             if cookie:
                 self.cookie = cookie.split(';')[0]
@@ -70,8 +72,8 @@ class AppClient:
         return raw.decode() if text else json.loads(raw)
 
 
-def accept_app_reports(base, html_directory=None):
-    client = AppClient(base)
+def accept_app_reports(base, html_directory=None, *, client=None):
+    client = client or AppClient(base)
     execution = {key: client.bootstrap['execution'][key] for key in ('mode', 'policy_version')}
     result = []
     for case in CASES:
@@ -87,12 +89,18 @@ def accept_app_reports(base, html_directory=None):
             time.sleep(.05)
         if any(task['ledger']['used'][key] != 0 for key in ('model_calls', 'data_requests')):
             raise RuntimeError('离线包后验收出现真实调用')
-        rows = []
+        rows, datasets = [], {}
         for profile in PROFILES:
             rendered = client.call('/api/tasks/' + task['id'] + '/report?profile=' + profile, text=True)
             frozen = document(rendered, profile)
+            if frozen.get('content_hash') != task['delivery']['digest']:
+                raise RuntimeError('App报告与已保存的交付版本不一致')
+            datasets[profile] = dataset_hash(frozen)
             for format in FORMATS:
                 export = client.call('/api/export', {'task_id': task['id'], 'profile': profile, 'format': format})
+                if (export.get('task_id'), export.get('version'), export.get('profile'), export.get('report_digest')) != (
+                        task['id'], task['delivery']['version'], profile, frozen['content_hash']):
+                    raise RuntimeError('App导出回执与已保存的交付版本不一致')
                 raw = base64.b64decode(export['content_base64'], validate=True)
                 if hashlib.sha256(raw).hexdigest() != export['sha256'] or not export['filename'].endswith('.' + format):
                     raise RuntimeError('App导出文件或摘要不一致')
@@ -106,8 +114,42 @@ def accept_app_reports(base, html_directory=None):
                 if format in ('docx', 'xlsx') and not raw.startswith(b'PK'):
                     raise RuntimeError('App未导出真实Office文件')
                 rows.append({'profile': profile, 'format': format, 'bytes': len(raw), 'sha256': export['sha256']})
-        result.append({'case': case, 'dataset_sha256': dataset_hash(frozen), 'exports': rows})
+        saved = client.call('/api/tasks/' + task['id'])
+        if saved['delivery'] != task['delivery'] or saved['ledger']['used'] != task['ledger']['used']:
+            raise RuntimeError('导出改变了已冻结报告或研究用量')
+        result.append({'case': case, 'dataset_sha256': datasets[PROFILES[-1]],
+                       'profile_dataset_sha256': datasets, 'exports': rows})
     return result
+
+
+def verify_report_parity(app, skill):
+    """Require the full case, profile and format matrix from both entry points."""
+    expected_exports = {(profile, format) for profile in PROFILES for format in FORMATS}
+
+    def datasets(reports):
+        if not isinstance(reports, list) or len(reports) != len(CASES):
+            raise RuntimeError('缺少三类离线研究验收记录')
+        result = {}
+        for row in reports:
+            if not isinstance(row, dict):
+                raise RuntimeError('离线研究验收记录无效')
+            profiles = row.get('profile_dataset_sha256', {})
+            exports = row.get('exports', [])
+            case = row.get('case')
+            if (case not in CASES or case in result or not isinstance(profiles, dict) or set(profiles) != set(PROFILES)
+                    or any(not re.fullmatch(r'[0-9a-f]{64}', str(value)) for value in profiles.values())
+                    or row.get('dataset_sha256') != profiles[PROFILES[-1]]
+                    or not isinstance(exports, list) or len(exports) != len(expected_exports)
+                    or any(not isinstance(item, dict) for item in exports)
+                    or {(item.get('profile'), item.get('format')) for item in exports} != expected_exports
+                    or any(type(item.get('bytes')) is not int or item['bytes'] <= 0
+                           or not re.fullmatch(r'[0-9a-f]{64}', str(item.get('sha256'))) for item in exports)):
+                raise RuntimeError('离线研究的报告详略、导出或数据摘要不完整')
+            result[case] = profiles
+        return result
+
+    if datasets(app) != datasets(skill):
+        raise RuntimeError('App与Skill的同案例、同详略研究数据不一致')
 
 
 
@@ -195,57 +237,84 @@ SKILL_WORKER = r'''
 import hashlib,json,socket,sys
 from pathlib import Path
 install,project,output=map(Path,sys.argv[1:]);sys.path.insert(0,str(install))
-from core.session import Session
-from researchhelper.artifact_exporter import convert_saved_html
 
 def denied(*a,**k):raise RuntimeError('Post-build Skill is offline')
 socket.socket.connect=denied;socket.socket.connect_ex=denied
+from core.session import Session
+from researchhelper.artifact_exporter import convert_saved_html
+assert Path(sys.modules['core.session'].__file__).resolve().is_relative_to(install.resolve())
 s=Session(project);results=[]
-for case in ('mechanism','etf','value'):
- task=s.agent.create_case(case);task=s.agent.start(task['id']);assert task.get('delivery')
- assert task['ledger']['used']['model_calls']==task['ledger']['used']['data_requests']==0
- exports=[]
- for profile in ('standard','detailed'):
-  for format in ('html','pdf','docx','xlsx','csv'):
-   file=s.export(task['id'],profile=profile,format=format);raw=file.read_bytes()
-   source=file.parent/'report.html';_,frozen=convert_saved_html(source,'html',expected_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
-   assert frozen['template']['id']=='report-'+profile
-   if format=='pdf':assert raw.startswith(b'%PDF-')
-   if format in ('docx','xlsx'):assert raw.startswith(b'PK')
-   exports.append(dict(profile=profile,format=format,bytes=len(raw),sha256=hashlib.sha256(raw).hexdigest()))
- digest=hashlib.sha256(json.dumps(frozen['dataset'],ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
- results.append(dict(case=case,dataset_sha256=digest,exports=exports))
-output.write_text(json.dumps(results,ensure_ascii=False))
+try:
+ for case in ('mechanism','etf','value'):
+  task=s.agent.create_case(case);task=s.agent.start(task['id']);assert task.get('delivery')
+  assert task['ledger']['used']['model_calls']==task['ledger']['used']['data_requests']==0
+  exports,datasets=[],{}
+  for profile in ('standard','detailed'):
+   for format in ('html','pdf','docx','xlsx','csv'):
+    file=s.export(task['id'],profile=profile,format=format);raw=file.read_bytes()
+    receipt=json.loads((file.parent/'receipt.json').read_text(encoding='utf-8'))
+    source=Path(receipt['source_html'])
+    assert receipt['schema']=='researchhelper.export-result' and receipt['status']=='saved'
+    assert Path(receipt['path'])==file and source.parent==file.parent and source.suffix=='.html' and not source.is_symlink()
+    assert receipt['profile']==profile and receipt['format']==format and receipt['converted_from_saved_html']
+    output_hash=hashlib.sha256(raw).hexdigest()
+    assert receipt['sha256']==output_hash and receipt['bytes']==len(raw)
+    _,frozen=convert_saved_html(source,'html',expected_sha256=receipt['source_html_sha256'])
+    assert frozen['template']['id']=='report-'+profile and frozen['profile']==profile and frozen['dataset']['rows']
+    assert frozen['content_hash']==receipt['content_hash']==task['delivery']['digest']
+    value=hashlib.sha256(json.dumps(frozen['dataset'],ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+    assert value==datasets.setdefault(profile,value)
+    if format=='pdf':assert raw.startswith(b'%PDF-')
+    if format in ('docx','xlsx'):assert raw.startswith(b'PK')
+    exports.append(dict(profile=profile,format=format,bytes=len(raw),sha256=output_hash))
+  results.append(dict(case=case,dataset_sha256=datasets['detailed'],profile_dataset_sha256=datasets,exports=exports))
+  saved=s.archive.get(task['id'])
+  assert saved['delivery']==task['delivery'] and saved['ledger']['used']==task['ledger']['used']
+ output.write_text(json.dumps(results,ensure_ascii=False),encoding='utf-8')
+finally:
+ s.agent.close_runtime()
 '''
 
 
 def accept_skill_reports(candidate, root, workspace):
-    with zipfile.ZipFile(candidate['artifacts']['skill']['path']) as archive:
-        archive.extractall(workspace)  # Complete safe names and hashes were verified above.
+    from skill.install_project_skill import verify_archive
+
+    artifact = candidate['artifacts']['skill']
+    archive_path, _, _ = verify_archive(Path(artifact['path']), artifact['sha256'])
+    with zipfile.ZipFile(archive_path) as archive:
+        archive.extractall(workspace)
     install = workspace / 'researchhelper'
     before = {str(p.relative_to(install)): digest(p) for p in install.rglob('*') if p.is_file()}
-    worker = workspace / 'host.py'; worker.write_text(SKILL_WORKER)
+    worker = workspace / 'host.py'
+    worker.write_text(SKILL_WORKER, encoding='utf-8')
     output = workspace / 'skill-results.json'
-    policy = '(version 1)(allow default)(deny network*)(deny file-write* (subpath ' + json.dumps(str(install)) + '))'
-    for path in (root/'core', root/'modules', root/'products', root/'.skills',
-                 Path.home()/'Library/Application Support/ResearchHelper'):
-        policy += '(deny file-read* (subpath ' + json.dumps(str(path)) + '))'
-    process = subprocess.run(['/usr/bin/sandbox-exec', '-p', policy, sys.executable, '-I', '-B', str(worker),
-        str(install), str(workspace/'project'), str(output)], cwd=workspace,
-        capture_output=True, text=True, timeout=120)
-    (workspace.parent/'skill.log').write_text(process.stdout + process.stderr)
+    command = [sys.executable, '-I', '-B', '-X', 'utf8', str(worker),
+               str(install), str(workspace/'project'), str(output)]
+    if candidate['platform'] == 'macos':
+        policy = '(version 1)(allow default)(deny network*)(deny file-write* (subpath ' + json.dumps(str(install)) + '))'
+        for path in (root/'core', root/'modules', root/'products', root/'.skills',
+                     Path.home()/'Library/Application Support/ResearchHelper'):
+            policy += '(deny file-read* (subpath ' + json.dumps(str(path)) + '))'
+        command = ['/usr/bin/sandbox-exec', '-p', policy, *command]
+    elif candidate['platform'] != 'windows':
+        raise RuntimeError('独立Skill验收平台未登记')
+    environment = {key: value for key,value in os.environ.items() if not key.upper().startswith('RESEARCHHELPER_')}
+    process = subprocess.run(command, cwd=workspace, env=environment, capture_output=True,
+                             encoding='utf-8', errors='replace', timeout=120)
+    (workspace.parent/'skill.log').write_text(process.stdout + process.stderr, encoding='utf-8')
     if process.returncode:
-        raise RuntimeError('独立Skill研究或导出失败，详见skill.log')
+        tail = (process.stderr or process.stdout).strip().splitlines()
+        raise RuntimeError('独立Skill研究或导出失败' + ('。' + tail[-1][:400] if tail else ''))
     after = {str(p.relative_to(install)): digest(p) for p in install.rglob('*') if p.is_file()}
     if before != after:
         raise RuntimeError('独立Skill安装目录被修改')
-    return json.loads(output.read_text())
+    return json.loads(output.read_text(encoding='utf-8'))
 
 
 def accept_current(selected, root=ROOT):
     from tests.accept_native_workbench_render import RenderRuntime
     root, selected = Path(root).resolve(), Path(selected).resolve()
-    candidate = verify_current_build(selected, root)
+    candidate = verify_current_build(selected, root, check_downloads=False)
     if candidate['platform'] != 'macos':
         raise RuntimeError('当前包后运行验收仅支持macOS；未声称Windows实机通过')
     out = Path(tempfile.mkdtemp(prefix='postbuild-' + selected.parent.name + '-', dir=root/'result/acceptance'))
@@ -269,10 +338,7 @@ def accept_current(selected, root=ROOT):
                     record['steps'].append('app_reports')
                 with stage('验收3/3', '独立Skill完成相同案例及导出，核对数据一致性'):
                     record['skill_reports'] = accept_skill_reports(candidate, root, workspace)
-                    app_data = {row['case']: row['dataset_sha256'] for row in record['app_reports']}
-                    skill_data = {row['case']: row['dataset_sha256'] for row in record['skill_reports']}
-                    if app_data != skill_data:
-                        raise RuntimeError('App与Skill的同案例研究数据不一致')
+                    verify_report_parity(record['app_reports'], record['skill_reports'])
                     record['steps'].append('skill_reports')
                     record['native_print_layout'] = accept_shared_native_print(
                         runtime.mount/'ResearchHelper.app', workspace/'researchhelper',
@@ -284,7 +350,7 @@ def accept_current(selected, root=ROOT):
                 log = workspace/'backend.log'
                 if log.is_file():
                     (out/'backend.log').write_bytes(log.read_bytes())
-        if verify_current_build(selected, root) != candidate:
+        if verify_current_build(selected, root, check_downloads=False) != candidate:
             raise RuntimeError('验收过程中候选身份发生变化')
         record.update(status='scoped_passed', temporary_research_removed=True, dataset_parity=True)
     except BaseException as error:
