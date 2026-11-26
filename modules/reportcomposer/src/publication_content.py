@@ -1070,7 +1070,8 @@ def reader_notes(content, *, client=False, comparison_refs=None):
     """Keep material comparability conditions once, alongside business risks."""
     draft=content.get('draft') or {}
     notes=list(dict.fromkeys(draft.get('reader_notes',[])))
-    from .draft_visuals import _validated
+    from .draft_analysis import FINANCIAL, analysis_field
+    from .draft_visuals import UNKNOWN_FINANCIAL_UNITS, _validated
     from .market_series import research_market_inputs_enabled
 
     comparisons = [row for row in _validated(content) if row.get('conditional_equal_scale')
@@ -1084,6 +1085,9 @@ def reader_notes(content, *, client=False, comparison_refs=None):
             else:
                 notes.append('同比与比率以计量口径一致为比较前提。' if comparison_refs is not None
                              else '若报表披露口径不同，同比和比率需重新计算。')
+        elif any(analysis_field(row) in FINANCIAL and observation_raw_unit(row) in UNKNOWN_FINANCIAL_UNITS
+                 for comparison in comparisons for row in comparison['rows']):
+            notes.append('相关金额的计量单位尚未核实，跨期比较以单位一致为前提。')
         else:
             notes.append('同比与比率按对应指标的原始计量口径比较。跨期比较要求单位一致。')
     return list(dict.fromkeys(notes))
