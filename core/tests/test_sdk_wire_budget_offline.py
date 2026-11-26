@@ -34,19 +34,27 @@ class Frame:
 
 class LocalSDK:
     def fund_daily(self, **parameters):
+        return self.query('fund_daily')
+
+    def daily_basic(self, **parameters):
+        return self.query('daily_basic')
+
+    def query(self, operation):
         import requests
         root, mode = os.environ["SDK_LOCAL_ENDPOINT"], os.environ["SDK_LOCAL_MODE"]
-        tries = 4 if mode == "retry" else 2 if mode in ("unknown", "auth") else 1
+        tries = 4 if mode == "retry" else 2 if mode in ("unknown", "auth", "duplicate_query") else 1
         for _ in range(tries):
             try:
-                reply = requests.post(root + "/query", json={"api": "fund_daily"}, timeout=2).json()
+                reply = requests.post(root + "/query", json={"api": operation}, timeout=2).json()
             except Exception:
-                if mode == "unknown":
+                if mode in ("unknown", "duplicate_query"):
                     continue
                 raise
+        if mode == "duplicate_query":
+            return Frame([])
         if mode == "query":
             return Frame(reply["data"])
-        if mode in ("swallowed_denial", "swallowed_cdn"):
+        if mode in ("swallowed_denial", "swallowed_cdn", "duplicate_cdn"):
             try:
                 return Frame(requests.get(root + "/cdn", timeout=2).json()["data"])
             except Exception:
@@ -102,7 +110,9 @@ class SDKWireBudgetTests(unittest.TestCase):
                 if owner.mode == "silent" and self.path == "/cdn":
                     owner.release.wait(5)
                     return
-                body = json.dumps({"data": [{"ts_code": "510300.SH", "trade_date": "20260930", "close": 4.5}]}).encode()
+                body = json.dumps({"data": getattr(owner, "response_rows", [{"ts_code": "510300.SH", "trade_date": "20260930", "close": 4.5}])}).encode()
+                if (owner.mode, self.path) in (("duplicate_query", "/query"), ("duplicate_cdn", "/cdn")):
+                    body = b'{"code":-1,"code":0,"data":[]}'
                 self.send_response(401 if owner.mode == "auth" else 503 if owner.mode == "retry" else 200)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -128,7 +138,7 @@ class SDKWireBudgetTests(unittest.TestCase):
 
     def task(self, requests=100):
         return {"id": "rh-wire-fixture", "version": 1, "batch": 1, "cutoff": "2026-10-02T18:00:00+08:00",
-            "ledger": budget({"data_requests": requests}), "source_records": []}
+            "ledger": budget({"data_requests": requests}), "source_records": [], "objects": ["510300.SH"]}
 
     def run_sdk(self, task):
         with patch.dict(os.environ, {"SDK_LOCAL_ENDPOINT": f"http://127.0.0.1:{self.server.server_port}",
@@ -198,6 +208,20 @@ class SDKWireBudgetTests(unittest.TestCase):
         self.assertEqual(self.calls, ["/query", "/cdn"])
         self.assertEqual(self.check(task, 2, 2)["failure_code"], "connection_interrupted")
         self.assertFalse(task["source_records"])
+
+    def test_duplicate_json_cannot_be_hidden_by_a_retry_or_empty_frame(self):
+        for mode, paths in (("duplicate_query", ["/query"]), ("duplicate_cdn", ["/query", "/cdn"])):
+            with self.subTest(mode=mode):
+                self.mode = mode
+                self.calls.clear()
+                task = self.task()
+                with self.assertRaisesRegex(ContractError, "重复字段"):
+                    self.run_sdk(task)
+                self.assertEqual(self.calls, paths)
+                count = len(paths)
+                self.assertEqual(self.check(task, count, count)["failure_code"], "duplicate_response_field")
+                self.assertEqual(task["ledger"]["dispatches"][-1]["sdk_request_state"], "返回结构异常")
+                self.assertFalse(task["source_records"])
 
     def test_known_responses_may_not_exceed_three_same_query_sends(self):
         self.mode = "retry"
