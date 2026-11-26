@@ -122,7 +122,7 @@ def is_finder_metadata(file):
         return stream.read(8) == b'\x00\x00\x00\x01Bud1'
 
 
-def delivery_entries(delivery, project_root=None):
+def delivery_entries(delivery, project_root=None, *, recorded_copy=None):
     """Validate the entire destination without copying or deleting any bytes."""
     delivery = Path(delivery)
     installer_pattern = r'(?:arm64\.dmg|windows-x64-setup\.exe)'
@@ -167,6 +167,8 @@ def delivery_entries(delivery, project_root=None):
         elif not file.is_file():
             kind = '非普通文件'
         elif not allowed.fullmatch(file.name):
+            if recorded_copy is not None and recorded_copy(file, allowed):
+                continue
             kind = '其他平台安装包' if installer.fullmatch(file.name) else '未知文件'
         else:
             artifacts.append(file)
@@ -184,12 +186,23 @@ def archive_deliveries(delivery, root):
     return [archive_file(file, root) for file in delivery_entries(delivery, root)]
 
 
-def replace_delivery(staged, target):
+def _delivery_state(directory):
+    files = {file.name: digest(file) for file in delivery_entries(directory)}
+    metadata = directory / '.DS_Store'
+    if is_finder_metadata(metadata):
+        files[metadata.name] = digest(metadata)
+    return files
+
+
+def replace_delivery(staged, target, *, archived=None):
     """Sibling-directory swap with rollback; archives already retain the old bytes."""
     staged, target = Path(staged), Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.is_symlink():
         raise RuntimeError('拒绝替换符号链接交付目录')
+    previous = _delivery_state(target)
+    if archived is not None and {name: value for name, value in previous.items() if name != '.DS_Store'} != archived:
+        raise RuntimeError('交付目录与已归档内容不一致，未替换')
     with tempfile.TemporaryDirectory(prefix='.' + target.name + '-staging-', dir=target.parent) as folder:
         ready = Path(folder) / 'delivery'
         shutil.copytree(staged, ready)
@@ -201,24 +214,35 @@ def replace_delivery(staged, target):
             if not is_finder_metadata(metadata) or (ready / '.DS_Store').is_symlink():
                 raise RuntimeError('交付目录含未知Finder项目，原目录保持不变：.DS_Store')
             shutil.copyfile(metadata, ready / '.DS_Store')
-            if digest(metadata) != digest(ready / '.DS_Store'):
+            if previous.get('.DS_Store') != digest(ready / '.DS_Store'):
                 raise RuntimeError('Finder元数据复制校验失败，原目录保持不变')
         backup = target.with_name('.' + target.name + '-backup-' + uuid.uuid4().hex)
         had_target = target.exists()
         if had_target:
             target.rename(backup)
         try:
+            if (had_target and _delivery_state(backup) != previous) or (not had_target and previous):
+                raise RuntimeError('交付目录在替换期间变化，保留原目录')
+            if target.exists() or target.is_symlink():
+                raise RuntimeError('交付位置在替换期间被占用，保留原目录')
             ready.rename(target)
         except BaseException:
-            if had_target and backup.exists() and not target.exists():
+            if had_target and backup.exists() and not target.exists() and not target.is_symlink():
                 backup.rename(target)
             raise
         if had_target:
             try:
-                shutil.rmtree(backup)
-            except OSError:
+                if _delivery_state(backup) != previous:
+                    raise RuntimeError('旧目录有新内容')
+                for name, value in previous.items():
+                    file = backup / name
+                    if file.is_symlink() or not file.is_file() or digest(file) != value:
+                        raise RuntimeError('旧文件已变化')
+                    file.unlink()
+                backup.rmdir()
+            except (OSError, RuntimeError):
                 # Never roll back a verified new delivery to a partially removed backup.
-                print('新交付已就绪，旧临时目录清理未完成：' + str(backup), flush=True)
+                print('新交付已就绪，旧目录保留待核对：' + str(backup), flush=True)
 
 
 def current_sources_match(root, expected):
@@ -273,7 +297,7 @@ def materialize_candidate(root, built, temporary):
     record = output / 'candidate.json'
     write_record(record, receipt)
     try:
-        replace_delivery(downloads, delivery)
+        replace_delivery(downloads, delivery, archived={file.name: file.parent.name for file in previous})
     except BaseException:
         receipt['status'] = 'failed_local_delivery'
         write_record(record, receipt)
@@ -328,12 +352,14 @@ def update_project_skill(candidate_path, root=ROOT):
     with build_lock(root):
         from reconcile_delivery import reconcile_downloads,reconcile_project_skill
         reconcile_downloads(root,root/('result/windows-candidate' if sys.platform=='win32' else 'dist'))
-        candidate = verify_current_build(candidate_path, root)
+        candidate = verify_or_restore_downloads(candidate_path, root, 'project_skill')
         archive = candidate['artifacts']['skill']
         retired=reconcile_project_skill(root)
         installed=install_project_skill(Path(archive['path']), project_root=root,
                                      expected_sha256=archive['sha256'], preserve_empty_directories=True)
         installed['generated_copy_reconciliation']=retired
+        installed['post_install_generated_copy_reconciliation']=reconcile_project_skill(
+            root, expected_manifest=installed['manifest_sha256'])
         installed['native_renderer_cache']=cache_native_renderer(candidate,root,candidate_path)
         return installed
 
@@ -353,8 +379,9 @@ def build_current(root=ROOT, *, builder=build_candidate, install_skill=True):
     # costly freezing; the same pure validator runs again before promotion.
     # Unknown user files remain untouched, and macOS/Windows stay isolated.
     target = root / ('result/windows-candidate' if sys.platform == 'win32' else 'dist')
+    from reconcile_delivery import download_inventory, reconcile_downloads
+    download_inventory(root, target)
     with build_lock(root):
-        from reconcile_delivery import reconcile_downloads
         reconcile_downloads(root,target)
         delivery_entries(target, root)
         parent = root / 'result/build-work';parent.mkdir(parents=True, exist_ok=True)
@@ -366,9 +393,12 @@ def build_current(root=ROOT, *, builder=build_candidate, install_skill=True):
             raw = Path(built['log']).parent / 'candidate.json'
             write_record(raw, {**built, 'status': 'promoted_local_candidate', 'final_receipt': str(record),
                                'snapshot_retained': False, 'temporary_payload_retained': False})
-    receipt.update(temporary_workspace_removed=not Path(folder).exists(),
-                   elapsed_seconds=round(time.monotonic() - started, 1))
-    write_record(record, receipt)
+        receipt.update(temporary_workspace_removed=not Path(folder).exists(),
+                       elapsed_seconds=round(time.monotonic() - started, 1))
+        write_record(record, receipt)
+        if receipt['platform'] == 'macos':
+            marker = macos_candidate_marker(root)
+            write_record(marker, {'candidate': str(record), 'manifest_sha256': receipt['manifest_sha256']})
     # Only after commit and scratch-workspace cleanup is it safe to retire old
     # delivery bytes. Failure cannot remove the current, verified candidate.
     from release_retention import retire_after_build
@@ -393,13 +423,31 @@ def build_current(root=ROOT, *, builder=build_candidate, install_skill=True):
     print('离线demo：' + receipt['directory_artifacts']['demo']['path'] + '\n回执：' + str(record) +
           '\n日志：' + receipt['log'] + '\n临时源码与编译目录已清理。', flush=True)
     retirement = receipt['release_retirement']
-    if retirement['status'] == 'retired_recoverably':
+    if retirement['status'] == 'retired_permanently':
+        print('已直接清理'+str(retirement['deleted'])+'项核验过的旧交付物；现版和研究记录保留。',flush=True)
+    elif retirement['status'] == 'retired_recoverably':
         print('旧安装包与候选demo已移入废纸篓，可恢复；仓库仅保留现版交付。', flush=True)
+    elif retirement['status'] == 'deferred_until_acceptance':
+        print('旧交付物保留，离线验收通过后再直接清理。',flush=True)
     elif retirement['status'] == 'nothing_superseded_to_remove':
         print('仓库无待清理的旧安装包或候选demo。', flush=True)
     elif retirement['status'] == 'requires_review':
         print('旧交付物清理待核对：' + str(retirement.get('worker_receipt', retirement.get('error', '现版已保留'))), flush=True)
     return receipt
+
+
+class MissingDownloadCopies(RuntimeError):
+    def __init__(self, present, missing):
+        super().__init__('当前下载目录不属于本候选，缺少文件' + '、'.join(missing))
+        self.present = present
+        self.missing = missing
+
+
+def candidate_downloads(candidate, root):
+    target = root / ('dist' if candidate['platform'] == 'macos' else 'result/windows-candidate')
+    if Path(candidate['delivery']) != target:
+        raise RuntimeError('当前下载目录不属于本候选')
+    return target, {Path(item['path']).name: item for item in candidate['artifacts'].values()}
 
 
 def verify_current_build(record, root=ROOT, *, check_downloads=True):
@@ -433,43 +481,159 @@ def verify_current_build(record, root=ROOT, *, check_downloads=True):
     for item in candidate['directory_artifacts'].values():
         verify_directory(item, output)
     if check_downloads:
-        target = root / ('dist' if candidate['platform'] == 'macos' else 'result/windows-candidate')
-        expected = {Path(item['path']).name for item in candidate['artifacts'].values()}
-        actual = {file.name for file in delivery_entries(target, root)}
-        if Path(candidate['delivery']).resolve() != target or actual != expected:
+        from reconcile_delivery import download_inventory
+        target, expected = candidate_downloads(candidate, root)
+        actual = set(download_inventory(root, target)['files'])
+        if actual - expected.keys():
             raise RuntimeError('当前下载目录不属于本候选或包含额外项目')
-        for item in candidate['artifacts'].values():
-            if digest(target / Path(item['path']).name) != item['sha256']:
+        present = {name: digest(target / name) for name in sorted(actual)}
+        for name, value in present.items():
+            if value != expected[name]['sha256']:
                 raise RuntimeError('当前下载与保留候选不一致')
+        if missing := sorted(expected.keys() - actual):
+            raise MissingDownloadCopies(present, missing)
     return candidate
 
 
+def macos_candidate_marker(root):
+    path = root / '.researchhelper/runtime/current-macos-candidate.json'
+    if path.is_symlink() or path.parent.resolve() != path.parent:
+        raise RuntimeError('macOS候选记录不能使用链接路径')
+    return path
+
+
+def active_macos_candidate(root):
+    marker = macos_candidate_marker(root)
+    if not marker.is_file():
+        return None
+    try:
+        state = json.loads(marker.read_text())
+        selected = Path(state['candidate'])
+        if (selected.name != 'candidate.json' or selected.parent.parent != root / 'result/build-candidates'
+                or selected.resolve() != selected):
+            return None
+        candidate = json.loads(selected.read_text())
+        if (candidate['platform'] == 'macos' and candidate['status'] == 'built_local_candidate'
+                and candidate['manifest_sha256'] == state['manifest_sha256']):
+            return selected, candidate
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    return None
+
+
+def verify_or_restore_downloads(selected, root, phase):
+    """Under the build lock, replace only missing copies of the active Mac candidate."""
+    selected = Path(selected).resolve()
+    try:
+        return verify_current_build(selected, root)
+    except MissingDownloadCopies as missing:
+        active = active_macos_candidate(root)
+        if not active or active[0] != selected:
+            raise
+        candidate = verify_current_build(selected, root, check_downloads=False)
+        if candidate['manifest_sha256'] != active[1]['manifest_sha256']:
+            raise RuntimeError('恢复前候选身份已变化')
+        target, expected = candidate_downloads(candidate, root)
+        with tempfile.TemporaryDirectory(prefix='.download-recovery-', dir=target.parent) as directory:
+            staged = Path(directory)
+            for name, item in expected.items():
+                file = staged / name
+                shutil.copyfile(item['path'], file)
+                if digest(file) != item['sha256']:
+                    raise RuntimeError('恢复文件与候选归档不一致：' + name)
+            replace_delivery(staged, target, archived=missing.present)
+        candidate = verify_current_build(selected, root)
+        candidate.setdefault('download_repairs', []).append({'phase': phase, 'files': missing.missing})
+        write_record(selected, candidate)
+        print('已从同一候选恢复下载文件：' + '、'.join(missing.missing), flush=True)
+        return candidate
+
+
+def resumable_macos_candidate(root):
+    from release_retention import _accepted_current_candidate, permanent_cleanup_enabled
+    active = active_macos_candidate(root)
+    if not active:
+        return None
+    selected, candidate = active
+    try:
+        current_sources_match(root, candidate['source_hashes'])
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError):
+        return None
+    target, expected = candidate_downloads(candidate, root)
+    installation = candidate.get('project_skill_installation', {}).get('status')
+    if installation not in ('installed', 'already_current') or not _accepted_current_candidate(root, selected):
+        return selected
+    if (permanent_cleanup_enabled(root) and
+            candidate.get('release_retirement', {}).get('status') == 'deferred_until_acceptance'):
+        return selected
+    if any(not (target / name).is_file() for name in expected):
+        return selected
+    return None
+
+
 def build_and_accept(root=ROOT, *, builder=build_candidate):
-    """Build once, accept the exact package, then update the project Skill."""
+    """Accept the active macOS candidate, then verify delivery and update the Skill."""
     from accept_current import accept_current
+    from reconcile_delivery import reconcile_downloads
+    from release_retention import _accepted_current_candidate, permanent_cleanup_enabled, retire_after_build
     root = Path(root).resolve()
-    built = build_current(root, builder=builder, install_skill=False)
-    selected = Path(built['payload']) / 'candidate.json'
     with build_lock(root):
-        from reconcile_delivery import reconcile_downloads
+        selected = resumable_macos_candidate(root)
+    if selected is None:
+        built = build_current(root, builder=builder, install_skill=False)
+        selected = Path(built['payload']) / 'candidate.json'
+    else:
+        print('继续验收同一候选：' + selected.parent.name, flush=True)
+    with build_lock(root):
         reconcile_downloads(root,root/'dist')
-        accepted = accept_current(selected, root)
+        if _accepted_current_candidate(root, selected):
+            candidate = verify_current_build(selected, root, check_downloads=False)
+        else:
+            accepted = accept_current(selected, root)
+            if accepted.get('status') != 'scoped_passed':
+                raise RuntimeError('包后验收未通过，旧交付物保留。')
+            candidate = verify_current_build(selected, root, check_downloads=False)
+            candidate['postbuild_acceptance'] = {'status': accepted['status'], 'path': accepted['receipt'],
+                                                 'sha256': digest(accepted['receipt'])}
+            write_record(selected, candidate)
+        verify_or_restore_downloads(selected, root, 'after_acceptance')
     installation = update_project_skill(selected, root)
+    if installation.get('status') not in ('installed','already_current'):
+        raise RuntimeError('项目级Skill尚未更新，旧交付物保留。')
     with build_lock(root):
         reconcile_downloads(root,root/'dist')
-        current = verify_current_build(selected, root)
+        current = verify_or_restore_downloads(selected, root, 'finalize')
         current.update(project_skill_installation=installation,
-            postbuild_acceptance={'status': accepted['status'], 'path': accepted['receipt'],
-                                  'sha256': digest(accepted['receipt'])})
+                       postbuild_acceptance=candidate['postbuild_acceptance'])
         write_record(selected, current)
+    # The worker takes its own lock only after package acceptance and Skill
+    # installation. Failed acceptance leaves the prior delivery bytes intact.
+    if permanent_cleanup_enabled(root):
+        try:
+            retirement=retire_after_build(root,selected)
+        except Exception as error:
+            retirement=dict(status='requires_review',error=str(error))
+        with build_lock(root):
+            reconcile_downloads(root,root/'dist')
+            current=verify_or_restore_downloads(selected,root,'after_retirement')
+            current['release_retirement']=retirement;write_record(selected,current)
+        if retirement['status']=='retired_permanently':
+            print('已直接清理'+str(retirement['deleted'])+'项核验过的旧交付物；现版和研究记录保留。',flush=True)
+        elif retirement['status']=='requires_review':
+            print('旧交付物清理未完成，已保留现版；详见当次回执。',flush=True)
     print('打包及离线验收完成：实际DMG和独立Skill的三类研究、两版报告、五种导出均已通过。', flush=True)
-    print('验收回执：' + accepted['receipt'] + '\n未自动安装App、同步demo或正式发布。', flush=True)
+    print('验收回执：' + current['postbuild_acceptance']['path'] + '\n未自动安装App、同步demo或正式发布。', flush=True)
     return current
 
 
 if __name__ == '__main__':
     try:
-        build_and_accept() if sys.platform == 'darwin' else build_current()
+        if sys.platform == 'darwin':
+            build_and_accept()
+        else:
+            result = build_current()
+            if result['project_skill_installation']['status'] not in ('installed', 'already_current'):
+                raise RuntimeError('安装包候选已生成，项目级Skill尚未更新，请核对候选回执')
     except KeyboardInterrupt:
         print('构建已取消。请查看当次回执；未安装或正式发布。', flush=True)
         sys.exit(130)
