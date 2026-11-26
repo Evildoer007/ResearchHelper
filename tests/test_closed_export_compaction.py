@@ -44,6 +44,15 @@ class ClosedExportCompactionTests(unittest.TestCase):
         (self.folder/'task.json').write_text(json.dumps(dict(id='closed_fixture',status='运行中')))
         with self.check(),self.assertRaises(ValueError):compact_closed_exports(self.folder,root=self.root)
 
+    def test_javascript_fixture_keeps_export_at_its_original_path(self):
+        tests = self.root / 'tests'
+        tests.mkdir()
+        (tests / 'replay.mjs').write_text(f"const fixture = 'result/acceptance/{self.folder.name}/task.json';")
+        with self.assertRaisesRegex(ValueError, '仍被回归引用'):
+            compact_closed_exports(self.folder, root=self.root)
+        self.assertEqual((self.folder / 'task.json').read_bytes(), self.task)
+        self.assertFalse((self.folder / 'task.json.gz').exists())
+
     def test_unknown_directory_and_existing_archive_are_not_overwritten(self):
         (self.folder/'task.json.gz').write_bytes(b'existing')
         with self.check(),self.assertRaises(ValueError):compact_closed_exports(self.folder,root=self.root)
