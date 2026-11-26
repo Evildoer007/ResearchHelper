@@ -2,11 +2,12 @@
 import copy
 import json
 import unittest
+from lxml import html
 
 from researchhelper.reports import compose, render, research_figures
 from researchhelper.report_examples import example_figures, render_example
 from tests import test_report_visual_selection_offline as fixtures
-from tests.test_report_measurement_accessibility_offline import MeasurementTables
+from tests.test_report_measurement_accessibility_offline import MeasurementTables, chart_data
 from tests.test_report_argument_figures_offline import ArgumentFigures
 from tests.test_report_editorial_figures_offline import Tables
 
@@ -19,7 +20,7 @@ class ReferenceHarnessPolicyTests(unittest.TestCase):
         self.addCleanup(self.fixture.doCleanups)
 
     def test_price_plot_occurs_once_beside_answer_and_preserves_all_bindings(self):
-        content = self.fixture.real()
+        content = self.fixture.saved_price_report()['content']
         before = copy.deepcopy(content)
         paper = render(content, ROOT)
         descriptor = next(iter(research_figures(content).values()))
@@ -27,12 +28,21 @@ class ReferenceHarnessPolicyTests(unittest.TestCase):
         self.assertEqual(descriptor['presentation'], 'chart')
         self.assertEqual([row['value'] for row in descriptor['rows']], [4.416, 4.432])
         ref = content['calculations'][0]['id']
-        self.assertEqual(paper.count("data-calculation-ref='"+ref+"'"), 1)
-        self.assertLess(paper.index(content['questions'][0]['answer']), paper.index("data-calculation-ref='"+ref+"'"))
-        self.assertLess(paper.index("data-calculation-ref='"+ref+"'"), paper.index("class='research-appendix'"))
+        tree = html.document_fromstring(paper)
+        figure, = tree.xpath('//main//figure[@data-calculation-ref=$ref]', ref=ref)
+        answer = tree.get_element_by_id('answer-' + content['questions'][0]['id'])
+        shared, = figure.xpath('ancestor::div[contains(concat(" ",normalize-space(@class)," ")," logic-reading-grid ")]')
+        self.assertIn(answer, list(shared.iterdescendants()))
+        order = list(shared.iterdescendants())
+        self.assertLess(order.index(answer), order.index(figure))
+        self.assertTrue(tree.get_element_by_id(ref).xpath('ancestor::*[@id="report-records"]'))
+        plot, = figure.xpath('.//*[@aria-details]')
+        detail = tree.get_element_by_id(plot.get('aria-details'))
         for row in descriptor['rows']:
-            self.assertIn(str(row['value'])+row['unit'], paper)
-            self.assertIn("id='ev-"+row['ref']+"'", paper)
+            self.assertIn(str(row['value'])+row['unit'], detail.text_content())
+            target = 'ev-' + row['ref']
+            self.assertTrue(detail.xpath('.//a[@href=$href]', href='#' + target))
+            self.assertEqual(len(tree.xpath('//*[@id=$target]', target=target)), 1)
         self.assertEqual(before, content)
 
     def test_financial_comparison_has_exact_values_and_accounting_basis(self):
@@ -71,8 +81,13 @@ class ReferenceHarnessPolicyTests(unittest.TestCase):
         self.assertEqual([[figure['rows'][index]['value'] for index in group['indices']] for group in figure['groups']],
                          [[.15, .05], [.5, .1]])
         paper = render(content, ROOT)
-        self.assertIn("type:'bar'", paper)
-        self.assertNotIn("type:'line'", paper)
+        selected=chart_data(paper)
+        self.assertEqual(len(selected),1)
+        self.assertEqual(selected[0]['auto_visual']['scheme'],'grouped_bar')
+        self.assertEqual(selected[0]['auto_visual']['data']['labels'],figure['categories'])
+        self.assertEqual(selected[0]['auto_visual']['data']['series'],[
+            dict(name=group['name'],values=[figure['rows'][index]['value'] for index in group['indices']])
+            for group in figure['groups']])
         self.assertEqual(before, content)
 
     def test_index_observations_retain_variant_currency_base_and_dates(self):
@@ -87,7 +102,12 @@ class ReferenceHarnessPolicyTests(unittest.TestCase):
         calculation = content['calculations'][0]
         self.assertEqual([row['label'] for row in figure['rows']],
                          [calculation['parameters'][key] for key in ('start_date', 'end_date')])
-        self.assertNotIn("type:'line'", render(content, ROOT))
+        selected=chart_data(render(content,ROOT))
+        self.assertEqual(len(selected),1)
+        self.assertEqual(selected[0]['kind'],'points')
+        self.assertNotIn(selected[0]['auto_visual']['scheme'],('line','area','multi_line'))
+        self.assertEqual(selected[0]['auto_visual']['data']['labels'],[row['label'] for row in figure['rows']])
+        self.assertEqual(selected[0]['auto_visual']['data']['values'],[row['value'] for row in figure['rows']])
         self.assertEqual(before, content)
 
     def test_every_measurement_keeps_accessible_table_units_headers_and_evidence(self):
