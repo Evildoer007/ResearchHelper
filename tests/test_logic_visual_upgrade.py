@@ -53,12 +53,15 @@ class LogicVisualUpgradeTests(unittest.TestCase):
         self.assertNotIn('foreign',str(result['mechanism']))
         self.assertEqual(canonical(value),before)
 
-    def test_explicit_path_and_numeric_chart_both_survive_reference_resolution(self):
+    def test_explicit_path_and_sparse_readings_survive_reference_resolution(self):
         content=self.referenced_path();before=canonical(content)
         specs=[spec for spec in logic_figure_plan(content) if spec.get('paper_logic')=='logic-1']
         self.assertIn('evidence',[spec['auto_visual']['scheme'] for spec in specs])
-        self.assertTrue(any(spec.get('coverage_kind')=='numeric' for spec in specs))
+        self.assertFalse(any(spec.get('coverage_kind')=='numeric' for spec in specs))
         self.assertTrue(all(set(spec.get('data_refs',[]))<=set(spec['argument_data_refs']) for spec in specs))
+        tree=html.document_fromstring(design(content,ROOT)['html'])
+        self.assertEqual(set(tree.get_element_by_id('logic-1').xpath('.//p[@class="measured-reading"]/span/@data-observation-id')),{'D1','D4'})
+        self.assertEqual(set(tree.get_element_by_id('draft-basis-1').xpath('.//tr/@data-observation-id')),{'D1','D4'})
         self.assertEqual(canonical(content),before)
 
     def test_detailed_step_basis_respects_source_ownership(self):
@@ -82,31 +85,36 @@ class LogicVisualUpgradeTests(unittest.TestCase):
             self.assertEqual([group.get('data-columns') for group in groups],['2','1'])
         self.assertEqual(canonical(content),before)
 
-    def test_every_data_backed_logic_gets_a_figure(self):
+    def test_every_data_backed_logic_keeps_a_figure_or_readable_evidence(self):
         tree=html.document_fromstring(design(self.content,ROOT)['html'])
         for index in range(1,4):
-            self.assertTrue(tree.xpath('//section[@id="logic-'+str(index)+'"]//figure'))
+            section=tree.get_element_by_id('logic-'+str(index))
+            self.assertTrue(section.xpath('.//figure | .//table | .//p[@class="measured-reading"]//span[@data-observation-id or @data-calculation-ref]'))
 
     def test_no_argument_can_borrow_unreferenced_observations(self):
         for spec in logic_figure_plan(self.content):
             if spec.get('paper_logic'):
                 self.assertTrue(set(spec.get('data_refs',[]))<=set(spec['argument_data_refs']))
 
-    def test_indexed_comparison_uses_registered_growth_without_amount_conversion(self):
-        spec=next(s for s in logic_figure_plan(self.content) if s.get('paper_logic')=='logic-1')
-        self.assertEqual(spec['plot_scale']['base'],100)
-        self.assertEqual(spec['auto_visual']['data']['pairs'],[[100.0,99.0],[100.0,90.0]])
-        self.assertEqual(spec['auto_visual']['scheme'],'dumbbell')
-        self.assertEqual(spec['context'],'2024年=100')
-        self.assertEqual(spec['data_refs'],['D1','D4','D2','D5'])
+    def test_two_growth_rates_keep_the_registered_comparisons_without_indexing(self):
+        result = design(self.content, ROOT)
+        paper = html.document_fromstring(result['html'])
+        section = paper.get_element_by_id('logic-1')
+        self.assertFalse(section.xpath('.//figure | .//table'))
+        readings = section.xpath('.//span[@data-calculation-ref]')
+        self.assertEqual([(row.text_content(), row.get('data-calculation-inputs').split()) for row in readings],
+                         [('-1.00%', ['D1', 'D4']), ('-10.00%', ['D2', 'D5'])])
 
-    def test_cash_logic_has_its_own_emphasized_registered_observation(self):
-        spec=next(s for s in logic_figure_plan(self.content) if s.get('paper_logic')=='logic-2')
-        self.assertEqual(spec['name'],'现金流与盈利变化')
-        self.assertEqual(spec['auto_visual']['scheme'],'lollipop')
-        self.assertEqual(spec['auto_visual']['data']['focusIndex'],0)
-        self.assertEqual(spec['data_refs'],['D3','D6'])
-        self.assertNotEqual(spec['target'],next(s['target'] for s in logic_figure_plan(self.content) if s.get('paper_logic')=='logic-1'))
+    def test_cash_logic_keeps_its_two_raw_readings_and_registered_change(self):
+        tree=html.document_fromstring(design(self.content,ROOT)['html'])
+        section=tree.get_element_by_id('logic-2')
+        self.assertFalse(section.xpath('.//figure'))
+        self.assertFalse(section.xpath('.//*[@data-observation-id]'))
+        result, = section.xpath('.//p[@class="measured-reading"]/span[@data-calculation-ref]')
+        self.assertEqual(result.text_content(), '-33.33%')
+        self.assertEqual(result.get('data-calculation-inputs').split(), ['D3', 'D6'])
+        source = tree.get_element_by_id('draft-basis-2')
+        self.assertEqual(source.xpath('.//tr/@data-observation-id'), ['D3', 'D6'])
 
     def test_price_and_valuation_share_only_a_verified_date_window(self):
         specs=[s for s in logic_figure_plan(self.content) if s.get('paper_logic')=='logic-3']
@@ -121,15 +129,20 @@ class LogicVisualUpgradeTests(unittest.TestCase):
         content=deepcopy(self.content)
         for logic in content['draft']['logics']:logic.update(data_refs=[],calculation_refs=[],source_refs=[])
         specs=logic_figure_plan(rehash(content))
-        self.assertEqual({s.get('paper_logic') for s in specs if s.get('paper_logic')},{'logic-1','logic-2','logic-3'})
-        self.assertTrue(all(s['reference_origin']=='literal_topic_match' for s in specs if s.get('paper_logic')))
+        self.assertEqual({spec.get('paper_logic') for spec in specs}, {'logic-3'})
+        self.assertEqual({spec['reference_origin'] for spec in specs}, {'literal_topic_match'})
+        self.assertEqual({ref for spec in specs for ref in spec['data_refs']}, {'D7', 'D8', 'D9', 'D10', 'D11', 'D12'})
 
     def test_partial_dates_do_not_get_filled_or_falsely_linked(self):
         content=deepcopy(self.content);content['draft']['logics'][2]['data_refs'].remove('D7')
         specs=[s for s in logic_figure_plan(rehash(content)) if s.get('paper_logic')=='logic-3']
-        self.assertEqual(len(specs),2);self.assertTrue(all('sync_group' not in s for s in specs))
-        price=next(s for s in specs if s['field']=='close')
-        self.assertEqual(price['dates'],['2026-10-27','2026-10-28']);self.assertEqual(price['values'],[1340,1335])
+        market,=specs
+        self.assertNotIn('sync_group',market)
+        self.assertNotEqual(market['field'],'close')
+        tree=html.document_fromstring(design(content,ROOT)['html'])
+        expected=[row['id'] for row in content['draft']['facts'] if row['field']=='close'
+                  and row['id'] in content['draft']['logics'][2]['data_refs']]
+        self.assertEqual(tree.get_element_by_id('logic-3').xpath('.//p[@class="measured-reading"]/span/@data-observation-id'),expected)
 
     def test_foreign_source_cannot_survive_as_a_supplementary_chart(self):
         content=deepcopy(self.content)
@@ -252,21 +265,26 @@ class LogicVisualUpgradeTests(unittest.TestCase):
         self.assertTrue(all(label in ''.join(texts) for label in labels))
         self.assertIn(labels[-1],texts[-1])
 
-    def test_compact_client_pairs_short_argument_with_its_figure(self):
-        client=html.document_fromstring(design(self.content,ROOT)['html'])
-        for index in (1,2):
-            nodes=client.xpath('//section[@id="logic-'+str(index)+'"]//div[@class="logic-reading-grid"]')
-            self.assertEqual(len(nodes),1);self.assertEqual(len(nodes[0].xpath('.//figure')),1)
-        detail=html.document_fromstring(design(self.content,ROOT,profile='detailed')['html'])
-        self.assertFalse(detail.xpath('//*[@class="logic-reading-grid"]'))
+    def test_sparse_arguments_stay_in_prose_and_matching_series_share_a_row(self):
+        for profile in ('standard', 'detailed'):
+            paper = html.document_fromstring(design(self.content, ROOT, profile=profile)['html'])
+            for number in (1, 2):
+                argument = paper.get_element_by_id(f'logic-{number}')
+                self.assertFalse(argument.xpath('.//figure | .//div[@class="logic-reading-grid"]'))
+            series = paper.get_element_by_id('logic-3')
+            group, = series.xpath('.//div[@data-columns="2"]')
+            self.assertEqual(len(group.xpath('./figure')), 2)
 
     def test_frozen_presentation_records_argument_visual_coverage(self):
         document=design(self.content,ROOT)['document']
-        self.assertEqual({key:row['figures'] for key,row in document['figure_coverage'].items()},
-                         {'logic-1':1,'logic-2':1,'logic-3':2})
-        self.assertTrue(all(row['status']=='numeric' for row in document['figure_coverage'].values()))
-        self.assertEqual(document['figure_coverage']['logic-1']['schemes'],['dumbbell'])
-        self.assertEqual(document['figure_coverage']['logic-2']['schemes'],['lollipop'])
+        coverage = document['figure_coverage']
+        self.assertEqual({key: row['figures'] for key, row in coverage.items()},
+                         {'logic-1': 0, 'logic-2': 0, 'logic-3': 2})
+        self.assertEqual(coverage['logic-1']['status'], 'numeric_text')
+        self.assertEqual(coverage['logic-2']['status'], 'numeric_text')
+        self.assertEqual(set(coverage['logic-1']['data_refs']), {'D1', 'D2', 'D4', 'D5'})
+        self.assertEqual(set(coverage['logic-2']['data_refs']), {'D3', 'D6'})
+        self.assertEqual(coverage['logic-3']['schemes'], ['line'])
 
     def test_static_qualitative_export_keeps_labels_instead_of_an_empty_chart(self):
         from researchhelper.publication_graphics import chart_pdf
@@ -285,10 +303,11 @@ class LogicVisualUpgradeTests(unittest.TestCase):
         class Engine:model=Model()
         task,_=fixture();_write(Engine(),task,task['draft_report']['facts'])
         self.assertEqual(len(calls),1)
-        self.assertIn('按引用单独配图',CLIENT_REPORT_BRIEF)
+        self.assertIn('段落和对应的图表服务于同一个判断', CLIENT_REPORT_BRIEF)
         self.assertIn('mechanism.steps',CLIENT_REPORT_BRIEF)
         payload=json.loads(calls[0][0][1]['content'])
         self.assertIn('mechanism',payload['output_example']['logics'][0])
+        self.assertIn('detail_analysis',payload['output_example']['logics'][0])
         self.assertEqual(calls[0][1]['phase'],'draft_report')
 
     def test_shared_date_is_a_caption_not_an_extra_static_chart_column(self):
@@ -300,9 +319,13 @@ class LogicVisualUpgradeTests(unittest.TestCase):
                 elif row['kind']=='reading_columns':
                     for column in row['panels']:yield from groups(column)
         panels=list(groups(document['blocks']))
-        self.assertEqual([row['columns'] for row in panels],[1,1,2])
-        self.assertEqual([len(row['panels']) for row in panels],[1,1,2])
-        self.assertEqual(sum(block['kind']=='chart' for row in panels for panel in row['panels'] for block in panel),4)
+        group, = panels
+        self.assertEqual(group['columns'], 2)
+        self.assertEqual(len(group['panels']), 2)
+        self.assertEqual(sum(block['kind'] == 'chart' for panel in group['panels'] for block in panel), 2)
+        paper = html.document_fromstring(design(self.content, ROOT)['html'])
+        dates, = paper.xpath('//p[contains(@class, "shared-figure-context")]')
+        self.assertEqual(dates.text_content(), '2026-10-26至2026-10-28')
 
     def test_same_result_is_not_mutated_by_reuse_or_multiple_profiles(self):
         before=canonical(self.content)
