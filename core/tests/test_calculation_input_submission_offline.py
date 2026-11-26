@@ -24,7 +24,7 @@ class CalculationInputSubmissionTests(unittest.TestCase):
     def test_actual_input_ids_have_required_context_and_exactly_one_basis_format(self):
         before = copy.deepcopy(self.task)
         contract = calculation_input_requirements(self.task)
-        self.assertEqual(contract['binding_version'], 2)
+        self.assertEqual(contract['binding_version'], 3)
         self.assertEqual(set(contract['proposal_requirements']), {'start', 'end'})
         for value in contract['proposal_requirements'].values():
             self.assertEqual(value['required_fields'], ['calculation_context'])
