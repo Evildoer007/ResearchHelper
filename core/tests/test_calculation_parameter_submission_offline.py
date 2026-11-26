@@ -4,7 +4,7 @@ import copy
 import unittest
 from unittest.mock import patch
 
-from researchhelper.contracts import ContractError, METHOD_REGISTRY, validate_calculation_parameters
+from researchhelper.contracts import ContractError, METHOD_REGISTRY, methods_for_task, validate_calculation_parameters
 from researchhelper.reasoning import CALCULATION_STRUCTURE_RULE, calculation_plan_contract
 from tests import test_calculation_input_submission_offline as fixtures
 
@@ -21,8 +21,10 @@ class CalculationParameterSubmissionTests(unittest.TestCase):
     def test_flat_parameter_keys_exactly_match_validator_for_all_methods(self):
         contract = calculation_plan_contract(self.task)
         for method, rule in contract['parameter_submissions'].items():
-            definition = METHOD_REGISTRY[method]
-            self.assertEqual(rule['fixed_values'], definition['parameters'])
+            definition = methods_for_task(self.task)[method]
+            options = definition.get('parameter_variants', {})
+            self.assertEqual(rule['fixed_values'], {key: value for key, value in definition['parameters'].items() if key not in options})
+            self.assertEqual(rule['registered_options'], options)
             self.assertEqual(rule['required_text_fields'], definition.get('context_parameters', []))
             self.assertEqual(set(rule['allowed_keys']), set(definition['parameters']) |
                 set(definition.get('context_parameters', [])))
