@@ -13,7 +13,7 @@ from researchhelper.settings import DataSettings
 
 class SourceSettingsTests(unittest.TestCase):
     def setUp(self):
-        root = Path(__file__).resolve().parents[1] / "result" / "acceptance" / "source-settings"
+        root = Path(__file__).resolve().parents[2] / "result" / "acceptance" / "source-settings"
         root.mkdir(parents=True, exist_ok=True)
         self.folder = tempfile.TemporaryDirectory(dir=root)
         self.addCleanup(self.folder.cleanup)
@@ -30,7 +30,12 @@ class SourceSettingsTests(unittest.TestCase):
         self.assertEqual(public, {"ifind": {"has_access_token": True, "has_refresh_token": True}, "tinyshare": {"has_token": True}})
         self.assertEqual(self.settings.read(private=True)["ifind"]["access_token"], "access-fixture")
         self.assertEqual(stat.S_IMODE(self.settings.path.stat().st_mode), 0o600)
-        self.assertEqual(list(Path(self.folder.name).iterdir()), [self.settings.path])
+        self.assertEqual(set(Path(self.folder.name).iterdir()), {self.settings.path, self.settings.secrets.root})
+        profile = self.settings.path.read_text()
+        for secret in ("access-fixture", "refresh-fixture", "tiny-fixture"):
+            self.assertNotIn(secret, profile)
+        for record in self.settings.secrets.root.iterdir():
+            self.assertEqual(stat.S_IMODE(record.stat().st_mode), 0o600)
         self.assertNotIn("fixture", json.dumps(public))
 
     def test_blank_preserves_and_clear_wins(self):
@@ -60,7 +65,15 @@ class SourceSettingsTests(unittest.TestCase):
     def test_replace_failure_preserves_old_file_and_cleans_temporary(self):
         self.settings.save({"tinyshare": {"token": "old-fixture"}})
         old = self.settings.path.read_bytes()
-        with patch("researchhelper.settings.os.replace", side_effect=OSError("fixture disk failure")), self.assertRaises(OSError):
+        secrets = {p.name: p.read_bytes() for p in self.settings.secrets.root.iterdir()}
+        with patch("researchhelper.credentials.os.replace", side_effect=OSError("fixture disk failure")), self.assertRaises(OSError):
             self.settings.save({"tinyshare": {"token": "new-fixture"}})
         self.assertEqual(self.settings.path.read_bytes(), old)
-        self.assertEqual(list(Path(self.folder.name).iterdir()), [self.settings.path])
+        self.assertEqual({p.name:p.read_bytes() for p in self.settings.secrets.root.iterdir()}, secrets)
+        self.assertEqual(self.settings.read(private=True)["tinyshare"]["token"], "old-fixture")
+        self.assertEqual(set(Path(self.folder.name).iterdir()), {self.settings.path, self.settings.secrets.root})
+        profile = self.settings.path.read_text()
+        for secret in ("access-fixture", "refresh-fixture", "tiny-fixture"):
+            self.assertNotIn(secret, profile)
+        for record in self.settings.secrets.root.iterdir():
+            self.assertEqual(stat.S_IMODE(record.stat().st_mode), 0o600)
