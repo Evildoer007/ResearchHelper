@@ -91,7 +91,7 @@ class AcceptanceIntegrityTests(unittest.TestCase):
     def test_current_native_icons_are_verified_without_browser(self):
         from icon_assets import verify_icons
         icons = verify_icons(ROOT)
-        self.assertEqual(set(icons), {'png', 'ico', 'icns'})
+        self.assertEqual(set(icons), {'png', 'ico', 'icns', 'dark_png', 'dark_ico', 'dark_icns'})
         source = (ROOT / 'packaging/app/build_app.py').read_text()
         self.assertNotIn('node_binary()', source)
         self.assertNotIn('build_icon.mjs', source)
