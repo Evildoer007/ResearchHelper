@@ -1,5 +1,6 @@
 """Full research delivery from retained synthetic TXT sources, without fixtures bypass."""
 import copy
+from decimal import Decimal
 import tempfile
 import unittest
 from pathlib import Path
@@ -24,15 +25,17 @@ class MethodDependencyWorkflowTests(unittest.TestCase):
         network.start()
         self.addCleanup(network.stop)
 
-    def prepare(self, method):
+    def prepare(self, method, *, price_endpoints=(10, 11)):
         params = copy.deepcopy(METHOD_REGISTRY[method]["parameters"])
         if method == "observed_price_return_v1":
             params.update(start_date="2026-09-29", end_date="2026-09-30")
             common = dict(security_id="合成测试主体", currency="CNY", price_basis="unadjusted", price_kind="close",
                           window_start=params["start_date"], window_end=params["end_date"], corporate_action_status="unknown")
-            rows = [("start_price", 10, "2026-09-29", dict(common, observation_date="2026-09-29"), "人民币未复权收盘价"),
-                    ("end_price", 11, "2026-09-30", dict(common, observation_date="2026-09-30"), "人民币未复权收盘价")]
-            question, expected = "计算已观测区间价格变化，不解释为总收益", 10
+            start_price, end_price = price_endpoints
+            rows = [("start_price", start_price, "2026-09-29", dict(common, observation_date="2026-09-29"), "人民币未复权收盘价"),
+                    ("end_price", end_price, "2026-09-30", dict(common, observation_date="2026-09-30"), "人民币未复权收盘价")]
+            question = "计算已观测区间价格变化，不解释为总收益"
+            expected = float((Decimal(str(end_price)) / Decimal(str(start_price)) - 1) * 100)
         elif method == "etf_nav_premium_v1":
             params.update(valuation_time="2026-09-30T15:00:00+08:00")
             common = dict(fund_id="合成测试主体", share_class="A类份额", currency="CNY", valuation_time=params["valuation_time"])
