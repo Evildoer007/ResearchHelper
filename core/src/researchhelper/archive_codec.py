@@ -110,18 +110,31 @@ def encode_body(db, value):
 
 
 def decode_body(db, body):
+    value, _ = _decode_body(db, body, {})
+    return value
+
+
+def snapshot_decoder(db):
+    """Reuse verified values only within the caller's current read transaction."""
+    cache = {}
+
+    def decode(body):
+        return _decode_body(db, body, cache)
+
+    return decode
+
+
+def _decode_body(db, body, cache):
     value = json.loads(body)
     metadata = value.get(STORAGE_KEY) if isinstance(value, dict) else None
     if not isinstance(metadata, dict) or 'logical_sha256' not in metadata:
-        return value
+        return value, None
     if (type(metadata.get('version')) is not int or metadata['version'] != 1
             or set(metadata) - {'version', 'logical_sha256', 'literal_root'}
             or not isinstance(metadata['logical_sha256'], str)
             or not re.fullmatch('[0-9a-f]{64}', metadata['logical_sha256'])
             or 'literal_root' in metadata and metadata['literal_root'] is not True):
         raise ContractError('归档正文版本或元数据无效')
-    cache = {}
-
     def decode(item):
         if isinstance(item, list):
             return [decode(child) for child in item]
@@ -153,4 +166,4 @@ def decode_body(db, body):
         restored = decode({key: child for key, child in value.items() if key != STORAGE_KEY})
     if not isinstance(restored, dict) or fingerprint(restored) != metadata['logical_sha256']:
         raise ContractError('归档正文完整性不一致，不能返回研究')
-    return restored
+    return restored, metadata['logical_sha256']
