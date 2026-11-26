@@ -13,9 +13,11 @@ import secrets
 import tempfile
 import threading
 import time
+from math import inf
 from pathlib import Path
 
-from .contracts import ContractError
+from .contracts import ContractError, LocalStateError, unique_json_object
+from .credentials import owned_bytes
 
 
 class AuthenticationRequired(ContractError):
@@ -33,26 +35,32 @@ class LocalAccount:
         self.session_file = self.root / "local-sessions.json"
         self.lock = threading.RLock()
         self.failures = []
-        self.sessions = self._read(self.session_file, {})
+        self.sessions = self._read(self.session_file, {}, "sessions_unavailable")
         for key, record in self.sessions.items():
+            expires = record.get("expires") if isinstance(record, dict) else None
             if (not isinstance(key, str) or len(key) != 64 or not isinstance(record, dict)
                     or not isinstance(record.get("account"), str)
-                    or not isinstance(record.get("expires"), (int, float))
+                    or type(expires) not in (int, float) or not 0 < expires < inf
                     or not isinstance(record.get("remember"), bool)
                     or not isinstance(record.get("generation"), str)):
-                raise ContractError("本地会话记录格式无效，请恢复记录")
+                raise LocalStateError("sessions_unavailable", "本地会话记录格式无效，请恢复记录")
 
     @staticmethod
-    def _read(path, default):
-        if not path.exists():
-            return default
+    def _read(path, default, code):
+        profile = code == "account_unavailable"
         try:
-            value = json.loads(path.read_text())
+            # First-time account setup briefly publishes a second hard link
+            # to a fully written file. Readers must tolerate that transition.
+            raw = owned_bytes(path, maximum=None, allow_multiple_links=profile)
+            if raw is None:
+                return default
+            value = json.loads(raw, object_pairs_hook=unique_json_object)
             if not isinstance(value, dict):
                 raise ValueError()
             return value
-        except (OSError, ValueError):
-            raise ContractError("本地账户记录无法读取，原件保留；请先恢复记录，不能重建覆盖") from None
+        except (OSError, ValueError, RecursionError):
+            label = "账户" if profile else "会话"
+            raise LocalStateError(code, f"本地{label}记录无法读取，原件保留；请先恢复记录，不能重建覆盖") from None
 
     def _write(self, path, value, exclusive=False):
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -79,7 +87,7 @@ class LocalAccount:
         return hashlib.scrypt(password.encode(), salt=bytes.fromhex(salt), n=16384, r=8, p=1, dklen=32).hex()
 
     def _owner(self):
-        owner = self._read(self.profile, None)
+        owner = self._read(self.profile, None, "account_unavailable")
         if owner is not None:
             try:
                 if owner.get("version") != 2 or not isinstance(owner.get("users"), dict):
@@ -92,7 +100,7 @@ class LocalAccount:
                             or len(bytes.fromhex(user["password_hash"])) != 32):
                         raise ValueError()
             except (ValueError, TypeError, KeyError, AttributeError):
-                raise ContractError("本地账户记录格式无效，不能改写原账户") from None
+                raise LocalStateError("account_unavailable", "本地账户记录格式无效，不能改写原账户") from None
         return owner
 
     def _distinct_sales_password(self, owner, password):
