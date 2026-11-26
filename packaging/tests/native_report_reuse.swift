@@ -26,7 +26,7 @@ struct NativeReportReuse {
         let first = owner.prepareReport(firstURL, printing: false, persistent: false)!
         let firstView = owner.reportWindows[first]!
         // Occupy the first view without scheduling an actual print.
-        owner.pendingPrints.insert(firstView)
+        owner.pendingPrints[firstView] = UUID()
         let second = owner.prepareReport(secondURL, printing: false, persistent: false)!
         try check("busy preview creates a separate owned document", first !== second && owner.reportWindows.count == 2)
         owner.pendingPrints.removeAll()
@@ -34,25 +34,26 @@ struct NativeReportReuse {
         // Target the non-first dictionary entry: regression must not depend on hash order.
         let idle = ordered[0]
         let target = ordered[1]
-        let targetURL = owner.reportTargets[target.value]!
-        let idleURL = owner.reportTargets[idle.value]!
+        let targetURL = owner.reportTargets[target.value]!.url
+        let idleURL = owner.reportTargets[idle.value]!.url
         target.key.setFrame(NSRect(x: 93, y: 121, width: 860, height: 640), display: false)
         let frame = target.key.frame
         let opened = owner.prepareReport(targetURL, printing: false, persistent: false)!
         try check("exact document wins over an earlier idle preview", opened === target.key)
-        try check("reopening leaves the other document intact", owner.reportTargets[idle.value] == idleURL)
+        try check("reopening leaves the other document intact", owner.reportTargets[idle.value]?.url == idleURL)
         try check("reopening preserves position and window count", opened.frame == frame && owner.reportWindows.count == 2)
-        owner.pendingPrints.formUnion([idle.value, target.value])
+        owner.pendingPrints[idle.value] = UUID()
+        owner.pendingPrints[target.value] = UUID()
         let busyMatch = owner.prepareReport(targetURL, printing: false, persistent: false)!
         try check("same document can reopen during a pending print", busyMatch === target.key && owner.pendingPrints.count == 2)
         let thirdURL = url.appendingPathComponent("api/tasks/rh_1234/report/3")
         let third = owner.prepareReport(thirdURL, printing: false, persistent: false)!
         try check("new document cannot overwrite either busy preview", third !== idle.key && third !== target.key && owner.reportWindows.count == 3)
-        try check("busy document targets stay frozen", owner.reportTargets[target.value] == targetURL && owner.reportTargets[idle.value] == idleURL)
+        try check("busy document targets stay frozen", owner.reportTargets[target.value]?.url == targetURL && owner.reportTargets[idle.value]?.url == idleURL)
         let thirdView = owner.reportWindows[third]!
         let fourthURL = url.appendingPathComponent("api/tasks/rh_1234/report/4")
         let reused = owner.prepareReport(fourthURL, printing: false, persistent: false)!
-        try check("new document reuses the only idle preview", reused === third && owner.reportTargets[thirdView] == fourthURL && owner.reportWindows.count == 3)
+        try check("new document reuses the only idle preview", reused === third && owner.reportTargets[thirdView]?.url == fourthURL && owner.reportWindows.count == 3)
         try check("all previews remain hidden and nonpersistent", owner.reportWindows.allSatisfy { !$0.key.isVisible && !$0.value.configuration.websiteDataStore.isPersistent })
         try check("application never activates", NSApp.activationPolicy() == .prohibited)
     }
