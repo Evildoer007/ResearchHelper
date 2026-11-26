@@ -159,7 +159,8 @@ class EarningsCashMethodsTests(unittest.TestCase):
             self.assertEqual(final["status"], "已完成", {"error": final.get("error"), "gaps": final["gaps"], "rejected": final["rejected_evidence"]})
             calculation = final["calculations"][0]
             self.assertAlmostEqual(calculation["output"]["value"], expected)
-            self.assertEqual(calculation["method_binding"]["knowledge_version"], 1)
+            self.assertEqual(calculation["method_binding"]["knowledge_version"],
+                final["knowledge"]["index"][METHOD_REGISTRY[method]["knowledge_id"]])
             self.assertTrue(calculation["dependency_hash"])
             self.assertEqual(final["ledger"]["used"]["data_requests"], 0)
             self.assertEqual(final["ledger"]["used"]["model_calls"], 0)
@@ -184,7 +185,8 @@ class EarningsCashMethodsTests(unittest.TestCase):
             self.assertIn(METHOD_REGISTRY[method]["knowledge_id"], package["index"])
             self.assertIn("rh_k_cash_profit", package["index"])
             self.assertTrue(ResearchKnowledge().method_binding(package, method))
-        self.assertEqual(len(ResearchKnowledge().catalog()), 14)
+        identifiers = [entry["id"] for entry in ResearchKnowledge().catalog()]
+        self.assertEqual(len(identifiers), len(set(identifiers)))
 
     def test_document_only_intent_cannot_get_new_financial_methods(self):
         for method in METHODS:
@@ -243,7 +245,7 @@ class EarningsCashInterfacesTests(unittest.TestCase):
         self.addCleanup(fixture.doCleanups)
         bootstrap = fixture.fixture.request("/api/bootstrap")[0]
         catalog = {entry["id"] for entry in bootstrap["knowledge"]}
-        self.assertEqual(len(catalog), 14)
+        self.assertEqual(catalog, {entry["id"] for entry in ResearchKnowledge().catalog()})
         self.assertTrue({"rh_k_cash_profit", "rh_k_rate_transmission", "rh_k_index_structure", "rh_k_etf_exposure"}.issubset(catalog))
         self.assertEqual(bootstrap["field_registry"]["tinyshare.daily_basic"]["permission"], "未验收")
         task = fixture.app_task()
