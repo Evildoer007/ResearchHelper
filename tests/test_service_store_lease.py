@@ -1,9 +1,12 @@
 """Bounded local ownership checks, isolated Stores, no supplier/model calls."""
 import copy
 import http.client
+import json
 import os
 from pathlib import Path
+import queue
 import select
+import socket
 import subprocess
 import sys
 import tempfile
@@ -12,7 +15,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from researchhelper.contracts import ContractError
+from researchhelper.contracts import ContractError, LocalStateError
 from researchhelper.runtime import StoreLease
 from researchhelper.service import make_server
 
@@ -43,6 +46,27 @@ class ServiceStoreLeaseTests(unittest.TestCase):
         task['ledger']['dispatches'] = [{'kind':'data_requests', 'status':'已派发', 'fingerprint':'retained-test'}]
         server.agent.archive.save(task)
         return task
+
+    def test_unavailable_reconnect_port_does_not_settle_task_until_bind_succeeds(self):
+        first = self.server()
+        task = self.task_running(first)
+        archive = first.agent.archive
+        original = archive.get(task['id'])
+        first.server_close()
+        with socket.socket() as occupied:
+            occupied.bind(('127.0.0.1', 0))
+            occupied.listen()
+            port = occupied.getsockname()[1]
+            with self.assertRaises(LocalStateError) as failure:
+                self.server(port=port)
+            self.assertEqual(failure.exception.code, 'local_listener_unavailable')
+            self.assertEqual(archive.get(task['id']), original)
+        reopened = self.server(port=port)
+        recovered = reopened.agent.archive.get(task['id'])
+        self.assertEqual(reopened.server_port, port)
+        self.assertEqual(recovered['status'], '失败')
+        self.assertEqual(recovered['batch'], original['batch'])
+        self.assertEqual(recovered['ledger'], original['ledger'])
 
     def test_second_service_rejected_before_configuration_or_recovery(self):
         first = self.server()
@@ -144,6 +168,72 @@ class ServiceStoreLeaseTests(unittest.TestCase):
         with self.assertRaises(ContractError):
             StoreLease(self.store)
 
+    def test_parent_pipe_stops_only_desktop_owned_services(self):
+        entry = ROOT/'products/app/backend/entry.py'
+        for owned in (True, False):
+            with self.subTest(owned=owned):
+                store = self.store.parent/('desktop' if owned else 'standalone')
+                environment = dict(os.environ, RESEARCHHELPER_STORE=str(store))
+                environment.pop('RESEARCHHELPER_DESKTOP_LIFETIME', None)
+                if owned:
+                    environment['RESEARCHHELPER_DESKTOP_LIFETIME'] = 'stdin'
+                child = subprocess.Popen([sys.executable, '-IB', str(entry)], cwd=ROOT, env=environment,
+                    stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                events = queue.Queue()
+                reader = threading.Thread(target=lambda: events.put(child.stdout.readline()), daemon=True)
+                reader.start()
+                try:
+                    ready = json.loads(events.get(timeout=10))
+                    self.assertTrue(ready['ready'])
+                    child.stdin.close()
+                    if owned:
+                        self.assertEqual(child.wait(timeout=4), 0)
+                        lease = StoreLease(store)
+                        lease.close()
+                    else:
+                        address = ready['url'].removeprefix('http://').rstrip('/')
+                        connection = http.client.HTTPConnection(address, timeout=3)
+                        try:
+                            connection.request('GET', '/api/auth/status')
+                            self.assertEqual(connection.getresponse().status, 200)
+                        finally:
+                            connection.close()
+                        self.assertIsNone(child.poll())
+                finally:
+                    if child.poll() is None:
+                        child.terminate()
+                        child.wait(timeout=5)
+                    for stream in (child.stdin, child.stdout, child.stderr):
+                        stream.close()
+                    reader.join(2)
+
+    def test_shutdown_signals_running_work_before_waiting_on_a_local_write(self):
+        server = self.server()
+        agent = server.agent
+        task = agent.create_case('etf')
+        task['batch'] = 1
+        key = (task['id'], task['version'], task['batch'])
+        agent._begin_run_control(*key)
+        control = agent.run_controls[key]
+        shutdown = threading.Thread(target=server.server_close)
+        try:
+            with agent.lock:
+                shutdown.start()
+                self.assertTrue(control.wait(3))
+                self.assertFalse(server.runtime_settled.is_set())
+                with self.assertRaises(ContractError):
+                    agent._check_run_control(task)
+                # A start which reached its archive write just as shutdown
+                # began still must not dispatch after that write completes.
+                task['batch'] += 1
+                agent._begin_run_control(task['id'], task['version'], task['batch'])
+                with self.assertRaises(ContractError):
+                    agent._check_run_control(task)
+        finally:
+            shutdown.join(5)
+        self.assertFalse(shutdown.is_alive())
+        self.assertTrue(server.runtime_settled.wait(3))
+
     def test_closing_service_retains_lease_until_worker_finishes(self):
         first = self.server()
         task = first.agent.create_case('etf')
@@ -192,25 +282,127 @@ class ServiceStoreLeaseTests(unittest.TestCase):
 
     def test_closing_service_waits_for_existing_request_ownership(self):
         first = self.server()
-        with first.runtime_condition:
-            first.runtime_requests = 1
-        first.server_close()
+        serving = self.listen(first)
+        token = self.token(first)
+        entered, release = threading.Event(), threading.Event()
+        original = first.agent.archive.save
+        outcomes = []
+
+        def delayed(task):
+            entered.set()
+            if not release.wait(5):
+                raise RuntimeError('test write did not receive its release signal')
+            return original(task)
+
+        def submit():
+            connection = http.client.HTTPConnection('127.0.0.1', first.server_port, timeout=5)
+            try:
+                connection.request('POST', '/api/tasks', body=b'{"question":"valid local write"}',
+                    headers={'X-ResearchHelper-Token': token})
+                outcomes.append(connection.getresponse().status)
+            except ConnectionError:
+                outcomes.append('disconnected')
+            finally:
+                connection.close()
+
+        with patch.object(first.agent.archive, 'save', side_effect=delayed):
+            sender = threading.Thread(target=submit)
+            sender.start()
+            try:
+                self.assertTrue(entered.wait(2))
+                self.stop_listener(first, serving)
+                self.assertFalse(first.runtime_settled.is_set())
+                with self.assertRaises(ContractError):
+                    self.server()
+            finally:
+                release.set()
+                sender.join(5)
+                self.assertFalse(sender.is_alive())
+            self.assertTrue(first.runtime_settled.wait(3))
+        self.assertEqual(outcomes, ['disconnected'])
+        reopened = self.server()
+        self.assertEqual([task['question'] for task in reopened.agent.archive.list()], ['valid local write'])
+
+    def listen(self, server):
+        serving = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .02})
+        serving.start()
+        self.addCleanup(self.stop_listener, server, serving)
+        return serving
+
+    def stop_listener(self, server, serving):
+        if serving.is_alive():
+            server.shutdown()
+        server.server_close()
+        serving.join(3)
+        self.assertFalse(serving.is_alive())
+
+    def token(self, server):
+        connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=5)
         try:
-            with self.assertRaises(ContractError):
-                self.server()
+            connection.request('GET', '/api/auth/status')
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            return json.loads(response.read())['token']
         finally:
-            first._request_settled()
-        deadline = time.monotonic() + 5
-        while first.runtime_lease.stream is not None and time.monotonic() < deadline:
+            connection.close()
+
+    def test_shutdown_releases_store_with_incomplete_headers_and_body(self):
+        first = self.server()
+        serving = self.listen(first)
+        retained = first.agent.create('preserved task')
+        host = f'127.0.0.1:{first.server_port}'
+        token = self.token(first)
+        body = b'{"question":"must not create"}'
+        prefix = f'POST /api/tasks HTTP/1.1\r\nHost: {host}\r\n'.encode()
+        with (socket.create_connection(('127.0.0.1', first.server_port), timeout=3) as header_peer,
+              socket.create_connection(('127.0.0.1', first.server_port), timeout=3) as body_peer):
+            header_peer.sendall(prefix)
+            body_peer.sendall(prefix + (f'X-ResearchHelper-Token: {token}\r\n'
+                f'Content-Length: {len(body) + 8}\r\n\r\n').encode() + body)
+            deadline = time.monotonic() + 3
             with first.runtime_condition:
-                first.runtime_condition.wait(.02)
-        self.assertIsNone(first.runtime_lease.stream)
-        self.server()
+                while len(first.runtime_connections) != 2 and time.monotonic() < deadline:
+                    first.runtime_condition.wait(.02)
+                self.assertEqual(len(first.runtime_connections), 2)
+            self.stop_listener(first, serving)
+            self.assertTrue(first.runtime_settled.wait(2))
+            reopened = self.server()
+            self.assertEqual(reopened.agent.archive.list(), [retained])
+            self.assertEqual(header_peer.recv(1), b'')
+            self.assertEqual(body_peer.recv(1), b'')
+
+    def test_complete_body_waiting_for_admission_cannot_write_after_shutdown(self):
+        first = self.server()
+        serving = self.listen(first)
+        token = self.token(first)
+        entered, release = threading.Event(), threading.Event()
+        admit = first.begin_operation
+
+        def delayed_admission():
+            entered.set()
+            if not release.wait(5):
+                raise RuntimeError('test admission did not receive its release signal')
+            admit()
+
+        body = b'{"question":"too late to save"}'
+        header = (f'POST /api/tasks HTTP/1.1\r\nHost: 127.0.0.1:{first.server_port}\r\n'
+                  f'X-ResearchHelper-Token: {token}\r\nContent-Length: {len(body)}\r\n\r\n')
+        with (patch.object(first, 'begin_operation', side_effect=delayed_admission),
+              socket.create_connection(('127.0.0.1', first.server_port), timeout=3) as peer):
+            peer.sendall(header.encode() + body)
+            try:
+                self.assertTrue(entered.wait(2))
+                self.stop_listener(first, serving)
+                self.assertFalse(first.runtime_settled.is_set())
+            finally:
+                release.set()
+            self.assertTrue(first.runtime_settled.wait(2))
+            self.assertEqual(peer.recv(1), b'')
+        self.assertEqual(self.server().agent.archive.list(), [])
 
     def test_real_loopback_requests_settle_then_closed_service_can_reopen(self):
         first = self.server()
-        serving = threading.Thread(target=first.serve_forever, kwargs={'poll_interval':.02})
-        serving.start()
+        serving = self.listen(first)
         connection = http.client.HTTPConnection('127.0.0.1', first.server_port, timeout=5)
         try:
             connection.request('GET', '/api/bootstrap')
@@ -219,17 +411,8 @@ class ServiceStoreLeaseTests(unittest.TestCase):
             self.assertIn(b'"offline": true', response.read())
         finally:
             connection.close()
-            first.shutdown()
-            serving.join(5)
-            first.server_close()
-        self.assertFalse(serving.is_alive())
-        deadline = time.monotonic() + 5
-        with first.runtime_condition:
-            self.assertTrue(first.runtime_condition.wait_for(
-                lambda:first.runtime_requests == 0, max(0,deadline-time.monotonic())))
-        while first.runtime_lease.stream is not None and time.monotonic() < deadline:
-            with first.runtime_condition:
-                first.runtime_condition.wait(.02)
+            self.stop_listener(first, serving)
+        self.assertTrue(first.runtime_settled.wait(3))
         self.assertIsNone(first.runtime_lease.stream)
         self.server()
 
