@@ -39,7 +39,7 @@ echo ResearchHelper Windows一键候选构建
 echo Python：%RH_PYTHON%
 echo 检查锁定依赖、.NET SDK 8和Inno Setup，不联网下载。
 echo 校验后更新result\windows-candidate和项目级Skill，不安装App或全局Skill，不覆盖macOS交付或同步现有demo。
-"%RH_PYTHON%" -I -B -u "%RH_PROJECT%packaging\build_current.py"
+"%RH_PYTHON%" -I -B -X utf8 -u "%RH_PROJECT%packaging\build_current.py"
 set "RH_BUILD_STATUS=%ERRORLEVEL%"
 if not "%RH_BUILD_STATUS%"=="0" goto :done
 goto :done
