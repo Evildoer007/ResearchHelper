@@ -3,7 +3,7 @@ import base64
 import hashlib
 import json
 
-from .contracts import ContractError, DOCUMENT_CONTENT_INTENT
+from .contracts import ContractError, DOCUMENT_CONTENT_INTENT, unique_json_object
 
 POLICY = 'source_field_inventory_version'
 PCF_FIELDS = ('NAV','PRE_TRADING_DAY','TRADING_DAY','TRADE_CODE','CREATION_REDEMPTION_UNIT',
@@ -55,7 +55,7 @@ def inventory(task, selected=None):
                 raw = base64.b64decode(snapshot['original_base64'],validate=True)
                 if hashlib.sha256(raw).hexdigest()!=snapshot['original_sha256']:
                     raise ValueError('Original bytes differ')
-                rows = json.loads(raw)['result']
+                rows = json.loads(raw, object_pairs_hook=unique_json_object)['result']
                 if not isinstance(rows,list) or any(not isinstance(row,dict) for row in rows):
                     raise ValueError('Original rows are not objects')
             except (KeyError,TypeError,ValueError) as error:
