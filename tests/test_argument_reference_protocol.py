@@ -7,19 +7,20 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from tests.argument_review_fixture import financial_review_fixture
 from researchhelper import argument_support as review
 from researchhelper.contracts import ContractError, fingerprint
 from researchhelper.model import ModelService, ModelSettings
 from researchhelper.output_schema import structured_json_completion
 
 ROOT=Path(__file__).resolve().parents[1]
-RETAINED=ROOT/'result/acceptance/one-sentence-research-9_qa5f41/task.json'
 
 
 class ArgumentReferenceProtocolTests(unittest.TestCase):
     def setUp(self):
-        self.original=RETAINED.read_bytes()
-        self.task=json.loads(self.original)
+        self.task, _ = financial_review_fixture()
+        self.task['argument_support_contract'] = review.VERSION
+        self.task['argument_reference_format'] = 1
         self.proposal=copy.deepcopy(self.task['host_result'])
         self.request=review.review_request(self.task,self.proposal)
         self.units=review.reference_units(self.request)
@@ -33,8 +34,6 @@ class ArgumentReferenceProtocolTests(unittest.TestCase):
                 for ident,units in self.units.items()])
         guard=patch.object(socket.socket,'connect',side_effect=AssertionError('No network'))
         guard.start();self.addCleanup(guard.stop)
-
-    def tearDown(self):self.assertEqual(RETAINED.read_bytes(),self.original)
 
     def decode(self,wire=None):
         return review.decode_reference_review(self.wire if wire is None else wire,self.schema,self.request)
