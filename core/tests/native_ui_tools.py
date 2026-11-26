@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import time
 
-from acceptance_safety import require_foreground_consent
+from core.tests.acceptance_safety import require_foreground_consent
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "result/acceptance/native-intensive"
