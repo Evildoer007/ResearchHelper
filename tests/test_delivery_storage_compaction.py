@@ -12,7 +12,9 @@ from unittest.mock import patch
 
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, canonical, fingerprint
+from researchhelper import archive_codec as codec
 from researchhelper.archive_codec import STORAGE_KEY
+from researchhelper.reports import stage_pending_html
 
 
 class DeliveryStorageCompactionTests(unittest.TestCase):
@@ -23,11 +25,17 @@ class DeliveryStorageCompactionTests(unittest.TestCase):
         self.content = dict(task_id='storage-only', research_version=1,
             input_hash='isolated-storage-fixture',
             evidence=[dict(snapshot={'text': '独立存储夹具，不是金融证据。' * 20000})] * 4)
-        self.html = '<!doctype html><html><body>独立报告存储夹具</body></html>'
-        self.task = dict(id='storage-only', version=1, revision=0, gaps=[], status='失败',
+        document = dict(schema='researchhelper.presentation-document', version=1, output_type='report',
+                        profile='standard', content_hash=fingerprint(self.content), title='独立报告存储夹具')
+        self.html = ('<!doctype html><html><head><title>独立报告存储夹具</title></head>'
+                     '<body data-report-variant="standard"><main><h1>独立报告存储夹具</h1></main>'
+                     '<script type="application/json" id="rh-publication-document">'
+                     + json.dumps(document) + '</script></body></html>')
+        self.task = dict(id='storage-only', version=1, revision=0, questions=[], gaps=[], status='失败',
             input_hash=self.content['input_hash'], pending_content=copy.deepcopy(self.content),
-            pending_html=self.html, evidence=copy.deepcopy(self.content['evidence']),
+            evidence=copy.deepcopy(self.content['evidence']),
             ledger=dict(used=dict(model_calls=0, data_requests=0)))
+        stage_pending_html(self.task, self.html)
         self.archive.save(self.task)
         for name, kwargs in [('check_content', dict(return_value=None)),
                              ('compose', dict(return_value=self.content))]:
@@ -61,6 +69,21 @@ class DeliveryStorageCompactionTests(unittest.TestCase):
             self.assertEqual(db.execute('SELECT COUNT(*) FROM archive_values').fetchone()[0], 1)
         self.assertLess(len(body.encode()), len(canonical(self.content).encode()) / 100)
 
+    def test_report_reuses_verified_values_within_one_read_and_rechecks_on_reopen(self):
+        self.deliver()
+        with patch.object(codec, '_get', wraps=codec._get) as read:
+            first = self.archive.report(self.task['id'], 1)
+            self.assertEqual(read.call_count, 1)
+            first['content']['evidence'][0]['snapshot']['text'] = '改动只在当前读取结果'
+            self.assertEqual(first['content']['evidence'][1]['snapshot'], self.content['evidence'][1]['snapshot'])
+            self.assertEqual(self.archive.report(self.task['id'], 1)['content'], self.content)
+            self.assertEqual(read.call_count, 2)
+            with self.archive.connect() as db:
+                db.execute('UPDATE archive_values SET compressed=?', (b'changed after preview',))
+            with self.assertRaises(ContractError):
+                self.archive.report(self.task['id'], 1)
+            self.assertEqual(read.call_count, 3)
+
     def test_legacy_plain_delivery_remains_readable_without_rewrite(self):
         self.deliver()
         raw = canonical(self.content)
@@ -89,6 +112,7 @@ class DeliveryStorageCompactionTests(unittest.TestCase):
         self.assertEqual(self.archive.get(self.task['id']), before)
         with self.archive.connect() as db:
             self.assertEqual(db.execute('SELECT COUNT(*) FROM deliveries').fetchone()[0], 0)
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM delivery_titles').fetchone()[0], 0)
         self.assertEqual(before['pending_content'], self.content)
 
     def test_corrupt_or_missing_compressed_value_never_returns_report(self):
