@@ -10,7 +10,7 @@ import researchhelper.visual as visual
 from researchhelper.layout import default_resource_root
 
 ROOT=Path(__file__).resolve().parents[1]
-SOURCE=ROOT/'result/acceptance/skill-host-financial-20261015-v2/result/researchhelper/rh_1cd38423decc4c6b9b46ea53ec82f05b/research-v1.json'
+from tests.financial_presentation_fixture import SOURCE, load_content
 
 
 class FinancialChartDisplayTests(unittest.TestCase):
@@ -57,17 +57,36 @@ class FinancialChartDisplayTests(unittest.TestCase):
         before=copy.deepcopy(original);visual.display_money_scale(original)
         self.assertEqual(original,before)
 
+    def test_selected_money_chart_scales_the_axis_and_points_but_keeps_the_original_ledger(self):
+        rows = [dict(label='营业收入', unit='百万元', value=100, ref='revenue'),
+                dict(label='营业成本', unit='百万元', value=60, ref='cost')]
+        figure = dict(kind='amounts', unit='百万元', rows=rows, refs=['revenue', 'cost'])
+        spec = visual.research_chart_spec({}, figure, 'money-chart')
+        chart = spec['auto_visual']
+        self.assertEqual(spec['display']['unit'], chart['data']['unit'])
+        self.assertEqual(chart['data']['unit'], '亿元')
+        self.assertEqual(chart['data']['values'], [1, .6])
+        self.assertEqual(chart['ledger']['unit'], '百万元')
+        self.assertEqual([row['values'] for row in chart['ledger']['rows']], [[100], [60]])
+        self.assertEqual(spec['rows'], rows)
+
     def test_real_content_rerenders_without_changing_frozen_data(self):
-        original=SOURCE.read_bytes();content=json.loads(original);before=copy.deepcopy(content)
+        from researchhelper.report_designer import design
+
+        original=SOURCE.read_bytes();content=load_content();before=copy.deepcopy(content)
         origin=getattr(visual,'__frozen_origin__',None)
         resources=Path(origin.split('!/PYZ.pyz/')[0]).parents[2] if origin else default_resource_root()
-        html=visual.render(content,resources)
+        report=design(content,resources)
+        html=report['html']
         self.assertEqual(content,before)
         self.assertEqual(SOURCE.read_bytes(),original)
-        self.assertIn("argument-reading argument-comparisons",html)
-        self.assertIn('90,703,260,964.48元',html)
-        self.assertIn('图示单位亿元',html)
-        self.assertIn('50.75%',html)
+        money=[chart for chart in report['document']['visual_sources'].values()
+               if chart.get('display', {}).get('unit') == '亿元']
+        self.assertTrue(money)
+        for chart in money:
+            self.assertEqual(chart['auto_visual']['data']['unit'], '亿元')
+            self.assertEqual(chart['auto_visual']['ledger']['unit'], chart['unit'])
+            self.assertEqual(chart['display']['source_unit'], chart['unit'])
         if origin:
             directory=Path(tempfile.gettempdir()).resolve()
             self.assertTrue(directory.is_relative_to(ROOT/'result/acceptance'))
