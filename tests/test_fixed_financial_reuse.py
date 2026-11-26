@@ -16,6 +16,10 @@ from researchhelper.planning import input_fingerprint
 from researchhelper.reports import compose
 
 
+REGISTERED_FIELDS={'ths_revenue_stock','ths_np_atoopc_stock','ths_operating_cost_stock','ths_np_stock',
+                  'ths_ncf_from_oa_stock','ths_account_receivable_stock','ths_inventory_stock','ths_accounts_payable_stock'}
+
+
 class FixedFinancialReuseTests(unittest.TestCase):
     def setUp(self):
         guard = patch('socket.socket.connect', side_effect=AssertionError('Offline only'))
@@ -44,9 +48,9 @@ class FixedFinancialReuseTests(unittest.TestCase):
         self.assertEqual(basic_financial_definitions(task), {})
         self.assertEqual(metadata_indicator_choices(task), [])
 
-    def test_known_five_field_parameters_are_reusable_not_business_values(self):
+    def test_registered_field_parameters_are_reusable_not_business_values(self):
         definitions = basic_financial_definitions(self.task)
-        self.assertEqual(len(definitions), 5)
+        self.assertEqual(set(definitions), REGISTERED_FIELDS)
         for value in definitions.values():
             self.assertEqual([row['name'] for row in value], ['D', 'C'])
             self.assertFalse(any('defaultValue' in row for row in value))
@@ -61,7 +65,7 @@ class FixedFinancialReuseTests(unittest.TestCase):
     def test_first_shape_discloses_reuse_not_permission(self):
         shapes = metadata_request_shapes(self.task)
         self.assertEqual([row['operation'] for row in shapes], ['get_limit_policy'])
-        self.assertEqual(len(shapes[0]['reusable_financial_fields']), 5)
+        self.assertEqual(set(shapes[0]['reusable_financial_fields']), REGISTERED_FIELDS)
         self.assertTrue(shapes[0]['raw_only'])
 
     def test_historical_and_document_tasks_do_not_gain_catalogue(self):
