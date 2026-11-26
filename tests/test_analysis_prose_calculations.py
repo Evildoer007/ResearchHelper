@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from tests import ROOT, test_question_bound_analysis as fixtures
+from tests.legacy_replay_fixtures import financial_task
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, context
 from researchhelper.engine import ResearchAgent
@@ -118,31 +119,35 @@ class AnalysisProseCalculationTests(unittest.TestCase):
             self.assertNotIn('analysis_prose_reference_version',agent.create('核对原文',intent='原件内容核对'))
 
     def test_referencing_a_calculation_does_not_allow_unbound_numeric_prose(self):
-        path=ROOT/'result/acceptance/one-sentence-research-zy9srfaq/task.json'
-        original=path.read_bytes();task=json.loads(original)
-        task['analysis_prose_reference_version']=1
+        task = financial_task(both_ratios=True)
+        task.update(analysis_citation_encoding=2, analysis_prose_reference_version=1, analysis_question_scope_version=1,
+                    analysis_question_map_version=1)
+        original = copy.deepcopy(task)
         calculation=task['calculations'][0];qid=calculation['question_ids'][0]
         schema=analysis_output_schema(task)
-        answer=dict(segments=[dict(text='净利润率为50%。',refs=[calculation['id']],counter_refs=[])],
+        answer=dict(segments=[dict(text='净利润率为91.23%。',refs=[calculation['id']],counter_refs=[])],
                     knowledge_refs=[],provenance_refs=[])
         wire=dict(version=3,binding=context(task),answers=dict.fromkeys(
             schema['properties']['answers']['properties']),theses=[])
         wire['answers'][qid]=answer
         proposal=decode_analysis_citations(wire,schema,task)
         self.assertFalse(analysis_numeric_review(task,proposal)['accepted'])
-        self.assertEqual(path.read_bytes(),original)
+        self.assertEqual(task, original)
 
     def test_actual_prompt_exposes_only_each_questions_executed_calculations(self):
         from tests.test_analysis_feedback_projection import payload_for, checked_prompt
-        path=ROOT/'result/acceptance/one-sentence-research-zy9srfaq/task.json'
-        original=path.read_bytes();task=json.loads(original)
-        task['analysis_prose_reference_version']=1
+        task = financial_task(both_ratios=True)
+        task.update(analysis_citation_encoding=2, analysis_prose_reference_version=1, analysis_question_scope_version=1)
+        original = copy.deepcopy(task)
         payload=payload_for(task)
-        for item in payload['analysis_contract']['by_question'].values():
+        by_question = payload['analysis_contract']['by_question']
+        self.assertEqual(len(by_question['financial']['calculations']), 2)
+        self.assertFalse(by_question['meaning']['calculations'])
+        for item in by_question.values():
             expected=[calculation['id'] for calculation in item['calculations']]
             self.assertEqual(item.get('text_calculation_ids',[]),expected)
         captured=checked_prompt(task,payload)
         messages='\n'.join(item['content'] for item in captured['messages'])
         self.assertIn('refs选本题支持判断的证据或已执行计算id',messages)
         self.assertNotIn('只选择实际支持本段判断或构成反证的证据id',messages)
-        self.assertEqual(path.read_bytes(),original)
+        self.assertEqual(task, original)
