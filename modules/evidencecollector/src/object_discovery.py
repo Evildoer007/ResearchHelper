@@ -9,6 +9,7 @@ import math
 import re
 
 from .contracts import ContractError
+from .subject_scope import scope_question, subject_allowed
 
 VERSION = 2
 MAX_ROWS = 200
@@ -37,7 +38,7 @@ def discovery_request(task, params):
     if set(params) != {'searchstring', 'searchtype'} or params['searchtype'] != 'stock':
         raise ContractError('候选发现仅使用登记的stock语义查询，不附加字段或条件')
     topic, kind = match.groups()
-    texts = [task.get('question', ''), *task.get('objects', [])]
+    texts = [scope_question(task), *task.get('objects', [])]
     if task.get('discovery_planned_scope_version')==1:
         # Approved research questions may express the user's theme more
         # precisely. They widen retrieval vocabulary, never financial scope
@@ -45,7 +46,8 @@ def discovery_request(task, params):
         for question in task.get('questions',[]):
             texts.append(question.get('question',''))
             texts.extend(question.get('evidence_needs',[]))
-    if topic in GENERIC_TOPICS or not any(isinstance(text, str) and topic in text for text in texts):
+    if (topic in GENERIC_TOPICS or not subject_allowed(task, topic) or
+            not any(isinstance(text, str) and topic in text for text in texts)):
         raise ContractError('候选发现主题须对应当前问题、研究对象或已登记研究计划，不扫描无关市场'
             if task.get('discovery_planned_scope_version')==1 else
             '候选发现主题须逐字来自当前用户问题或研究对象，不猜主题、不扫描全市场')
