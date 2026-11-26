@@ -28,7 +28,9 @@ class BoundInitialPlanTests(unittest.TestCase):
         self.schema = planning_output_schema(self.task)
         main = self.task['questions'][0]
         self.wire = dict(version=3, main_question=dict(id=main['id'], question=main['question'], required=True,
-            kind='comparison', group='q1', dependencies=[], evidence_needs=['同份额、币种和所属日的实际原值'],
+            kind='comparison', group='q1', dependencies=[], evidence_needs=[
+                dict(text='同份额收盘价原值', value_kind='number', unit_dimension='price', minimum_count=1, period_kind='point'),
+                dict(text='同份额所属日官方单位净值原值', value_kind='number', unit_dimension='price', minimum_count=1, period_kind='point')],
             method_needs=['etf_daily_nav_premium_v1']), additional_questions=[], data_requests=[], calculations=[])
 
     def test_mandatory_main_fields_are_single_literal_values(self):
@@ -42,7 +44,11 @@ class BoundInitialPlanTests(unittest.TestCase):
     def test_decode_only_repackages_the_explicit_unchanged_main_question(self):
         before = copy.deepcopy(self.wire)
         result = decode_planning_output(self.wire, self.schema)
-        self.assertEqual(result['questions'], [self.wire['main_question']])
+        expected=copy.deepcopy(self.wire['main_question'])
+        needs=expected['evidence_needs']
+        expected['evidence_needs']=[need['text'] for need in needs]
+        expected['evidence_need_constraints']={need['text']:{key:value for key,value in need.items() if key!='text'} for need in needs}
+        self.assertEqual(result['questions'], [expected])
         self.assertEqual(self.wire, before)
 
     def test_rewrite_deletion_and_downgrade_are_rejected(self):
