@@ -1,25 +1,50 @@
 """Grounded context choices cross the real gates, not a mocked approval path."""
 import copy
 import hashlib
-import json
-from pathlib import Path
 import unittest
 
+from tests.test_financial_value_reference import FIXTURE, archived_financial_original
 from researchhelper.contracts import ContractError
 from researchhelper.reasoning import evidence_contract,validate_model_specs
 from researchhelper.financial_sources import expand_financial_value_references,financial_context_cells
 from researchhelper.output_schema import financial_extraction_output_schema,decode_financial_extraction_output,financial_selector_prompt
-from researchhelper.evidence import candidate_evidence
+from researchhelper.evidence import candidate_evidence, current_original_reference
+from researchhelper.planning import input_fingerprint
 from researchhelper.analyzer import ResearchAnalyzer
 
-ROOT=Path(__file__).resolve().parents[1]
-RETAINED=ROOT/'result/acceptance/one-sentence-research-5mp4kywz/task.json'
+
+def legacy_financial_context():
+    fixture, digest = archived_financial_original()
+    task = copy.deepcopy(fixture['task'])
+    # The version-7/8 tests exercise the earlier numeric and text selectors on
+    # the same retained original. Later selector changes have their own cases.
+    for flag in ('financial_text_period_version', 'financial_need_map_version',
+                 'financial_question_owner_version', 'financial_observation_reference_version',
+                 'financial_quote_fallback_version', 'request_schema_sharing_version'):
+        task.pop(flag, None)
+    task['input_hash'] = input_fingerprint(task)
+    specifications = copy.deepcopy(fixture['financial_specs'])
+    sources = {item['id']: item for item in task['source_records']}
+    for item in specifications:
+        availability = current_original_reference(task, sources[item['artifact_id']])
+        if availability is None:
+            raise AssertionError('The fixture must retain a verifiable original receipt')
+        item['availability'] = availability
+    return task, copy.deepcopy(fixture['reading']['views']), specifications, digest
+
+
+def misplaced_entity_basis(spec):
+    result = copy.deepcopy(spec)
+    basis = result['calculation_context_basis']['entity_id']
+    basis['part'] = result['record_locator']['part']
+    if basis == spec['calculation_context_basis']['entity_id']:
+        raise AssertionError('The retained context should be located outside the financial row')
+    return result
 
 
 class FinancialContextChoicesTests(unittest.TestCase):
     def setUp(self):
-        self.digest=hashlib.sha256(RETAINED.read_bytes()).hexdigest()
-        self.task=json.loads(RETAINED.read_text());self.views=self.task['reasoning_state']['reading']['bundle']['views']
+        self.task, self.views, self.specs, self.digest = legacy_financial_context()
         self.record=next(r for r in self.task['source_records'] if r['kind']=='filing')
         self.contract=evidence_contract(self.task,self.views);self.source=self.contract['sources'][0]
         self.schema=financial_extraction_output_schema(self.task,self.views)
@@ -27,7 +52,7 @@ class FinancialContextChoicesTests(unittest.TestCase):
             'current_version_only':True,'financial_cells':[],'text_quotes':[]}
         from researchhelper.financial_sources import original_date_anchors
         dates=original_date_anchors(self.views[0])
-        for spec in self.task['host_result']['evidence_specs']:
+        for spec in self.specs:
             if 'calculation_context' not in spec:continue
             context=spec['calculation_context']
             cell=next(c for c in self.source['financial_context_cells'] if all(c['context'][key]==context[key]
@@ -43,7 +68,7 @@ class FinancialContextChoicesTests(unittest.TestCase):
                     for field in ('entity_id','accounting_standard')}})
 
     def tearDown(self):
-        self.assertEqual(hashlib.sha256(RETAINED.read_bytes()).hexdigest(),self.digest)
+        self.assertEqual(hashlib.sha256(FIXTURE.read_bytes()).hexdigest(),self.digest)
 
     def decode(self):
         return decode_financial_extraction_output(self.wire,self.schema,(self.task,self.views))
@@ -61,7 +86,8 @@ class FinancialContextChoicesTests(unittest.TestCase):
         self.assertFalse(self.task['evidence']);self.assertFalse(self.task['calculations'])
 
     def test_old_mislocated_entity_text_is_not_silently_repaired(self):
-        spec=copy.deepcopy(self.task['host_result']['evidence_specs'][0]);spec['object']=self.source['object_binding']['value']
+        spec = misplaced_entity_basis(self.specs[0])
+        spec['object'] = self.source['object_binding']['value']
         with self.assertRaisesRegex(ContractError,'计算口径'):candidate_evidence(self.task,self.record,spec)
 
     def test_current_choices_cannot_cross_task_binding(self):
