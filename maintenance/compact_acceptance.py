@@ -15,8 +15,15 @@ import subprocess
 import tempfile
 import zipfile
 
+from .retire_closed_test_stores import referenced_cases
+
 ROOT = Path(__file__).resolve().parents[1]
 CLOSED = {'已完成', '部分完成', '失败', '已取消'}
+
+
+def require_unreferenced_case(directory, root):
+    if referenced_cases(root, (directory.name,)):
+        raise ValueError('验收目录仍被回归引用，保留原路径')
 
 
 def compact_closed_exports(directory, *, root=ROOT):
@@ -30,6 +37,7 @@ def compact_closed_exports(directory, *, root=ROOT):
             or directory.parent!=root/'result/acceptance'
             or not directory.name.startswith(('one-sentence-research-','autonomous-data-phase-'))):
         raise ValueError('仅压缩本项目已关闭验收的导出文件')
+    require_unreferenced_case(directory, root)
     receipt=directory/'receipt.json'
     if receipt.is_symlink():raise ValueError('验收回执不是普通文件')
     record=json.loads(receipt.read_text())
@@ -66,6 +74,7 @@ def compact_closed_exports(directory, *, root=ROOT):
                 shutil.copyfileobj(incoming,outgoing)
             if digest(staged,compressed=True)!=hashes[p.name] or digest(p)!=hashes[p.name]:
                 raise ValueError('导出压缩与原值不一致，未清理')
+        require_unreferenced_case(directory, root)
         for p in files:
             unused(p)
             if digest(p)!=hashes[p.name]:raise ValueError('导出在压缩时发生变化，保留原件')
@@ -108,6 +117,7 @@ def compact_case(directory, *, root=ROOT):
             or directory.parent != root/'result/acceptance'
             or not directory.name.startswith('one-sentence-research-')):
         raise ValueError('仅压缩本项目独立验收任务，不处理生产库或任意目录')
+    require_unreferenced_case(directory, root)
     if any(path.is_symlink() for path in directory.rglob('*')):
         raise ValueError('验收目录包含软链接，未清理')
     receipt = directory/'receipt.json'
@@ -165,6 +175,8 @@ def compact_case(directory, *, root=ROOT):
                 for name, value in hashes.items():
                     if hashlib.sha256(package.read(name)).hexdigest() != value or digest(store/name) != value:
                         raise ValueError('临时库发生变化，未清理')
+        require_unreferenced_case(directory, root)
+        if files:
             os.replace(packed_store, store_archive)
         os.replace(packed_task, archive)
         source.unlink()
@@ -208,6 +220,7 @@ def compact_data_phase(directory, *, root=ROOT):
     if (not directory.is_absolute() or directory.is_symlink() or directory.resolve()!=directory
             or directory.parent!=root/'result/acceptance' or not directory.name.startswith('autonomous-data-phase-')):
         raise ValueError('仅处理本项目明确的独立取数验收')
+    require_unreferenced_case(directory, root)
     if any(path.is_symlink() for path in directory.rglob('*')):
         raise ValueError('测试目录含链接，未清理')
     receipt=json.loads((directory/'receipt.json').read_text())
@@ -240,6 +253,7 @@ def compact_data_phase(directory, *, root=ROOT):
                 or any(digest(directory/name)!=value for name,value in hashes.items())):
             raise ValueError('取数测试库发生变化，保留原件')
         require_unused_store(store,root)
+        require_unreferenced_case(directory, root)
         os.replace(packed,archive)
         if store.exists():shutil.rmtree(store)
         task_path.unlink()
