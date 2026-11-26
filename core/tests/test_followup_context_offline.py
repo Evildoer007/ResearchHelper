@@ -61,15 +61,18 @@ class FollowUpContextTests(unittest.TestCase):
         self.assertEqual(payload["data_request_contract"]["callable_codes"], ["600036.SH"])
         self.assertEqual(self.agent.archive.get(child["id"])["status"], "运行中")
 
-    def test_every_model_phase_and_shared_contract_receives_same_context(self):
+    def test_only_analysis_receives_prior_findings(self):
         child = self.follow(self.parent())
         expected = conversation_context(child)
+        evidence_context = {key: value for key, value in expected.items() if key != 'previous_answer'}
         for phase, fields in PHASE_FIELDS.items():
-            model_object(self.agent.model, child, phase, {}, fields)
-            messages = self.agent.model.calls[-1][1]
-            self.assertEqual(json.loads(messages[1]["content"])["conversation_context"], expected)
-            self.assertNotIn("招商银行", messages[0]["content"])
-        self.assertEqual(evidence_contract(child)["research_scope"]["conversation_context"], expected)
+            with self.subTest(phase=phase):
+                model_object(self.agent.model, child, phase, {}, fields)
+                messages = self.agent.model.calls[-1][1]
+                self.assertEqual(json.loads(messages[1]["content"])["conversation_context"],
+                                 expected if phase == 'analyze' else evidence_context)
+                self.assertNotIn("招商银行", messages[0]["content"])
+        self.assertEqual(evidence_contract(child)["research_scope"]["conversation_context"], evidence_context)
         self.assertEqual(analysis_contract(child)["research_scope"]["conversation_context"], expected)
 
     def test_frozen_parent_report_and_evidence_not_inherited(self):
@@ -128,6 +131,9 @@ class FollowUpContextTests(unittest.TestCase):
         child = self.follow(parent)
         self.assertEqual(available_security_codes(child), ["600036.SH"])
         model_object(self.agent.model, child, "extract", {}, PHASE_FIELDS["extract"])
+        messages = self.agent.model.calls[-1][1]
+        self.assertNotIn(injection, canonical(messages))
+        model_object(self.agent.model, child, "analyze", {}, PHASE_FIELDS["analyze"])
         messages = self.agent.model.calls[-1][1]
         self.assertNotIn(injection, messages[0]["content"])
         self.assertIn(injection, json.loads(messages[1]["content"])["conversation_context"]["previous_answer"]["text"])
@@ -219,18 +225,21 @@ class FollowUpContextTests(unittest.TestCase):
     def test_conversation_protocol_version_is_separate_and_recorded(self):
         parent = self.parent()
         child = self.follow(parent)
-        self.assertEqual(RULES_VERSION, 24)
-        for task in (parent, child):
-            with patch("researchhelper.reasoning._record_output_contract") as record:
-                _, receipt = model_object(self.agent.model, task, "extract", {}, PHASE_FIELDS["extract"])
-            diagnostic = record.call_args.args[3]
-            self.assertEqual(receipt["rules_version"], 24)
-            if task is child:
-                self.assertEqual(receipt["conversation_rules_version"], CONVERSATION_RULES_VERSION)
-                self.assertEqual(diagnostic["conversation_rules_version"], CONVERSATION_RULES_VERSION)
-            else:
-                self.assertNotIn("conversation_rules_version", receipt)
-                self.assertNotIn("conversation_rules_version", diagnostic)
+        for version in (RULES_VERSION, RULES_VERSION + 1):
+            for task in (parent, child):
+                with self.subTest(rules_version=version, followup=task is child), \
+                        patch("researchhelper.reasoning.RULES_VERSION", version), \
+                        patch("researchhelper.reasoning._record_output_contract") as record:
+                    _, receipt = model_object(self.agent.model, task, "extract", {}, PHASE_FIELDS["extract"])
+                diagnostic = record.call_args.args[3]
+                self.assertEqual(receipt["rules_version"], version)
+                if task is child:
+                    self.assertEqual(receipt["conversation_rules_version"], CONVERSATION_RULES_VERSION)
+                    self.assertEqual(diagnostic["conversation_rules_version"], CONVERSATION_RULES_VERSION)
+                else:
+                    self.assertNotIn("conversation_rules_version", receipt)
+                    self.assertNotIn("conversation_rules_version", diagnostic)
+
 
 
 if __name__ == "__main__":
