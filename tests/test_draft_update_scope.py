@@ -8,7 +8,7 @@ from researchhelper.contracts import fingerprint
 from researchhelper.engine import ResearchAgent
 from researchhelper.evidence import snapshot_record
 from researchhelper.planning import input_fingerprint
-from researchhelper.draft_sources import source_context,writing_context
+from researchhelper.draft_sources import SCOPE_VERSION,source_context,writing_context
 
 POLICY='draft_quote_scope_version'
 REPORT=dict(title='收盘观测',conclusion='只讨论已取得的观测。',logics=[
@@ -43,7 +43,7 @@ class DraftUpdateScopeTests(unittest.TestCase):
     def test_prepare_update_adopts_policy_and_keeps_version_one_frozen(self):
         done=self.first();frozen=deepcopy(self.archive.report(done['id'],1))
         updated=self.agent.prepare_update(done['id'],'2026-10-30T18:00:00+08:00')
-        self.assertEqual(updated.get(POLICY),2)
+        self.assertEqual(updated.get(POLICY),SCOPE_VERSION)
         self.assertEqual(updated['input_hash'],input_fingerprint(updated))
         self.assertEqual(self.archive.report(done['id'],1),frozen)
         self.assertNotIn(POLICY,self.archive.get(done['id'],1))
@@ -67,7 +67,7 @@ class DraftUpdateScopeTests(unittest.TestCase):
         other=ResearchAgent(self.archive,ROOT,offline=True,draft_first=False)
         try:
             updated=other.prepare_update(done['id'],'2026-10-30T18:00:00+08:00')
-            self.assertEqual(updated.get(POLICY),2)
+            self.assertEqual(updated.get(POLICY),SCOPE_VERSION)
         finally:other.close_runtime()
     def test_reopening_a_legacy_task_does_not_change_its_policy(self):
         done=self.first();before=deepcopy(done)
