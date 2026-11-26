@@ -1,5 +1,6 @@
 """Real retained cells fill chart context, without becoming submitted evidence."""
 from copy import deepcopy
+import json
 import unittest
 from tests import ROOT
 from researchhelper.contracts import canonical,fingerprint
@@ -34,6 +35,19 @@ def selected(content):
     return {row['field']:row for row in logic_figure_plan(content) if row.get('paper_logic')=='logic-1'}
 
 
+def assert_sparse_quotes(test, content, refs, values):
+    from lxml import html
+    content['content_hash'] = fingerprint({key: value for key, value in content.items() if key != 'content_hash'})
+    test.assertNotIn('close', selected(content))
+    tree = html.document_fromstring(design(content, ROOT)['html'])
+    section = tree.get_element_by_id('logic-1')
+    test.assertEqual(section.xpath('.//p[@class="measured-reading"]/span/@data-observation-id'), refs)
+    inspector = tree.get_element_by_id('draft-basis-1')
+    for ref, value in zip(refs, values, strict=True):
+        row, = inspector.xpath('.//tr[@data-observation-id=$ref]', ref=ref)
+        test.assertIn(value, row.text_content())
+
+
 class ObservedWindowVisualTests(unittest.TestCase):
     def setUp(self):self.content=fixture()
 
@@ -51,12 +65,12 @@ class ObservedWindowVisualTests(unittest.TestCase):
         self.assertEqual(len(logic_basis(self.content,self.content['draft']['logics'][0])[0]),4)
         self.assertEqual(canonical(self.content),before)
 
-    def test_only_the_observed_anchor_interval_is_added(self):
+    def test_two_isolated_observations_do_not_form_a_line(self):
         content=deepcopy(self.content);content['draft']['logics'][0].update(data_refs=['D2','D4','D7','D9'],calculation_refs=[])
         specs=selected(content)
-        self.assertEqual(specs['close']['dates'],['2026-10-27','2026-10-28','2026-10-29'])
-        self.assertEqual(specs['close']['values'],[12,None,11])
-        self.assertNotIn('D1',specs['close']['data_refs']);self.assertNotIn('D5',specs['close']['data_refs'])
+        self.assertEqual(specs['ths_pe_ttm_stock']['dates'],['2026-10-27','2026-10-28','2026-10-29'])
+        self.assertEqual(specs['ths_pe_ttm_stock']['values'],[24,22,23])
+        assert_sparse_quotes(self, content, ['D2', 'D4'], ['12', '11'])
 
     def test_changed_frozen_cells_or_original_hash_disable_only_their_series_expansion(self):
         for change in ('fact','source'):
@@ -65,15 +79,14 @@ class ObservedWindowVisualTests(unittest.TestCase):
             else:content['source_records'][0]['snapshot']['tables'][0]['table']['close'][1]=999
             specs=selected(content)
             with self.subTest(change=change):
-                self.assertEqual(specs['close']['values'],[10,15])
-                self.assertNotIn('plot_context',specs['close'])
+                assert_sparse_quotes(self, content, ['D1', 'D5'], ['10', '15'])
                 self.assertEqual(len(specs['ths_pe_ttm_stock']['values']),5)
                 self.assertTrue(all('sync_group' not in spec for spec in specs.values()))
 
     def test_an_uncited_source_cannot_fill_the_window(self):
         content=deepcopy(self.content);other=deepcopy(content['source_records'][0]);other['id']='uncited'
         content['source_records'].append(other);content['draft']['facts'][1]['artifact_id']='uncited'
-        spec=selected(content)['close'];self.assertEqual(spec['values'],[10,15]);self.assertNotIn('plot_context',spec)
+        assert_sparse_quotes(self, content, ['D1', 'D5'], ['10', '15'])
 
     def test_no_future_context_and_no_missing_dates_are_invented(self):
         content=deepcopy(self.content);content['cutoff']='2026-10-29T16:00:00+08:00'
@@ -94,7 +107,9 @@ class ObservedWindowVisualTests(unittest.TestCase):
         self.assertEqual(tree.xpath('.//table[1]/thead/tr/th/@scope'),['col'])
         self.assertEqual(tree.xpath('.//table[1]/*')[0].tag,'caption')
         self.assertEqual(len(tree.xpath('.//thead')),1)
-        self.assertEqual(_blocks(tree,{})[0]['rows'],before[:4])
+        blocks = _blocks(tree, {})
+        self.assertEqual(blocks[0], dict(kind='caption', text='原值'))
+        self.assertEqual(blocks[1], dict(kind='table', rows=before[:4]))
         frozen=etree.tostring(tree);_table_sections(tree);self.assertEqual(etree.tostring(tree),frozen)
 
     def test_standard_and_detailed_keep_the_same_ten_rows_and_point_addresses(self):
@@ -112,6 +127,32 @@ class ObservedWindowVisualTests(unittest.TestCase):
         for spec in selected(self.content).values():
             for refs in spec['point_refs']:self.assertEqual(len(refs),1)
             self.assertEqual(len(spec['data_refs']),5)
+
+    def test_real_sample_range_preserves_every_reading_and_exact_endpoint(self):
+        source = ROOT/'result/reports/gui-maotai-20261029/client-content.json'
+        original = source.read_bytes()
+        content = json.loads(original)
+        self.assertFalse(any(plot.get('kind') == 'market_observed_range' for plot in logic_figure_plan(content)))
+        content['draft']['visual_design_version'] = 1
+        plots = logic_figure_plan(content)
+        sample, = [plot for plot in plots if plot.get('kind') == 'market_observed_range']
+        data = sample['auto_visual']['data']
+        expected = [row for row in content['draft']['facts'] if row['field'] == 'close']
+        self.assertEqual(data['samples'], [dict(date=row['period'],value=row['value']) for row in expected])
+        self.assertEqual(data['latest'], expected[-1]['value'])
+        self.assertEqual(sample['series_point_refs'][2], [[expected[-1]['id']]])
+        self.assertEqual(sample['series_point_refs'][1], [[row['id']] for row in expected])
+        self.assertTrue(all(row['id'] in sample['argument_data_refs'] for row in expected))
+        # A suppressed or modified endpoint cannot be replaced by an earlier observation.
+        for change in ('omitted', 'altered'):
+            broken=deepcopy(content)
+            if change == 'omitted':
+                broken['draft']['logics'][-1]['off_scope_data_refs'] = [expected[-1]['id']]
+                broken['draft']['logics'][-1]['data_refs'].remove(expected[-1]['id'])
+            else:
+                next(row for row in broken['draft']['facts'] if row['id']==expected[-1]['id'])['value'] += 1
+            self.assertFalse(any(plot.get('kind') == 'market_observed_range' for plot in logic_figure_plan(broken)))
+        self.assertEqual(source.read_bytes(), original)
 
 
 if __name__=='__main__':unittest.main()
