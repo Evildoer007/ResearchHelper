@@ -12,6 +12,7 @@ import plistlib
 import re
 import subprocess
 from candidate_acceptance import verify_candidate
+from retire_closed_test_stores import referenced_cases
 
 ROOT = Path('/Users/haoranxu/Desktop/ResearchHelper')
 CANDIDATE = ROOT / 'result/build-staging/20261011-010238-284488/candidate.json'
@@ -50,8 +51,10 @@ def cleanup_plan(root=ROOT, candidate=CANDIDATE):
         if path.is_dir() and path != candidate.parent:
             add(path, 'superseded_candidate')
     acceptance = root / 'result/acceptance'
-    for path in sorted(acceptance.iterdir()):
-        if path.is_dir() and path.name not in RETAINED_UI and not re.search(
+    folders = sorted(path for path in acceptance.iterdir() if path.is_dir() and not path.is_symlink())
+    referenced = referenced_cases(root, (path.name for path in folders))
+    for path in folders:
+        if path.name not in RETAINED_UI and path.name not in referenced and not re.search(
                 r'(?:^|[-_])(?:live|ifind|real|current|installed|retained)(?:[-_]|$)|^thesis-harness-delivery$',
                 path.name, re.I):
             add(path, 'historical_test_workspace')
@@ -99,6 +102,12 @@ def validate_targets(plan, root, candidate, mounted=()):
         if any(path.is_relative_to(other) or other.is_relative_to(path) for other in targets):
             raise RuntimeError('清理目标相互重叠：' + str(path))
         targets.append(path)
+    acceptance = root / 'result/acceptance'
+    if acceptance in targets:
+        raise RuntimeError('不能清理整个验收目录')
+    cases = {path.relative_to(acceptance).parts[0] for path in targets if path.is_relative_to(acceptance)}
+    if referenced_cases(root, cases):
+        raise RuntimeError('清理目标仍被回归引用')
 
 
 def main():
