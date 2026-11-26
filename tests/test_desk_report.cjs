@@ -4,6 +4,7 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const path=require('node:path');
 const sandbox={window:{}};
+vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../products/app/frontend/ui/research-data.js'),'utf8'),sandbox);
 vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../products/app/frontend/ui/desk-report.js'),'utf8'),sandbox);
 const render=sandbox.window.RHDeskViews.report;
 const esc=value=>String(value).replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -32,13 +33,32 @@ test('offline profiles read their respective frozen HTML without mutation',()=>{
   assert.equal(JSON.stringify(delivered),before);
 });
 test('offline unsupported formats and absent detailed variant are disabled',()=>{
-  const html=render({...delivered,report_detailed_html:null},context({apiMode:false,reportProfile:()=> 'detailed'}));
+  // The workspace resolves the effective profile before calling this view.
+  const html=render({...delivered,report_detailed_html:null},context({apiMode:false}));
   for(const format of ['docx','xlsx','csv'])assert.match(html,new RegExp('value="'+format+'" disabled'));
   assert.match(html,/data-report-profile="detailed" aria-pressed="false" disabled/);
   assert.match(html,/打印PDF/);assert.match(html,/srcdoc="&lt;h1&gt;标准正文/);
 });
 test('version requests disable the existing version entry',()=>{
   assert.match(render(delivered,context({reportVersionBusy:()=>true})),/data-action="versions" disabled aria-busy="true"/);
+});
+test('a pending update can read and export its prior saved edition',()=>{
+  const prior={version:1,corrections:[{task_id:'one',version:1,reason:'原版更正'}]};
+  const task={...delivered,delivery:null,status:'失败',has_pending_content:true};
+  const html=render(task,context({edition:prior,latest:prior,reportURL:(_task,version)=>'/saved/'+version,
+    taskActions:()=>'<button type="button" data-action="retry-save">重试保存</button>'}));
+  assert.match(html,/阅读版本1，版本2待保存/);
+  assert.match(html,/data-action="retry-save"/);
+  assert.match(html,/查看1条报告更正/);
+  assert.match(html,/src="\/saved\/1"/);
+  assert.match(html,/data-action="export"/);
+  assert.doesNotMatch(html,/data-action="latest-report"/);
+});
+test('an explicitly selected older edition can return to the latest saved report',()=>{
+  const html=render(delivered,context({edition:{version:1},latest:delivered.delivery}));
+  assert.match(html,/阅读版本1/);
+  assert.match(html,/data-action="latest-report">阅读版本2/);
+  assert.doesNotMatch(html,/待保存|更新失败/);
 });
 test('version, URL and offline HTML cannot escape their containers',()=>{
   const task={...delivered,delivery:{version:'<img src=x>'},report_html:'"><img src=x onerror="bad()">'};
