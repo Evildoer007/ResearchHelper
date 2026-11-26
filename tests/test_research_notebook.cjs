@@ -61,7 +61,7 @@ test('Chat preserves the shared report heading and escapes it once',()=>{
  const before=JSON.stringify(task),rendered=cardsBox.draftReportCards(task);
  assert.match(rendered,/传导逻辑一：&lt;script&gt;解释&lt;\/script&gt;/);
  assert.doesNotMatch(rendered,/<script>|策略逻辑/);
- assert.match(rendered,/data-draft-basis="0"/);assert.equal(JSON.stringify(task),before);
+ assert.doesNotMatch(rendered,/data-draft-basis/);assert.equal(JSON.stringify(task),before);
 });
 test('legacy Chat headings remain readable when the new field is absent',()=>{
  const rendered=cardsBox.draftReportCards({draft_report:{conclusion:'旧结论',logics:[{title:'旧逻辑',analysis:'原文'},{analysis:'保留可用正文'}]}});
@@ -90,11 +90,11 @@ function stepFixture(){
   mechanism:{steps:[{label:'已有观察',data_refs:['D1']},{label:'适用条件',data_refs:['D2']}]}}];
  return task;
 }
-test('step-only data belong under the argument in Chat and ResDesk',()=>{
+test('step-only data stay under the Desk argument while Chat shows the conclusion',()=>{
  const task=stepFixture(),before=JSON.stringify(task),paper=views.workingpaper(task,ctx),chat=cardsBox.draftReportCards(task);
  const argument=paper.slice(paper.indexOf('id="paper-logic-0"'),paper.indexOf('</article>'));
  assert.match(argument,/data-observation="draft:D1"/);assert.match(argument,/data-observation="draft:D2"/);
- assert.match(chat,/data-draft-basis="0"/);assert.equal(JSON.stringify(task),before);
+ assert.match(chat,/条件解释/);assert.doesNotMatch(chat,/data-draft-basis/);assert.equal(JSON.stringify(task),before);
 });
 test('source ownership applies in data views, workpapers and Chat basis',()=>{
  const task=stepFixture();task.source_records.push({id:'foreign-source',task_id:task.id,research_version:task.version+1});
@@ -109,4 +109,40 @@ test('source ownership applies in data views, workpapers and Chat basis',()=>{
  vm.runInNewContext(source,basisBox);basisBox.openDraftBasis(0);
  assert.ok(popup.includes(String(task.draft_report.facts.find(row=>row.id==='D1').raw_value??task.draft_report.facts.find(row=>row.id==='D1').value)));
  assert.doesNotMatch(popup,/999999001|foreign-source/);assert.equal(JSON.stringify(task),before);
+});
+
+test('ResDesk and ResChat use the report scope without rewriting retained references',()=>{
+ const task={id:'scoped-paper',version:2,source_records:[
+  {id:'other-company',kind:'api',operation:'other'},{id:'own-company',kind:'api',operation:'own'}],draft_report:{
+  conclusion:'比较留存记录。',facts:[
+   {id:'D1',code:'600519.SH',field:'ths_revenue_stock',value:761345,period:'2024-12-31',unit:'元',artifact_id:'other-company'},
+   {id:'D2',code:'000001.SZ',field:'ths_revenue_stock',value:12,period:'2025-12-31',unit:'元',artifact_id:'own-company'},
+   {id:'D3',code:'000001.SZ',field:'ths_revenue_stock',value:10,period:'2024-12-31',unit:'元',artifact_id:'own-company'}],
+  calculations:[{id:'crossed',data_refs:['D1','D2'],label:'错引计算',value:90,unit:'%'},{id:'local',data_refs:['D3','D2'],label:'有效计算',value:20,unit:'%'}],
+  logics:[{title:'仅有错引',analysis:'当前读数待补。',data_refs:['D1'],off_scope_data_refs:['D1'],
+           reference_notes:['原值见完整数据。']},
+          {title:'有效原值与混合引用',analysis:'收入变化可复核。',data_refs:['D2'],off_scope_data_refs:['D1'],
+           mechanism:{steps:[{data_refs:['D1']}]},calculation_refs:['crossed','local']}]}};
+ const before=JSON.stringify(task),paper=views.workingpaper(task,ctx),chat=cardsBox.draftReportCards(task);
+ const [first,second]=paper.split(/<article class="paper-argument"/).slice(1).map(section=>section.split('</article>')[0]);
+ assert.doesNotMatch(first,/data-observation|data-draft-calculation/);
+ assert.match(first,/原值见完整数据/);
+ assert.match(second,/data-observation="draft:D2"/);
+ assert.match(second,/data-observation="draft:D3"/);
+ assert.match(second,/data-draft-calculation="local"/);
+ assert.doesNotMatch(second,/draft:D1|crossed|未找到对应记录/);
+ assert.match(paper,/未关联的取数[\s\S]*data-observation="draft:D1"/);
+ assert.match(paper,/未关联的计算[\s\S]*data-draft-calculation="crossed"/);
+ assert.doesNotMatch(chat,/data-draft-basis/);
+ assert.match(chat,/收入变化可复核/);
+ const popups=[];
+ const basisBox={window:sandbox.window,esc,selected:task,modal:(_title,body)=>popups.push(body),
+  draftArithmetic:rows=>rows.map(row=>row.label).join(','),
+  sourceRecordButtons:value=>value.source_records.map(record=>record.id).join(',')};
+ vm.runInNewContext(workspace.slice(workspace.indexOf('function draftFactsTable('),workspace.indexOf('function draftArithmetic(')),basisBox);
+ basisBox.openDraftBasis(0);basisBox.openDraftBasis(1);
+ assert.equal(popups.length,1);
+ assert.match(popups[0],/有效计算[\s\S]*000001\.SZ[\s\S]*own-company/);
+ assert.doesNotMatch(popups[0],/错引计算|761345|600519\.SH|other-company/);
+ assert.equal(JSON.stringify(task),before);
 });
