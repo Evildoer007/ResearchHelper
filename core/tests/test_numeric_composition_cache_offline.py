@@ -4,7 +4,7 @@ import copy
 import unittest
 from unittest.mock import patch
 
-from researchhelper.reasoning import analysis_contract, analysis_numeric_review
+from researchhelper.reasoning import analysis_contract, analysis_numeric_review, ANALYSIS_TEXT_RULES_VERSION
 from tests import test_management_custody_fee_offline as fixtures
 
 
@@ -47,8 +47,10 @@ class NumericCompositionCacheTests(unittest.TestCase):
 
     def test_contract_describes_complete_prose_not_number_appendix(self):
         contract = analysis_contract(self.task)
-        self.assertEqual(contract['answer_item_structure']['version'], 2)
+        self.assertEqual(contract['answer_item_structure']['version'], ANALYSIS_TEXT_RULES_VERSION)
         composition = contract['numeric_statement']['composition']
+        self.assertEqual(composition['version'], ANALYSIS_TEXT_RULES_VERSION)
+        self.assertEqual(contract['output_structure']['answers']['empty'], {})
         self.assertEqual(composition['scope'], 'complete_field_text')
         self.assertFalse(composition['separate_numeric_appendix'])
         self.assertFalse(composition['automatic_repair'])
