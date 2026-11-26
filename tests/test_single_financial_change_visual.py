@@ -43,14 +43,29 @@ class SingleFinancialChangeVisualTests(unittest.TestCase):
                 output=design(content,ROOT,profile=profile);tree=html.document_fromstring(output['html'])
                 figures=[block['spec'] for block in output['document']['blocks'] if block['kind']=='chart']
                 self.assertEqual(figures,[])
-                self.assertEqual(set(tree.xpath('//section[@id="logic-1"]//p[@class="measured-reading"]//*[@data-observation-id]/@data-observation-id')),
-                                 {row['id'] for row in content['draft']['facts']})
+                facts = content['draft']['facts']
+                original_ids = {row['id'] for row in facts}
+                logic = tree.get_element_by_id('logic-1')
+                readings = logic.xpath('.//p[@class="measured-reading"]/*[@data-observation-id]')
                 risk = tree.get_element_by_id('risk').text_content()
                 if profile == 'standard':
-                    self.assertNotIn('金额单位尚未确认',tree.find('.//main').text_content())
+                    self.assertFalse(readings, 'Unconfirmed amounts belong in the linked original data')
+                    result, = logic.xpath('.//p[@class="measured-reading"]//*[@data-calculation-ref]')
+                    self.assertEqual(set(result.get('data-calculation-inputs').split()), original_ids)
+                    link, = result.xpath('./a')
+                    record = tree.get_element_by_id(link.get('href').removeprefix('#'))
+                    self.assertEqual(set(record.xpath('.//tr/@data-observation-id')), original_ids)
+                    for fact in facts:
+                        row, = record.xpath('.//tr[@data-observation-id=$ref]', ref=fact['id'])
+                        self.assertEqual(row.xpath('./td[last()-1]/text()'), [str(fact['value'])])
+                    self.assertNotIn('计量单位尚未核实',tree.find('.//main').text_content())
                     self.assertIn('若报表披露口径不同，同比和比率需重新计算。',risk)
                 else:
-                    self.assertIn('金额单位尚未确认',risk)
+                    self.assertEqual({node.get('data-observation-id') for node in readings}, original_ids)
+                    for node in readings:
+                        self.assertIn('原值为', node.text_content())
+                        self.assertIn('（单位待核对）', node.text_content())
+                    self.assertIn('相关金额的计量单位尚未核实，跨期比较以单位一致为前提。',risk)
                 self.assertEqual([row[3] for row in output['document']['dataset']['rows']],[10,12])
                 self.assertEqual([row[4] for row in output['document']['dataset']['rows']],['原始单位待核对']*2)
 
@@ -88,10 +103,14 @@ class SingleFinancialChangeVisualTests(unittest.TestCase):
 
     def test_balance_change_is_named_as_a_balance_without_cash_attribution(self):
         _,content=fixture('ths_inventory_stock')
-        result=html.document_fromstring(design(content,ROOT)['html']).xpath('//main//p[@class="measured-reading"]//span[@data-calculation-ref]')[0]
-        self.assertIn('存货余额',result.text_content())
-        self.assertNotIn('释放',result.text_content())
-        self.assertIn('20.00%',result.text_content())
+        tree=html.document_fromstring(design(content,ROOT)['html'])
+        paragraph, = tree.get_element_by_id('logic-1').xpath('.//p[@class="measured-reading"]')
+        result, = paragraph.xpath('.//span[@data-calculation-ref]')
+        link, = result.xpath('./a')
+        self.assertIn('存货余额',paragraph.text_content())
+        self.assertIn('存货余额',link.get('aria-label'))
+        self.assertNotRegex(paragraph.text_content(), r'释放|现金流')
+        self.assertEqual(result.text_content(),'20.00%')
 
     def test_incomparable_or_single_period_data_still_saves_a_readable_presentation(self):
         _,content=fixture();content['draft']['calculations']=[];content['draft']['facts']=content['draft']['facts'][:1]
