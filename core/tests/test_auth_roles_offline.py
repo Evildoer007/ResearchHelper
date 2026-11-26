@@ -14,9 +14,7 @@ from researchhelper.service import make_server
 
 class RoleIsolationTests(unittest.TestCase):
     def setUp(self):
-        acceptance = Path(__file__).resolve().parents[1] / "result" / "acceptance"
-        acceptance.mkdir(parents=True, exist_ok=True)
-        self.temp = tempfile.TemporaryDirectory(prefix="roles-offline-", dir=acceptance)
+        self.temp = tempfile.TemporaryDirectory(prefix="roles-offline-")
         self.server = make_server(self.temp.name, authentication=True)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
