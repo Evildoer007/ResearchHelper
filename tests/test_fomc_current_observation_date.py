@@ -4,19 +4,32 @@ import hashlib
 import json
 import unittest
 from unittest.mock import patch
+from zipfile import ZipFile
 
 from tests import ROOT
 from researchhelper.analyzer import ResearchAnalyzer
 from researchhelper.contracts import ContractError, validate_evidence
 from researchhelper.evidence import candidate_evidence, current_original_reference
 
-ORIGINAL = ROOT / 'result/acceptance/fomc-source-live-ldktj1_x/task.json'
+ORIGINAL = ROOT / 'result/acceptance/autonomous-data-phase-ebu_db39/raw-qa.zip'
+
+
+def retained_statement_scope():
+    with ZipFile(ORIGINAL) as replay:
+        task = json.loads(replay.read('task.json'))
+    # This scope tests the September statement against its original calendar.
+    # Keep the strong acquisition fields and the saved task's wire data intact.
+    catalogue, september, july = task['source_records']
+    assert september['snapshot']['official_origin']['path_date_hint'] == '2026-09-16'
+    assert july['snapshot']['official_origin']['path_date_hint'] == '2026-07-29'
+    task['source_records'] = [catalogue, september]
+    return task
 
 
 class FOMCCurrentObservationDateTests(unittest.TestCase):
     def setUp(self):
         self.digest = hashlib.sha256(ORIGINAL.read_bytes()).hexdigest()
-        self.task = json.loads(ORIGINAL.read_text())
+        self.task = retained_statement_scope()
         self.record = self.task['source_records'][-1]
         self.parts = self.record['snapshot']['parts']
         self.header = next(part for part in self.parts if part['text'] == 'September 16, 2026')
