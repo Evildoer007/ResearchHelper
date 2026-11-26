@@ -8,6 +8,7 @@ from tests import test_object_discovery_contract as fixture
 from researchhelper.acquisition import complete_initial_acquisition, navigation_question_projection
 from researchhelper.evidence import data_request_contract
 from researchhelper.planning import input_fingerprint
+from researchhelper.financial_sources import STRUCTURED_SOURCE_POLICY
 
 
 class DiscoveryNavigationContextTests(unittest.TestCase):
@@ -20,9 +21,13 @@ class DiscoveryNavigationContextTests(unittest.TestCase):
         self.task['questions'][0].update(evidence_needs=['本期营业收入与报表净利润'],
                                         method_needs=['net_profit_margin_v1'])
         self.task['input_hash'] = input_fingerprint(self.task)
-        self.source = self.base.retained()
+        # Retain the synthetic response only after the case has chosen its input policy.
 
-    def test_actual_navigation_payload_keeps_candidate_choice_when_discovery_tool_removed(self):
+    def navigation_payload(self, *, legacy=False):
+        if legacy:
+            self.task.pop(STRUCTURED_SOURCE_POLICY)
+            self.task['input_hash']=input_fingerprint(self.task)
+        self.source=self.base.retained()
         captured = []
         engine = SimpleNamespace(offline=False, model=object(), source_credentials={'ifind': {'refresh_token': 'SYNTHETIC_NOT_SENT'}},
             _active_supplement=Mock(return_value=None), _reasoning_available=Mock(return_value=True),
@@ -37,12 +42,24 @@ class DiscoveryNavigationContextTests(unittest.TestCase):
             complete_initial_acquisition(engine, self.task)
         self.assertEqual(len(captured), 1)
         contract = captured[0]['data_request_contract']
-        self.assertNotIn('smart_stock_picking', [tool['operation'] for tool in contract['tools']])
         self.assertIn('get_thscode', [tool['operation'] for tool in contract['tools']])
         self.assertEqual(contract['object_discovery']['results'][0]['candidates'][0]['name'], '测试样本甲')
         self.assertEqual(contract['callable_codes'], ['000001.SZ', '600001.SH'])
+        return contract
+
+    def test_actual_navigation_payload_keeps_candidate_choice_when_discovery_tool_removed(self):
+        contract=self.navigation_payload(legacy=True)
+        self.assertNotIn('smart_stock_picking',[tool['operation'] for tool in contract['tools']])
+        self.assertNotIn(STRUCTURED_SOURCE_POLICY,self.task)
+
+    def test_current_api_priority_keeps_numeric_navigation_and_retained_candidates(self):
+        contract=self.navigation_payload()
+        self.assertIn('smart_stock_picking',[tool['operation'] for tool in contract['tools']])
+        self.assertEqual(contract['source_preference']['primary_provider'],'ifind')
+        self.assertFalse(contract['source_preference']['financial_approval'])
 
     def test_projection_preserves_choices_without_inventing_scope_or_codes(self):
+        self.source=self.base.retained()
         contract = data_request_contract(self.task)
         expected = copy.deepcopy(contract['object_discovery'])
         contract['tools'] = [tool for tool in contract['tools'] if tool['operation'] == 'get_thscode']
