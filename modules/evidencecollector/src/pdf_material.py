@@ -3,20 +3,126 @@
 Tables are a reproducible representation of actual PDF geometry. They are not
 financial facts, selected periods, publication proofs or semantic approvals.
 """
+import base64
+import hashlib
 import io
 import math
 import re
 from datetime import date
 
-EXTRACT_VERSION = 'pdf-tables-6'
-TABLE_EXTRACT_VERSIONS = ('pdf-tables-2', 'pdf-tables-3', 'pdf-tables-4', 'pdf-tables-5', EXTRACT_VERSION)
-ALIGNED_EXTRACT_VERSIONS = ('pdf-tables-3', 'pdf-tables-4', 'pdf-tables-5', EXTRACT_VERSION)
-FINANCIAL_CONTEXT_EXTRACT_VERSIONS = ('pdf-tables-4', 'pdf-tables-5', EXTRACT_VERSION)
-DURATION_EXTRACT_VERSIONS = ('pdf-tables-5', EXTRACT_VERSION)
+EXTRACT_VERSION = 'pdf-tables-7'
+STATEMENT_DETAIL_EXTRACT_VERSIONS = ('pdf-tables-6', EXTRACT_VERSION)
+DURATION_EXTRACT_VERSIONS = ('pdf-tables-5', *STATEMENT_DETAIL_EXTRACT_VERSIONS)
+FINANCIAL_CONTEXT_EXTRACT_VERSIONS = ('pdf-tables-4', *DURATION_EXTRACT_VERSIONS)
+ALIGNED_EXTRACT_VERSIONS = ('pdf-tables-3', *FINANCIAL_CONTEXT_EXTRACT_VERSIONS)
+TABLE_EXTRACT_VERSIONS = ('pdf-tables-2', *ALIGNED_EXTRACT_VERSIONS)
 TABLE_VERSION = 1
 MAX_PAGES = 500
 COLUMN_DRIFT_POINTS = 1.0
 TEXT_TABLE_VERSION = 2
+_UNDECODED = re.compile(r'\(cid:\d+\)|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ufffd\ufffe\uffff]')
+
+
+def legacy_pdf_text_damaged(material):
+    """Flag known decoder artifacts for an explicit retry, without editing the archive."""
+    version = material.get('extract_version')
+    return (version in ('1', *TABLE_EXTRACT_VERSIONS[:-1])
+            and str(material.get('name', '')).lower().endswith('.pdf')
+            and any(isinstance(part, dict) and isinstance(part.get('text'), str) and _UNDECODED.search(part['text'])
+                    for part in material.get('parts', [])))
+
+
+def pdf_reparse_replacements(task):
+    """Resolve obsolete PDF text to a unique readable parse of the same original."""
+    from .contracts import fingerprint
+
+    earlier, current = [], {}
+    for record in task.get('source_records', []) + task.get('materials', []):
+        if (record.get('kind') not in ('material', 'filing') or record.get('task_id') != task.get('id')
+                or record.get('research_version') != task.get('version')):
+            continue
+        snapshot = record.get('snapshot')
+        if not isinstance(snapshot, dict):
+            continue
+        material = snapshot.get('material') if record['kind'] == 'filing' else snapshot
+        if not isinstance(material, dict) or not str(material.get('name', '')).lower().endswith('.pdf'):
+            continue
+        readable = (material.get('extract_version') == EXTRACT_VERSION and material.get('status') == '已解析'
+                    and any(isinstance(part, dict) and isinstance(part.get('text'), str)
+                            and part['text'].strip() and not part.get('pdf_text_limited')
+                            for part in material.get('parts', [])))
+        if not readable and material.get('extract_version') not in ('1', *TABLE_EXTRACT_VERSIONS[:-1]):
+            continue
+        source = record.get('source')
+        scope = (record['kind'], source, record.get('operation'), material['name'], material.get('hash'),
+                 fingerprint([record.get('parameters'), record.get('directory'), material.get('official_origin')]),
+                 record.get('obtained_at') if source == 'official' else None)
+        if readable:
+            current.setdefault(scope, []).append((record, material))
+        else:
+            earlier.append((scope, record, material))
+
+    replacements = {}
+    for scope, old, material in earlier:
+        matches = current.get(scope, [])
+        if len(matches) != 1:
+            continue
+        new, extracted = matches[0]
+        if not legacy_pdf_text_damaged(material) and not any(
+                part.get('pdf_text_recovered') or part.get('pdf_text_limited') for part in extracted['parts']):
+            continue
+        encoded = material.get('original_base64')
+        if (not encoded or encoded != extracted.get('original_base64')
+                or any(fingerprint(record['snapshot']) != record.get('snapshot_hash', record.get('hash'))
+                       for record in (old, new))):
+            continue
+        try:
+            original_hash = hashlib.sha256(base64.b64decode(encoded, validate=True)).hexdigest()
+        except (ValueError, TypeError):
+            continue
+        if original_hash == extracted.get('hash'):
+            replacements[old['id']] = new['id']
+    return replacements
+
+
+def _decoded_page(plain, page):
+    from pypdf.errors import PdfReadError
+    from pdfplumber.utils.exceptions import PdfminerException
+
+    unmapped = set()
+
+    def note_font(text, _cm, _tm, font, _size):
+        if (text.strip() and font and font.get('/Subtype') == '/Type0'
+                and font.get('/Encoding') in ('/Identity-H', '/Identity-V') and not font.get('/ToUnicode')):
+            name = font.get('/BaseFont', '')
+            descendants = font.get('/DescendantFonts', [])
+            if descendants:
+                descriptor = descendants[0].get_object().get('/FontDescriptor')
+                if descriptor:
+                    name = descriptor.get_object().get('/FontName', name)
+            unmapped.add(str(name).lstrip('/'))
+
+    try:
+        text = plain.extract_text(visitor_text=note_font) or ''
+    except PdfReadError:
+        text = None
+    if text is not None and not unmapped and not _UNDECODED.search(text):
+        return dict(text=text)
+    try:
+        alternate = page.extract_text() or ''
+        if alternate.strip() and not _UNDECODED.search(alternate):
+            # CID codes are not Unicode. The layout decoder must actually
+            # map every affected font, not just return the surviving digits.
+            if unmapped:
+                decoded = {char['fontname'] for char in page.chars
+                           if char['text'].strip() and not _UNDECODED.search(char['text'])}
+                if unmapped <= decoded:
+                    return dict(text=alternate, pdf_text_recovered=True)
+            elif any(char.isalpha() for char in alternate):
+                return dict(text=alternate, pdf_text_recovered=True)
+    except PdfminerException:
+        pass
+    return dict(text='', pdf_text_limited=True)
 
 
 def aligned_statement_part(words, width, height, number):
@@ -432,6 +538,7 @@ def physical_rule_settings(page):
 def _layout_parts(page, plain_text, number, previous, point_previous, version):
     """Commit one page's geometry together; a failed page cannot bridge tables."""
     parts=[]
+    statement_details = version in STATEMENT_DETAIL_EXTRACT_VERSIONS
     # Only physical rules. Never use text-alignment inference or OCR.
     settings = (physical_rule_settings(page) if version in FINANCIAL_CONTEXT_EXTRACT_VERSIONS
                 else {'vertical_strategy': 'lines', 'horizontal_strategy': 'lines'})
@@ -480,13 +587,13 @@ def _layout_parts(page, plain_text, number, previous, point_previous, version):
             and any(re.search(r'营业收入|净利润|经营活动产生的现金流量净', line.split('\t')[0])
                     for line in part['text'].splitlines())]
         if not ruled:
-            words=page.extract_words(x_tolerance=1,y_tolerance=2,keep_blank_chars=False,**({'return_chars':True} if version==EXTRACT_VERSION else {}))
+            words=page.extract_words(x_tolerance=1,y_tolerance=2,keep_blank_chars=False,**({'return_chars':True} if statement_details else {}))
             aligned = aligned_statement_part(words, page.width, page.height, number)
             if aligned is None and version in DURATION_EXTRACT_VERSIONS:
-                aligned = duration_statement_part(words,page.width,page.height,number,accounting_parentheses=version==EXTRACT_VERSION)
+                aligned = duration_statement_part(words,page.width,page.height,number,accounting_parentheses=statement_details)
             if aligned is not None:
                 parts.append(aligned)
-    if version==EXTRACT_VERSION:
+    if statement_details:
         point_caption=re.search(r'(?m)^'+caption_prefix+r'(?:合并|母公司)资产负债表\s*$',plain_text)
         other_statement=re.search(r'(?m)^'+caption_prefix+r'(?:合并|母公司)(?:利润表|现金流量表|所有者权益变动表)\s*$',plain_text)
         point=None
@@ -518,12 +625,16 @@ def extract_parts(payload, *, extract_version=None):
             raise ContractError('PDF正文与表格页数不一致，未采用表格')
         for number, (plain, page) in enumerate(zip(reader.pages, document.pages), 1):
             try:
-                plain_text = plain.extract_text() or ''
-                literal = {'locator': f'第{number}页', 'text': plain_text}
+                literal = {'locator': f'第{number}页'}
+                literal.update(_decoded_page(plain, page) if version == EXTRACT_VERSION else
+                               dict(text=plain.extract_text() or ''))
                 parts.append(literal)
+                if literal.get('pdf_text_limited'):
+                    previous = point_previous = None
+                    continue
                 try:
                     page_parts, next_previous, next_point = _layout_parts(
-                        page, plain_text, number, previous, point_previous, version)
+                        page, literal['text'], number, previous, point_previous, version)
                 except PdfminerException:
                     # The independently decoded literal text remains useful.
                     # Do not invent grids or carry a statement across this page.
