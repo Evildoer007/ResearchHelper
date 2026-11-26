@@ -8,9 +8,9 @@ import json
 import math
 import re
 
-from .contracts import (ContractError, METHOD_REGISTRY, calculation_quantity_paths, fingerprint,
+from .contracts import (ContractError, DuplicateJSONField, METHOD_REGISTRY, calculation_quantity_paths, fingerprint,
                         method_reference_quantities, analysis_quantity_paths,
-                        tracking_contract, validate_tracking)
+                        tracking_contract, unique_json_object, validate_tracking)
 
 VERSION = 1
 FUNCTION_NAME = 'rh_submit_analysis_v1'
@@ -24,6 +24,7 @@ PLAN_REQUEST_FUNCTION_NAME = 'rh_submit_plan_v2'
 PLAN_REQUEST_PROTOCOL = 'strict_plan_v2'
 ACQUISITION_PROTOCOL = 'strict_acquisition_v1'
 ACQUISITION_FUNCTION_NAME = 'rh_submit_acquisition_v1'
+DRAFT_REPORT_SCHEMA_NAME = 'rh_research_draft_v1'
 MATERIAL_EXTRACTION_FUNCTION_NAME = 'rh_submit_material_evidence_v1'
 MATERIAL_EXTRACTION_PROTOCOL = 'strict_material_extraction_v1'
 FINANCIAL_EXTRACTION_FUNCTION_NAME = 'rh_submit_financial_original_v7'
@@ -86,9 +87,16 @@ def provider_request_schema(task, schema, protocol):
         from .flat_api_selection import project as flat_api_schema
         schema = flat_api_schema(task, schema)
     result = provider_output_schema(schema)
-    original = (protocol == ORIGINAL_SPAN_PROTOCOL
-                and type(task.get('structured_schema_sharing_version')) is int
-                and task['structured_schema_sharing_version'] == 1)
+    original_policy = task.get('structured_schema_sharing_version')
+    # Named quantity selections carry exact source-local enumerations. Some
+    # saved tasks predate the sharing flag, so reuse identical definitions on
+    # their wire too. The task and local decoder keep the full constraints.
+    named_quantity_wire = ('structured_schema_sharing_version' not in task
+                           and type(task.get('literal_quantity_reference_version')) is int
+                           and task['literal_quantity_reference_version'] == 5
+                           and schema.get('properties', {}).get('version', {}).get('enum') in ([10], [11], [12]))
+    original = (protocol == ORIGINAL_SPAN_PROTOCOL and (
+        type(original_policy) is int and original_policy == 1 or named_quantity_wire))
     analysis = (protocol == ANALYSIS_CITATION_PROTOCOL
                 and type(task.get('analysis_schema_sharing_version')) is int
                 and task['analysis_schema_sharing_version'] == 1)
@@ -186,6 +194,31 @@ def array_schema(items):
     # DeepSeek strict mode does not support minItems/maxItems. Local validation
     # still enforces resource bounds, in addition to the existing kernel gates.
     return {'type': 'array', 'items': items}
+
+
+def draft_report_output_schema(task):
+    """Describe the report container, leaving judgment and evidence review to the kernel."""
+    from .planning import draft_research_scope
+
+    text = {'type': 'string'}
+    texts = array_schema(text)
+    def nullable(schema):
+        return {'anyOf': [schema, {'type': 'null'}]}
+
+    scope = draft_research_scope(task)
+    scopes = scope['allowed_report_scopes'] if scope else ['fact', 'comparison', 'mechanism', 'research']
+    step = object_schema(dict(label=text, kind={'type': 'string', 'enum': ['observation', 'hypothesis', 'condition']},
+                              data_refs=texts))
+    tracking = dict(indicator=text, source=text, window=text, condition=text)
+    logic = object_schema(dict(title=text, analysis=text,
+        argument=nullable(object_schema(dict(claim=text, evidence=text, reasoning=text, condition=text))),
+        implication=text, risk=text, data_refs=texts, source_refs=texts, calculation_refs=texts,
+        knowledge_refs=array_schema(object_schema(dict(id=text, version={'type': 'integer'}))),
+        mechanism=nullable(object_schema(dict(steps=array_schema(step)))),
+        tracking={'anyOf': [object_schema(tracking), object_schema(dict(tracking, benchmark=text)), {'type': 'null'}]},
+        workpaper_notes=texts))
+    return object_schema(dict(title=text, conclusion=text, report_scope=nullable({'type': 'string', 'enum': scopes}),
+                              logics=array_schema(logic), risks=texts, reader_notes=texts, workpaper_notes=texts))
 
 
 def _literal_schema(value):
@@ -415,6 +448,22 @@ def _planned_request_schemas(task, selected_contract=None):
             choice = object_schema(fields)
             if tool.get('request_description'):
                 choice['description'] = tool['request_description']
+            observation = tool.get('observation_selection')
+            if observation is not None:
+                # Date ranges keep their original wire form. A latest query
+                # selects a task-bound window instead of inventing two dates.
+                latest = copy.deepcopy(choice)
+                fields = latest['properties']['parameters']['properties']
+                required = latest['properties']['parameters']['required']
+                for name in ('startdate','enddate'):
+                    fields.pop(name);required.remove(name)
+                fields['observation_window'] = object_schema(dict(
+                    mode=dict(type='string',enum=['latest_available']),
+                    as_of=dict(type='string',enum=[observation['as_of']]),
+                    lookback_calendar_days=dict(type='integer',enum=observation['lookback_calendar_days'])))
+                required.append('observation_window')
+                latest['description'] = observation['rule']
+                choices.append(latest)
             choices.append(choice)
     return choices
 
@@ -487,6 +536,15 @@ def decode_acquisition_output(wire, schema, description):
     _decode_series_parameter_selections(result['data_requests'], schema)
     _decode_identity_requests(result['data_requests'], schema)
     _decode_semantic_requests(result['data_requests'])
+    from .market_series import compile_observation_window
+    for index,(original,request) in enumerate(zip(wire['data_requests'],result['data_requests'])):
+        if 'observation_window' not in original.get('parameters',{}):continue
+        branches=schema['properties']['data_requests']['items']['anyOf']
+        matches=[branch for branch in branches if _matches(original,branch)]
+        if len(matches)!=1:raise StructuredOutputError('ambiguous_observation_window','最近观测窗口未唯一绑定')
+        window=matches[0]['properties']['parameters']['properties']['observation_window']['properties']
+        selection=dict(version=1,as_of=window['as_of']['enum'][0],lookback_calendar_days=window['lookback_calendar_days']['enum'])
+        result['data_requests'][index]=compile_observation_window(request,selection)
     return result
 
 
@@ -580,13 +638,16 @@ def _fee_candidate_choices(task, views):
     choices=_fee_original_choices(task,views)
     if choices is None:return None
     from .fee_sources import original_fee_choices
+    policy=task.get('original_duration_anchor_version')
+    literal_duration=type(policy) is int and policy==1
     result=[]
     for choice in choices:
         bound=choice['source'].get('object_binding')
         if (not isinstance(bound,dict) or not isinstance(bound.get('value'),str)
                 or not re.fullmatch(r'\d{6}\.(?:SH|SZ)',bound['value'])):
             return None
-        candidates=original_fee_choices(choice['view'],object_code=bound['value'].split('.')[0])
+        candidates=original_fee_choices(choice['view'],object_code=bound['value'].split('.')[0],
+            literal_duration=literal_duration)
         if not candidates['eligible']:return None
         result.append(dict(**choice,candidates=candidates))
     return result
@@ -838,19 +899,27 @@ def financial_extraction_v2_schema(task, views):
         'financial_cells':array_schema(numeric),'text_quotes':array_schema(quote)})
 
 
-def financial_extraction_v5_schema(task,views):
-    """A fixed source-selector protocol: no retyped quotations or amounts."""
-    from .contracts import FINANCIAL_PERIOD_METHODS,DOCUMENT_CONTENT_INTENT
+def _financial_extraction_contract(task, views):
+    from .contracts import FINANCIAL_PERIOD_METHODS, DOCUMENT_CONTENT_INTENT
     from .reasoning import evidence_contract
-    from .financial_sources import original_line_index,original_date_anchors
     methods={m for q in task.get('questions',[]) for m in q.get('method_needs',[])}
     methods.update(c.get('method') for c in task.get('calculation_specs',[]))
     if (not methods or not methods.issubset(FINANCIAL_PERIOD_METHODS)
             or task.get('intent')==DOCUMENT_CONTENT_INTENT or not isinstance(views,list)
             or len(views)!=1 or views[0].get('kind') not in ('material','filing')):
         return None
-    contract=evidence_contract(task,views)
-    if contract['source_bindings_omitted'] or len(contract['sources'])!=1 or not contract['question_ids']:
+    return evidence_contract(task, views)
+
+
+def financial_extraction_v5_schema(task, views):
+    """A fixed source-selector protocol: no retyped quotations or amounts."""
+    return _financial_extraction_v5_schema(task, views, _financial_extraction_contract(task, views))
+
+
+def _financial_extraction_v5_schema(task, views, contract):
+    from .financial_sources import original_line_index, original_date_anchors
+    if (contract is None or contract['source_bindings_omitted']
+            or len(contract['sources']) != 1 or not contract['question_ids']):
         return None
     source=contract['sources'][0]
     availability=source.get('current_availability_reference')
@@ -888,12 +957,16 @@ def financial_extraction_v5_schema(task,views):
         'financial_cells':array_schema(numeric),'text_quotes':array_schema(quote)})
 
 
-def financial_extraction_output_schema(task,views):
+def financial_extraction_output_schema(task, views):
     """Select bound original positions rather than regenerate known fields."""
-    schema=financial_extraction_v5_schema(task,views)
-    if schema is None:return None
-    from .reasoning import evidence_contract
-    source=evidence_contract(task,views)['sources'][0]
+    return _financial_extraction_output_schema(task, views, _financial_extraction_contract(task, views))
+
+
+def _financial_extraction_output_schema(task, views, contract):
+    schema = _financial_extraction_v5_schema(task, views, contract)
+    if schema is None:
+        return None
+    source = contract['sources'][0]
     cells=source.get('financial_context_cells',[])
     shared=source.get('financial_shared_context_choices',{})
     if not cells or any(not shared.get(field) for field in ('entity_id','accounting_standard')):
@@ -984,22 +1057,26 @@ def financial_selector_prompt(payload,task=None):
     return result
 
 
-def _financial_reference_binding(task, views):
+def _financial_reference_binding(task, views, contract):
+    """Bind a selector to the contract computed from this operation's read view."""
     from .contracts import context, fingerprint
-    legacy = financial_extraction_output_schema(task, views)
+    legacy = _financial_extraction_output_schema(task, views, contract)
     if legacy is None or legacy['properties']['version']['enum'] != [7]:
         return None
     choices = legacy['properties']['text_quotes']['items']['properties']['quote_reference']['enum']
     refs = {'quote_' + str(index + 1): value for index, value in enumerate(choices)}
     binding = dict(source_ref='source_1', binding_ref=fingerprint(dict(task=context(task), schema=legacy))[:16])
-    return legacy, refs, binding
+    return dict(legacy=legacy, refs=refs, binding=binding, contract=contract)
 
 
 def financial_reporting_period_choices(task, views):
     """Exact period labels and anchors from actual read financial headers."""
-    from .contracts import fingerprint
     from .reasoning import evidence_contract
-    source = evidence_contract(task, views)['sources'][0]
+    return _financial_reporting_period_choices(evidence_contract(task, views)['sources'][0])
+
+
+def _financial_reporting_period_choices(source):
+    from .contracts import fingerprint
     choices, seen = [], set()
     for cell in source.get('financial_context_cells', []):
         period = cell['context']['period']
@@ -1093,10 +1170,8 @@ def _financial_observation_binding(binding, choices):
         base=binding, observation_reference_version=1, choices=choices))[:16])
 
 
-def _financial_need_map_schema(task, views):
+def _financial_need_map_schema(task, contract):
     """Unique question keys, explicit empty selection, no inferred coverage."""
-    from .reasoning import evidence_contract
-    contract = evidence_contract(task, views)
     requirements = contract['question_requirements']
     mapping = {qid: dict(array_schema({'type':'string', 'enum':[
         need['id'] for need in needs]}), uniqueItems=True, maxItems=len(needs))
@@ -1110,7 +1185,7 @@ def _financial_need_map_schema(task, views):
     return object_schema(mapping)
 
 
-def _financial_text_period_need_schema(task, views, quote):
+def _financial_text_period_need_schema(task, views, quote, *, contract=None):
     """Offer only compatible literal period/need pairs, never approve a fact.
 
     Group equivalent choices to avoid a branch per date or original header.
@@ -1124,12 +1199,13 @@ def _financial_text_period_need_schema(task, views, quote):
     if task.get('financial_text_period_version') != 2 or not _financial_need_map_enabled(task):
         raise ContractError('财务摘录期间兼容须使用显式原文期间和问题需求映射')
     from .data_requirements import normalized, period_matches
-    from .reasoning import evidence_contract
-    contract = evidence_contract(task, views)
+    if contract is None:
+        from .reasoning import evidence_contract
+        contract = evidence_contract(task, views)
     requirements = contract['question_requirements']
     constraints = {question['id']: normalized(question) for question in task['questions']}
     periods = {choice['reference']: choice['period']
-               for choice in financial_reporting_period_choices(task, views)}
+               for choice in _financial_reporting_period_choices(contract['sources'][0])}
     # observation_date decodes the original anchor's ISO date, not a duration.
     from .financial_sources import original_date_anchors
     observations = original_date_anchors(views[0])
@@ -1160,12 +1236,11 @@ def _financial_text_period_need_schema(task, views, quote):
     return branches[0] if len(branches) == 1 else {'anyOf': branches}
 
 
-def _financial_amount_catalogue(task, views):
-    from .reasoning import evidence_contract
+def _financial_amount_catalogue(task, contract):
     from .financial_sources import financial_amount_selection_enabled
     if not financial_amount_selection_enabled(task):
         return None
-    sources = evidence_contract(task, views)['sources']
+    sources = contract['sources']
     if len(sources) != 1 or 'financial_amount_tables' not in sources[0]:
         raise ContractError('财务明细选择缺少同原件读取目录')
     return sources[0]['financial_amount_tables']
@@ -1238,15 +1313,13 @@ def _financial_amount_need_compatible(spec, period):
                  or spec['value_kind'] == 'number' and spec['unit_dimension'] == 'amount'))
 
 
-def _financial_amount_wire_schema(task, views, catalogue):
+def _financial_amount_wire_schema(task, views, catalogue, contract):
     from .data_requirements import normalized, period_matches
-    from .reasoning import evidence_contract
-    contract = evidence_contract(task, views)
     source = contract['sources'][0]
     if not source.get('object_binding') or not source.get('current_availability_reference'):
         return dict(array_schema(object_schema({})), maxItems=0)
     observations = financial_observation_choices(views)
-    base_map = _financial_need_map_schema(task, views)
+    base_map = _financial_need_map_schema(task, contract)
     constraints = {question['id']: normalized(question) for question in task['questions']}
     choices = _financial_amount_choices(task, catalogue) if _financial_amount_reference_enabled(task) else None
     variants = []
@@ -1281,11 +1354,9 @@ def _financial_amount_wire_schema(task, views, catalogue):
     return (array_schema({'anyOf': variants}) if variants else dict(array_schema(object_schema({})), maxItems=0))
 
 
-def _decode_financial_amounts(task, views, selections, catalogue):
+def _decode_financial_amounts(task, views, selections, catalogue, contract):
     """Restore selected original cells, never an assumed metric or calculation."""
-    from .reasoning import evidence_contract
     from .financial_sources import _financial_amount_value
-    contract = evidence_contract(task, views)
     source = contract['sources'][0]
     tables = {table['reference']: table for table in catalogue['tables']}
     observations = {choice['reference']: choice for choice in financial_observation_choices(views)}
@@ -1353,17 +1424,20 @@ def _decode_financial_amounts(task, views, selections, catalogue):
 
 def financial_reference_output_schema(task, views):
     """Short quote addresses, still bound to the exact source and read view."""
-    description = _financial_reference_binding(task, views)
-    if description is None:
-        return None
-    legacy, refs, binding = description
-    schema = copy.deepcopy(legacy)
+    selector = _financial_reference_binding(task, views, _financial_extraction_contract(task, views))
+    return _financial_reference_schema(task, views, selector) if selector is not None else None
+
+
+def _financial_reference_schema(task, views, selector):
+    contract = selector['contract']
+    binding = selector['binding']
+    schema = copy.deepcopy(selector['legacy'])
     schema['properties']['version']['enum'] = [8]
     schema['properties']['source_reference'] = _literal_schema(binding)
     field = schema['properties']['text_quotes']['items']['properties']['quote_reference']
-    field['enum'] = list(refs)
+    field['enum'] = list(selector['refs'])
     if task.get('financial_text_period_version') == 2:
-        choices = financial_reporting_period_choices(task, views)
+        choices = _financial_reporting_period_choices(contract['sources'][0])
         schema['properties']['version']['enum'] = [9]
         schema['properties']['source_reference'] = _literal_schema(_financial_period_binding(binding, choices))
         quote = schema['properties']['text_quotes']['items']
@@ -1382,7 +1456,7 @@ def financial_reference_output_schema(task, views):
             item['properties']['observation_reference'] = {'type':'string','enum':[row['reference'] for row in choices]}
             item['required'] = list(item['properties'])
     if _financial_need_map_enabled(task):
-        mapping = _financial_need_map_schema(task, views)
+        mapping = _financial_need_map_schema(task, contract)
         for name in ('financial_cells', 'text_quotes'):
             item = schema['properties'][name]['items']
             fields = item['properties']
@@ -1393,14 +1467,14 @@ def financial_reference_output_schema(task, views):
             else:
                 fields['question_ids']['uniqueItems'] = True
     schema['properties']['text_quotes']['items'] = _financial_text_period_need_schema(
-        task, views, schema['properties']['text_quotes']['items'])
-    catalogue = _financial_amount_catalogue(task, views)
+        task, views, schema['properties']['text_quotes']['items'], contract=contract)
+    catalogue = _financial_amount_catalogue(task, contract)
     if catalogue is not None:
         if not _financial_question_owner_enabled(task) or not _financial_observation_reference_enabled(task):
             raise ContractError('财务明细选择须使用显式问题归属和观测日期引用')
         current = {key: value['enum'][0] for key, value in schema['properties']['source_reference']['properties'].items()}
         schema['properties']['source_reference'] = _literal_schema(_financial_amount_binding(current, catalogue, task))
-        shape = _financial_amount_wire_schema(task, views, catalogue)
+        shape = _financial_amount_wire_schema(task, views, catalogue, contract)
         from .financial_data import product_selection_enabled
         if not product_selection_enabled(task) or shape.get('maxItems') != 0:
             schema['properties']['amount_cells'] = shape
@@ -1432,11 +1506,17 @@ def _financial_selector_projection(payload, task):
 
 
 def financial_reference_prompt(payload, task):
-    description = _financial_reference_binding(task, payload.get('untrusted_sources'))
-    if description is None:
+    views = payload.get('untrusted_sources')
+    selector = _financial_reference_binding(task, views, _financial_extraction_contract(task, views))
+    if selector is None:
         raise ContractError('本次原件不适用财务短引用，不改变旧提取协议')
-    _, refs, binding = description
-    aliases = {value: key for key, value in refs.items()}
+    return _financial_reference_prompt(payload, task, selector)
+
+
+def _financial_reference_prompt(payload, task, selector):
+    contract = selector['contract']
+    binding = selector['binding']
+    aliases = {value: key for key, value in selector['refs'].items()}
     result = financial_selector_prompt(payload, task)
     for view in result['untrusted_sources']:
         for part in view['parts']:
@@ -1457,7 +1537,7 @@ def financial_reference_prompt(payload, task):
             '每个键填写本摘录实际支持的该题need_id列表，不支持则填[]；编号不重复、不跨题。'
             '非空关联只能属于本条question_ids，空列表不计覆盖。关联仍须来源及金融适用性核验。')
     if task.get('financial_text_period_version') == 2:
-        choices = financial_reporting_period_choices(task, payload['untrusted_sources'])
+        choices = _financial_reporting_period_choices(contract['sources'][0])
         result['reporting_period_choices'] = choices
         result['financial_reference_binding'] = _financial_period_binding(binding, choices)
         result['reporting_period_rule'] = ('text_quotes.period_reference显式选择原文期间，或observation_date只保留观测日。'
@@ -1477,7 +1557,7 @@ def financial_reference_prompt(payload, task):
             'financial来源的financial_cells和text_quotes均显式选择observation_reference字符串，'
             '仅取本来源observation_choices.reference，不填数字下标、原始日期、null或observation_anchor。'
             '每个编号只定位所列date、part和逐字quote，不证明首次公开时间或自动批准观测日期的金融用途。')
-    catalogue = _financial_amount_catalogue(task, payload['untrusted_sources'])
+    catalogue = _financial_amount_catalogue(task, contract)
     if catalogue is not None:
         result['financial_reference_binding'] = _financial_amount_binding(result['financial_reference_binding'], catalogue, task)
         result['financial_amount_tables'] = dict(version=1, scan_complete=catalogue['scan_complete'],
@@ -1525,9 +1605,13 @@ def decode_financial_references(wire, schema, context):
     if not isinstance(context, tuple) or len(context) != 2:
         raise StructuredOutputError('missing_financial_reference_context', '财务短引用缺少实际任务和原件')
     task, views = context
-    expected = financial_reference_output_schema(task, views)
-    if expected is None or expected != schema:
+    selector = _financial_reference_binding(task, views, _financial_extraction_contract(task, views))
+    if selector is None or _financial_reference_schema(task, views, selector) != schema:
         raise StructuredOutputError('source_binding_changed', '财务短引用绑定已变化，未采用提案')
+    return _decode_financial_reference_selection(wire, schema, task, views, selector)
+
+
+def _decode_financial_reference_selection(wire, schema, task, views, selector):
     if not _matches(wire, schema):
         raise StructuredOutputError('invalid_financial_reference', '财务短引用不在本次候选范围，未采用提案',
                                     schema_diagnostic(wire, schema))
@@ -1535,7 +1619,8 @@ def decode_financial_references(wire, schema, context):
         identifiers = [item['id'] for key in ('financial_cells', 'text_quotes', 'amount_cells') for item in wire.get(key, [])]
         if len(identifiers) != len(set(identifiers)):
             raise StructuredOutputError('duplicate_evidence_id', '原件选择的证据标识重复，未覆盖期间依据')
-    legacy, refs, _ = _financial_reference_binding(task, views)
+    contract = selector['contract']
+    legacy, refs = selector['legacy'], selector['refs']
     expanded = copy.deepcopy(wire)
     amount_selections = expanded.pop('amount_cells', [])
     expanded['version'] = 7
@@ -1547,7 +1632,8 @@ def decode_financial_references(wire, schema, context):
             for item in expanded[name]:
                 item['observation_anchor'] = observations[item.pop('observation_reference')]
     periods = {}
-    choices = ({choice['reference']:choice for choice in financial_reporting_period_choices(task, views)}
+    choices = ({choice['reference']:choice
+                for choice in _financial_reporting_period_choices(contract['sources'][0])}
                if wire['version'] == 9 else {})
     if wire['version'] == 9:
         from .financial_sources import original_date_anchors
@@ -1579,13 +1665,13 @@ def decode_financial_references(wire, schema, context):
                     for qid, needs in mapping.items() if needs]
     # Ordinary extraction, exact original text and all later source/financial
     # gates remain authoritative. The selector never approves a fact.
-    result = decode_financial_extraction_output(expanded, legacy, (task, views))
+    result = _decode_financial_extraction_output(expanded, legacy, (task, views), contract=contract)
     for item in result['evidence_specs']:
         if item['id'] in periods:
             item['reporting_period_basis'] = copy.deepcopy(periods[item['id']])
     if amount_selections:
-        result['evidence_specs'].extend(_decode_financial_amounts(task, views, amount_selections,
-                                                                _financial_amount_catalogue(task, views)))
+        result['evidence_specs'].extend(_decode_financial_amounts(
+            task, views, amount_selections, _financial_amount_catalogue(task, contract), contract))
     return result
 
 
@@ -1608,12 +1694,13 @@ def _span_need_references(task, contract):
             for qid, needs in contract['question_requirements'].items()}
 
 
-def _original_quote_selector(task, view, *, _document_dates=False):
+def _original_quote_selector(task, view, *, _document_dates=False, contract=None):
     """A nonnumeric original can explain a financial question, not supply cash."""
     from .contracts import context, fingerprint
     from .financial_sources import original_date_anchors, financial_quote_choices
-    from .reasoning import evidence_contract
-    contract = evidence_contract(task, [view])
+    if contract is None:
+        from .reasoning import evidence_contract
+        contract = evidence_contract(task, [view])
     if contract['source_bindings_omitted'] or len(contract['sources']) != 1:
         return None
     source = contract['sources'][0]
@@ -1689,7 +1776,7 @@ def _original_quote_selector(task, view, *, _document_dates=False):
                 *[period['reference'] for period in periods]]}
             quote['required'] = list(quote['properties'])
         if catalogue.get('tables'):
-            shape = _financial_amount_wire_schema(task, [view], catalogue)
+            shape = _financial_amount_wire_schema(task, [view], catalogue, contract)
             if shape.get('maxItems') != 0:
                 schema['properties']['amount_cells'] = shape
                 schema['required'] = list(schema['properties'])
@@ -1711,14 +1798,19 @@ def _original_batch_choices(task, views):
         return None
     choices = []
     for index, view in enumerate(views):
-        schema = financial_reference_output_schema(task, [view])
-        kind = 'financial'
-        if schema is None:
-            quote = _original_quote_selector(task, view)
-            if quote is None:
+        source_views = [view]
+        contract = _financial_extraction_contract(task, source_views)
+        selector = _financial_reference_binding(task, source_views, contract)
+        if selector is not None:
+            schema = _financial_reference_schema(task, source_views, selector)
+            kind = 'financial'
+        else:
+            selector = _original_quote_selector(task, view, contract=contract)
+            if selector is None:
                 return None
-            schema, kind = quote['schema'], 'qualitative'
-        choices.append(dict(source_ref='source_'+str(index+1), kind=kind, view=view, schema=schema))
+            schema, kind = selector['schema'], 'qualitative'
+        choices.append(dict(source_ref='source_'+str(index+1), kind=kind, view=view,
+                            schema=schema, selector=selector))
     # A borderless financial report remains readable prose. Reuse the literal
     # quote protocol without manufacturing table cells, numeric inputs or a
     # successful method. Existing typed sources always retain their own route.
@@ -1726,10 +1818,12 @@ def _original_batch_choices(task, views):
 
 
 def original_batch_output_schema(task, views):
-    from .contracts import context, fingerprint
     choices = _original_batch_choices(task, views)
-    if choices is None:
-        return None
+    return _original_batch_schema(task, choices) if choices is not None else None
+
+
+def _original_batch_schema(task, choices):
+    from .contracts import context, fingerprint
     binding = fingerprint(dict(task=context(task), choices=[dict(source_ref=item['source_ref'],
         schema=item['schema']) for item in choices]))[:16]
     return object_schema({'version':{'type':'integer','enum':[1]},
@@ -1740,7 +1834,6 @@ def original_batch_output_schema(task, views):
 
 
 def original_batch_prompt(payload, task):
-    from .reasoning import evidence_contract
     choices = _original_batch_choices(task, payload.get('untrusted_sources'))
     if choices is None:
         raise ContractError('本次多原件不适用登记选择格式，不删材料或义务')
@@ -1752,14 +1845,15 @@ def original_batch_prompt(payload, task):
     navigation = literal_navigation_rule(task)
     if navigation is not None and navigation.get('version') == 2:
         result['knowledge_navigation'] = navigation
-    result['batch_binding_ref'] = original_batch_output_schema(task, payload['untrusted_sources'])[
+    result['batch_binding_ref'] = _original_batch_schema(task, choices)[
         'properties']['binding_ref']['enum'][0]
     for item in choices:
         view = item['view']
         period_metadata = {}
         if item['kind']=='financial':
-            projected = financial_reference_prompt(dict(untrusted_sources=[view],
-                evidence_contract=evidence_contract(task, [view])), task)
+            selector = item['selector']
+            projected = _financial_reference_prompt(dict(untrusted_sources=[view],
+                evidence_contract=selector['contract']), task, selector)
             result['untrusted_sources'].extend(projected['untrusted_sources'])
             result['evidence_contract']['sources'].extend(projected['evidence_contract']['sources'])
             binding = projected['financial_reference_binding']
@@ -1780,7 +1874,7 @@ def original_batch_prompt(payload, task):
             if 'unread_supplement_cells' in projected:
                 period_metadata['unread_supplement_cells'] = projected['unread_supplement_cells']
         else:
-            quote = _original_quote_selector(task, view)
+            quote = item['selector']
             projected_view = copy.deepcopy(view)
             for index, part in enumerate(projected_view['parts']):
                 part['quote_choices'] = [[ref, value['quote']] for ref, value in quote['refs'].items()
@@ -1829,9 +1923,8 @@ def original_batch_prompt(payload, task):
     return _financial_selector_projection(result, task)
 
 
-def _decode_original_quote_selection(task, view, wire):
-    description = _original_quote_selector(task, view)
-    if description is None or not _matches(wire, description['schema']):
+def _decode_original_quote_selection(task, view, wire, description):
+    if not _matches(wire, description['schema']):
         raise StructuredOutputError('invalid_original_quote_selection', '原件摘录不属于当前来源选择范围')
     source = description['source']
     requirements = {qid:{reference:need['text'] for reference,need in needs.items()}
@@ -1856,14 +1949,15 @@ def _decode_original_quote_selection(task, view, wire):
             text=quote['quote'], unit='不适用', availability=copy.deepcopy(source['current_availability_reference']),
             publication_mode='unknown_current_original', observation_date=date['date'],
             record_locator=dict(part=quote['part'], period_part=date['part'], period_quote=date['quote']), review=review))
+    contract = description['contract']
     result = decode_material_extraction_output(dict(version=1, evidence_specs=specs),
-                                             _original_extraction_schema(task, [view]))['evidence_specs']
+        _original_extraction_schema(task, [view], contract=contract))['evidence_specs']
     for item in result:
         if item['id'] in period_bases:
             item['reporting_period_basis'] = copy.deepcopy(period_bases[item['id']])
     if wire.get('amount_cells'):
         result.extend(_decode_financial_amounts(task, [view], wire['amount_cells'],
-                      description['source']['financial_amount_tables']))
+                      description['source']['financial_amount_tables'], contract))
     return result
 
 
@@ -1889,10 +1983,15 @@ def _financial_selector_frame_schema(shape, question_ids, *, isolate_address_sca
                   '$.period_reference', '$.observation_reference', '$.observation_anchor',
                   '$.table_reference', '$.row_reference', '$.column_reference', '$.amount_reference'}
     needs = {'$.review.need_links.'+qid for qid in question_ids}
+    need_addresses = {path+'[*]' for path in needs}
+    if isolate_address_scalars:
+        # Qualitative originals use links with an explicit question and local
+        # need IDs. Only the IDs are selectors; the question is still authority.
+        need_addresses.add('$.review.need_links[*].need_ids[*]')
 
     def visit(node, path='$'):
         result = copy.deepcopy(node)
-        if path in references or path in {key+'[*]' for key in needs}:
+        if path in references or path in need_addresses:
             result.pop('enum', None)
         if isolate_address_scalars and path in references and node.get('type') == 'string':
             # Rejection classification only: malformed scalar addresses are
@@ -1914,7 +2013,7 @@ def _financial_selector_frame_schema(shape, question_ids, *, isolate_address_sca
     return visit(shape)
 
 
-def _decode_independent_financial_batch(wire, schema, task, views):
+def _decode_independent_financial_batch(wire, schema, task, choices):
     """Quarantine bad local selectors, not changed authority or source frames.
 
     The emptied arrays are used only to check the envelope. No submitted item
@@ -1926,7 +2025,6 @@ def _decode_independent_financial_batch(wire, schema, task, views):
         raise StructuredOutputError('invalid_original_batch', '财务引用隔离版本未登记')
     if not isinstance(wire, dict) or not isinstance(wire.get('sources'), list):
         raise StructuredOutputError('invalid_original_batch', '原件批次容器格式无效')
-    choices = {item['source_ref']: item for item in _original_batch_choices(task, views)}
     frame = copy.deepcopy(wire)
     entries, identifiers, seen, submitted = [], [], set(), 0
     for index, entry in enumerate(wire['sources']):
@@ -1947,7 +2045,7 @@ def _decode_independent_financial_batch(wire, schema, task, views):
                 raise StructuredOutputError('invalid_original_batch', '原件选择列表格式或数量不符', diagnostic)
             submitted += len(values)
             identifiers.extend(item.get('id') for item in values if isinstance(item, dict))
-            if choice['kind'] == 'financial' or field == 'amount_cells':
+            if address_policy == 1 or choice['kind'] == 'financial' or field == 'amount_cells':
                 frame['sources'][index]['selection'][field] = []
                 entries.extend((index, field, item, shape['items'], position)
                                for position, item in enumerate(values))
@@ -1966,8 +2064,9 @@ def _decode_independent_financial_batch(wire, schema, task, views):
             # All-null ownership is a local semantic rejection, not an
             # instruction to infer a question or erase other valid records.
             # Check only after the entire item shape and authority are valid.
-            if (_financial_question_owner_enabled(task)
-                    and not any(value is not None for value in item['review']['need_links'].values())):
+            need_links = item['review']['need_links']
+            if (_financial_question_owner_enabled(task) and isinstance(need_links, dict)
+                    and not any(value is not None for value in need_links.values())):
                 rejected.append(dict(location=f'$.sources[{index}].selection.{field}[{position}]',
                                      category='selection_decode_rejected'))
                 continue
@@ -1997,12 +2096,7 @@ def _decode_independent_financial_batch(wire, schema, task, views):
     specs = []
     for entry in filtered['sources']:
         choice = choices[entry['source_ref']]
-        if choice['kind'] == 'financial':
-            decoded = decode_financial_references(entry['selection'], choice['schema'],
-                                                 (task, [choice['view']]))['evidence_specs']
-        else:
-            decoded = _decode_original_quote_selection(task, choice['view'], entry['selection'])
-        specs.extend(decoded)
+        specs.extend(_decode_batch_selection(task, choice, entry['selection']))
     if len(specs) > 1000 or len({item['id'] for item in specs}) != len(specs):
         raise StructuredOutputError('invalid_original_batch_size', '展开后的原件标识重复或数量超限')
     result = dict(evidence_specs=specs)
@@ -2022,30 +2116,31 @@ def decode_original_batch(wire, schema, context):
     if not isinstance(context, tuple) or len(context)!=2:
         raise StructuredOutputError('missing_original_batch_context', '多原件选择缺少实际任务和读取绑定')
     task, views = context
-    expected = original_batch_output_schema(task, views)
-    if expected is None or expected != schema:
+    batch = _original_batch_choices(task, views)
+    if batch is None or _original_batch_schema(task, batch) != schema:
         raise StructuredOutputError('source_binding_changed', '多原件选择绑定已变化')
+    choices = {item['source_ref']: item for item in batch}
     if independent_financial_selections(task):
-        return _decode_independent_financial_batch(wire, schema, task, views)
+        return _decode_independent_financial_batch(wire, schema, task, choices)
     if not _matches(wire, schema):
         raise StructuredOutputError('invalid_original_batch', '多原件选择不在当前候选范围', schema_diagnostic(wire, schema))
-    choices = {item['source_ref']:item for item in _original_batch_choices(task, views)}
     seen, specs = set(), []
     for entry in wire['sources']:
         ref = entry['source_ref']
         if ref in seen:
             raise StructuredOutputError('duplicate_original_source', '同一原件重复提交，未合并提案')
         seen.add(ref)
-        item = choices[ref]
-        selected = entry['selection']
-        if item['kind']=='financial':
-            result = decode_financial_references(selected, item['schema'], (task, [item['view']]))['evidence_specs']
-        else:
-            result = _decode_original_quote_selection(task, item['view'], selected)
-        specs.extend(result)
+        specs.extend(_decode_batch_selection(task, choices[ref], entry['selection']))
     if len(specs)>1000 or len({spec['id'] for spec in specs})!=len(specs):
         raise StructuredOutputError('invalid_original_batch_size', '多原件提案数量超限或标识重复')
     return dict(evidence_specs=specs)
+
+
+def _decode_batch_selection(task, choice, wire):
+    if choice['kind'] == 'financial':
+        return _decode_financial_reference_selection(wire, choice['schema'], task,
+            [choice['view']], choice['selector'])['evidence_specs']
+    return _decode_original_quote_selection(task, choice['view'], wire, choice['selector'])
 
 
 def _original_number_tokens(lines, source_index, *, compact=False):
@@ -4072,13 +4167,14 @@ def _decode_original_selection_set(task,views,wire,schema,*,choices=None,period_
     return {'evidence_specs': specs}
 
 
-def _original_extraction_schema(task, views, *, financial=False):
+def _original_extraction_schema(task, views, *, financial=False, contract=None):
     from .contracts import DOCUMENT_CONTENT_INTENT, FINANCIAL_PERIOD_METHODS
-    from .reasoning import evidence_contract
     if (task.get('intent') == DOCUMENT_CONTENT_INTENT or not isinstance(views, list) or not views
             or any(not isinstance(v, dict) or v.get('kind') not in ('material', 'filing') for v in views)):
         return None
-    contract = evidence_contract(task, views)
+    if contract is None:
+        from .reasoning import evidence_contract
+        contract = evidence_contract(task, views)
     if contract['source_bindings_omitted']:
         return None
     text = {'type': 'string'}
@@ -4206,7 +4302,11 @@ def decode_material_extraction_output(wire, schema):
     return {'evidence_specs': result}
 
 
-def decode_financial_extraction_output(wire,schema,context=None):
+def decode_financial_extraction_output(wire, schema, context=None):
+    return _decode_financial_extraction_output(wire, schema, context)
+
+
+def _decode_financial_extraction_output(wire, schema, context, *, contract=None):
     if not _matches(wire,schema):
         raise StructuredOutputError('schema_mismatch','结构化财务提取不符合本次固定提交格式，未采用提案',
                                     schema_diagnostic(wire,schema))
@@ -4214,14 +4314,17 @@ def decode_financial_extraction_output(wire,schema,context=None):
         if not isinstance(context,tuple) or len(context)!=2:
             raise StructuredOutputError('missing_source_binding','财务行引用缺少本任务实际读取绑定，未采用提案')
         task,views=context
-        expected=(financial_extraction_v5_schema(task,views) if wire['version']==5
-                  else financial_extraction_output_schema(task,views))
-        if expected!=schema:
+        if contract is None:
+            contract = _financial_extraction_contract(task, views)
+        expected = (_financial_extraction_v5_schema(task, views, contract) if wire['version'] == 5
+                    else _financial_extraction_output_schema(task, views, contract))
+        if expected != schema:
             raise StructuredOutputError('source_binding_changed','财务行引用的任务或来源已改变，未采用提案')
-        from .reasoning import evidence_contract
-        from .financial_sources import original_line_index,original_date_anchors,selected_original_span,financial_quote_choices
-        contract=evidence_contract(task,views)
+        from .financial_sources import (original_line_index, original_date_anchors,
+                                        selected_original_span, financial_quote_choices)
         source=contract['sources'][0]
+        quotes = ({choice['candidate_id']: choice for choice in financial_quote_choices(task, views[0])}
+                  if wire['version'] == 7 and wire['text_quotes'] else {})
         requirements={qid:{need['id']:need['text'] for need in needs}
                       for qid,needs in contract['question_requirements'].items()}
         lines=original_line_index(views[0]);dates=original_date_anchors(views[0])
@@ -4273,9 +4376,7 @@ def decode_financial_extraction_output(wire,schema,context=None):
                             **span_reference(span,key,item_index)) for key,span in spec.pop('context_spans').items()}
                 else:
                     if wire['version']==7:
-                        selected=spec.pop('quote_reference')
-                        choice=next(choice for choice in financial_quote_choices(task,views[0])
-                                    if choice['candidate_id']==selected)
+                        choice = quotes[spec.pop('quote_reference')]
                         quote={'part':choice['part'],'quote':choice['quote']}
                     else:
                         quote=span_reference(spec.pop('span'),'text',item_index)
@@ -5571,21 +5672,8 @@ def schema_diagnostic(value, schema):
             'submitted_values_retained': False, 'automatic_repair': False}
 
 
-class _DuplicateSubmissionKey(ValueError):
-    """Fixed classification only; never attach the submitted key or value."""
-
-
 class _NonfiniteSubmissionConstant(ValueError):
     """An unsupported numeric literal is not a usable financial value."""
-
-
-def _unique_object(pairs):
-    result = {}
-    for key, value in pairs:
-        if key in result:
-            raise _DuplicateSubmissionKey()
-        result[key] = value
-    return result
 
 
 def _reject_constant(value):
@@ -5754,9 +5842,9 @@ def structured_json_completion(text, schema, *, protocol='strict_analysis_v1', c
 
 def _decode_submission_arguments(arguments, schema, decoder):
     try:
-        wire = json.loads(arguments, object_pairs_hook=_unique_object, parse_constant=_reject_constant)
-    except (_DuplicateSubmissionKey, _NonfiniteSubmissionConstant) as error:
-        category = ('duplicate_key' if isinstance(error, _DuplicateSubmissionKey)
+        wire = json.loads(arguments, object_pairs_hook=unique_json_object, parse_constant=_reject_constant)
+    except (DuplicateJSONField, _NonfiniteSubmissionConstant) as error:
+        category = ('duplicate_key' if isinstance(error, DuplicateJSONField)
                     else 'nonfinite_constant')
         raise StructuredOutputError('invalid_argument_json',
             '结构化提交含重复键或非有限数值，未修复或采用正文',
