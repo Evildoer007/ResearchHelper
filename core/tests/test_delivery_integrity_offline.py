@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import socket
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -60,6 +61,13 @@ class DeliveryIntegrityTests(unittest.TestCase):
     def test_unrendered_html_cannot_replace_checkpoint(self):
         with self.assertRaises(ContractError):
             self.deliver(paper='<html><body>另一份报告</body></html>')
+
+    def test_archive_refuses_to_freeze_a_page_changed_after_rendering(self):
+        self.task['pending_html'] += '<!-- storage fault -->'
+        self.archive.save(self.task)
+        with self.assertRaisesRegex(ContractError, '同版呈现检查点'):
+            self.deliver(paper=self.task['pending_html'])
+        self.assertEqual(self.archive.delivery_versions(self.task['id']), [])
 
     def test_empty_html_cannot_be_saved(self):
         with self.assertRaises(ContractError):
@@ -121,11 +129,107 @@ class DeliveryIntegrityTests(unittest.TestCase):
 
     def test_failed_save_retry_keeps_accounting_durable(self):
         before = self.task['ledger']['used']['seconds']
-        with patch.object(self.archive, 'deliver', side_effect=OSError('再次保存失败')):
+        clock = [100.0]
+
+        def failed_save(*args, **kwargs):
+            clock[0] += 5
+            raise OSError('再次保存失败')
+
+        with patch('researchhelper.engine.time', SimpleNamespace(monotonic=lambda: clock[0])), \
+                patch.object(self.archive, 'deliver', side_effect=failed_save):
             with self.assertRaises(OSError):
                 self.agent.retry_save(self.task['id'])
         current = self.archive.get(self.task['id'])
-        self.assertAlmostEqual(current['ledger']['used']['seconds'], before + .001)
+        self.assertAlmostEqual(current['ledger']['used']['seconds'], before + 5)
+        self.assertEqual(current['pending_html'], self.paper)
+
+    def test_failed_first_save_counts_render_and_transaction_wait_once(self):
+        from researchhelper import reports
+
+        task = self.agent.create_case('etf')
+        clock = [100.0]
+        render = reports.render
+
+        def render_after_wait(*args, **kwargs):
+            clock[0] += 2
+            return render(*args, **kwargs)
+
+        def failed_save(*args, **kwargs):
+            clock[0] += 5
+            raise OSError('归档提交失败')
+
+        with patch('researchhelper.engine.time', SimpleNamespace(monotonic=lambda: clock[0])), \
+                patch.object(reports, 'render', side_effect=render_after_wait), \
+                patch.object(self.archive, 'deliver', side_effect=failed_save):
+            failed = self.agent.start(task['id'])
+        self.assertEqual(failed['status'], '失败')
+        self.assertTrue(failed['pending_html'])
+        self.assertAlmostEqual(failed['ledger']['used']['seconds'], 7)
+
+    def test_successful_save_retry_freezes_elapsed_seconds_with_the_same_report(self):
+        clock = [100.0]
+        deliver = self.archive.deliver
+        before = self.task['ledger']['used']['seconds']
+
+        def save_after_wait(*args, **kwargs):
+            clock[0] += 5
+            return deliver(*args, **kwargs)
+
+        with patch('researchhelper.engine.time', SimpleNamespace(monotonic=lambda: clock[0])), \
+                patch.object(self.archive, 'deliver', side_effect=save_after_wait):
+            saved = self.agent.retry_save(self.task['id'])
+        frozen = self.archive.get(self.task['id'], self.task['version'])
+        self.assertAlmostEqual(frozen['ledger']['used']['seconds'], before + 5)
+        self.assertEqual(saved['ledger'], frozen['ledger'])
+        self.assertEqual(self.report()['html'], self.paper)
+
+    def test_save_timeout_keeps_the_checkpoint_without_a_partial_frozen_report(self):
+        task = self.archive.get(self.task['id'])
+        used = task['ledger']['used']['seconds']
+        task['ledger']['limits']['seconds'] = used + 2
+        self.archive.save(task)
+        clock = [100.0]
+        deliver = self.archive.deliver
+
+        def save_after_timeout(*args, **kwargs):
+            clock[0] += 5
+            return deliver(*args, **kwargs)
+
+        with patch('researchhelper.engine.time', SimpleNamespace(monotonic=lambda: clock[0])), \
+                patch.object(self.archive, 'deliver', side_effect=save_after_timeout):
+            with self.assertRaisesRegex(ContractError, '执行时间.*正文已保留') as error:
+                self.agent.retry_save(task['id'])
+        self.assertEqual(getattr(error.exception, 'code', None), 'execution_time_exhausted')
+        current = self.archive.get(task['id'])
+        self.assertAlmostEqual(current['ledger']['used']['seconds'], used + 5)
+        self.assertEqual(current['pending_html'], self.paper)
+        self.assertFalse(current['delivery'])
+        self.assertEqual(self.archive.delivery_versions(task['id']), [])
+        self.assertEqual(current['error'], str(error.exception))
+
+    def test_exhausted_save_recovery_leaves_the_original_checkpoint_untouched(self):
+        task = self.archive.get(self.task['id'])
+        task['ledger']['used']['seconds'] = task['ledger']['limits']['seconds']
+        self.archive.save(task)
+        before = self.archive.get(task['id'])
+        with patch('researchhelper.reports.compose', side_effect=AssertionError('No work can be started')):
+            for action in (self.agent.retry_save, self.agent.start):
+                with self.subTest(action=action.__name__):
+                    with self.assertRaisesRegex(ContractError, '执行时间.*正文已保留'):
+                        action(task['id'])
+        self.assertEqual(self.archive.get(task['id']), before)
+
+    def test_unspent_delivery_reserve_still_allows_local_save(self):
+        task = self.archive.get(self.task['id'])
+        for kind in ('model_calls', 'data_requests'):
+            task['ledger']['used'][kind] = task['ledger']['limits'][kind]
+        task['ledger']['used']['seconds'] = task['ledger']['limits']['seconds'] - 10
+        self.archive.save(task)
+        done = self.agent.retry_save(task['id'])
+        self.assertEqual(self.report()['html'], self.paper)
+        self.assertEqual(done['ledger']['dispatches'], task['ledger']['dispatches'])
+        for kind in ('model_calls', 'data_requests'):
+            self.assertEqual(done['ledger']['used'][kind], task['ledger']['used'][kind])
 
     def test_unsaved_task_changes_cannot_freeze(self):
         self.task['question'] += '未保存变更'
