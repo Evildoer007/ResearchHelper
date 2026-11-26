@@ -1,25 +1,86 @@
-"""Retained real observations; pure wire projections, no API or Store writes."""
+"""Large synthetic price series; check wire projections without external I/O."""
 import copy
-import hashlib
-import json
-from pathlib import Path
+from datetime import date, timedelta
+from tempfile import TemporaryDirectory
 import unittest
 import threading
-from researchhelper.contracts import ContractError
-from researchhelper.contracts import canonical
-from researchhelper.engine import ResearchAgent
-from researchhelper.reasoning import analysis_contract, calculation_plan_contract, MAX_CONTEXT_CHARACTERS
+from unittest.mock import patch
 
-ORIGINAL=Path(__file__).resolve().parents[1]/'result/acceptance/default-app-investment-35fx2htd/task.json'
+from tests import ROOT
+from researchhelper.archive import ResearchArchive
+from researchhelper.contracts import ContractError, canonical, charge, fingerprint, now
+from researchhelper.engine import ResearchAgent
+from researchhelper.evidence import (
+    _record_current_acquisition, candidate_evidence, direct_code_reference, snapshot_record,
+)
+from researchhelper.reasoning import (
+    analysis_contract, calculation_plan_contract, evidence_contract, MAX_CONTEXT_CHARACTERS,
+)
+
+
+def synthetic_price_task(agent, *, days=None, query_window=None):
+    code = '600000.SH'
+    task = agent.create('核对合成收盘序列', entry='个股', objects=[code], research_mode='current',
+        questions=[dict(id='q2', question='收盘序列如何变化？', kind='fact',
+                        evidence_needs=['逐日收盘原值'], method_needs=['observed_price_return_v1']),
+                   dict(id='q3', question='公开材料说明了什么？', kind='fact',
+                        evidence_needs=['材料原文'], method_needs=[])])
+    task['synthetic'] = True
+    if days is None:
+        calendar = [date(2026, 7, 8) + timedelta(days=offset) for offset in range(90)]
+        days = [day.isoformat() for day in calendar if day.weekday() < 5][:61]
+    values = [10 + index / 100 for index in range(len(days))]
+    first, last = query_window or (days[0], days[-1])
+    params = dict(codes=code, indicators='close', startdate=first, enddate=last,
+                  functionpara=dict(Currency='RMB', CPS='1', Fill='Omit'))
+    payload = dict(errorcode=0, tables=[dict(thscode=code, time=days, table=dict(close=values))])
+    record = snapshot_record(task, 'ifind', 'cmd_history_quotation', params, payload)
+    charge(task['ledger'], 'data_requests', 1)
+    event = dict(kind='data_requests', source='ifind', operation=record['operation'], batch=task['batch'],
+                 fingerprint=record['request_hash'], status='成功', time=now(), transport_isolated=True,
+                 network_request_started=True, network_worker_reaped=True, synthetic_test_transport=True)
+    task['ledger']['dispatches'].append(event)
+    _record_current_acquisition(task, record, event)
+    record['question_ids'] = ['q2']
+    task['source_records'] = [record]
+    agent._adopt_method_knowledge(task)
+    contract = evidence_contract(task)
+    source, = contract['sources']
+    identity = direct_code_reference(task, record)
+    review = dict(question_ids=['q2'], allowed_natures=['已实现事实'],
+                  conditions=['合成行情，仅检查长序列传输'], reason='逐项核对原值、代码和日期。',
+                  evidence_need_ids={'q2': [row['id'] for row in contract['question_requirements']['q2']]})
+    for row, (day, value) in enumerate(zip(days, values)):
+        spec = dict(id=f'price_{row + 1}', artifact_id=record['id'], object=code,
+                    record_locator=dict(table=0, row=row, field='close'), period=day,
+                    nature='已实现事实', unit='元', published_at=None,
+                    publication=contract['current_publication_template'], availability=source['current_availability_reference'],
+                    raw_value=value, raw_unit='元', value=value, conversion_factor=1, question_ids=['q2'],
+                    direct_code_reference=identity, api_context_reference=source['compact_context_reference'],
+                    calculation_context=dict(security_id=code, currency='CNY', price_basis='unadjusted',
+                        price_kind='close', observation_date=day, window_start=first,
+                        window_end=last, corporate_action_status='unknown'))
+        item = candidate_evidence(task, record, spec)
+        task['evidence'].append(agent.analyzer.assess(task, item, review, [record]))
+    return task
 
 
 class LongSeriesReasoningPayloadTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        with TemporaryDirectory() as folder, patch('socket.socket.connect', side_effect=AssertionError('No network')):
+            agent = ResearchAgent(ResearchArchive(folder), ROOT, offline=True)
+            try:
+                cls.original = synthetic_price_task(agent)
+            finally:
+                agent.close_runtime()
+
     def setUp(self):
-        self.digest=hashlib.sha256(ORIGINAL.read_bytes()).hexdigest()
-        self.task=json.loads(ORIGINAL.read_text())
+        self.digest = fingerprint(self.original)
+        self.task = copy.deepcopy(self.original)
 
     def tearDown(self):
-        self.assertEqual(hashlib.sha256(ORIGINAL.read_bytes()).hexdigest(),self.digest)
+        self.assertEqual(fingerprint(self.original), self.digest)
 
     def restored(self,payload):
         lookup={field:{entry['ref']:entry['value'] for entry in entries}
