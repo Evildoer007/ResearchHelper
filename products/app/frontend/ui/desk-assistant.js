@@ -1863,5 +1863,5 @@ function createBloubAvatar(){
   return {element:svg,setState,setActivity,interact,setActive(value){active=Boolean(value);sync();},destroy(){destroyed=true;cancelAnimationFrame(raf);io.disconnect();observer.disconnect();motion.removeEventListener('change',sync);document.removeEventListener('visibilitychange',sync);document.removeEventListener('pointermove',look);document.documentElement.removeEventListener('pointerleave',leave);document.removeEventListener('load',frameLoaded,true);window.removeEventListener('blur',leave);frameObserver.disconnect();frameListeners.forEach(remove=>remove());frameListeners.clear();}};
 }
 
-global.RHDeskAvatar=Object.freeze({createBloubAvatar});
+global.RHDeskAvatar=Object.freeze({createBloubAvatar,RAYON,DEMI_VIEWBOX});
 })(window);
