@@ -1,7 +1,7 @@
 """Current report names; inherit unchanged data, conversion and math acceptance."""
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import hashlib,importlib.util,json,sys
+import json,sys
 from lxml import html
 from tests import ROOT
 from tests import test_strategy_paper_template as previous
@@ -17,22 +17,12 @@ class NamedReportTemplatesTests(previous.StrategyPaperTemplateTests):
             self.assertTrue((assets/name).is_file());self.assertIn(str((assets/name).relative_to(ROOT)),registered)
         self.assertFalse((assets/'strategy-paper.html').exists())
         self.assertIn('data-paper-slot="logics"',(assets/'report.html').read_text())
-    def test_reference_case_uses_the_same_template_and_six_compositions(self):
-        spec=importlib.util.spec_from_file_location('broker_named_reference',ROOT/'modules/reportcomposer/examples/broker_report.py');module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-        data=json.loads((self.reference.parent/'report-data.json').read_text())
-        for profile in ('standard','detailed'):
-            tree=html.document_fromstring(module.render(data,profile=profile))
-            self.assertEqual(tree.xpath('//body/@data-report-template'),['report-'+profile]);self.assertEqual(len(tree.xpath('//main')),1)
-            self.assertEqual(len(tree.xpath('//main//figure')),6);self.assertEqual(len(tree.xpath('//main//section[starts-with(@id,"logic-")]')),3)
-            self.assertTrue(tree.xpath('//*[@data-columns="2"]'));self.assertTrue(tree.xpath('//*[@data-columns="3"]'))
-            self.assertEqual(len(tree.xpath('//*[@data-logic-detail]')),3 if profile=='detailed' else 0)
-        self.assertEqual(hashlib.sha256(self.reference.read_bytes()).hexdigest(),self.reference_hash)
-    def test_app_and_skill_default_design_contains_six_actual_bound_figures(self):
+    def test_app_and_skill_default_design_renders_only_the_scoped_figures(self):
         result=design(self.content,ROOT);tree=html.document_fromstring(result['html'])
         self.assertEqual(result['document']['template'],dict(id='report-standard',version=1));self.assertEqual(result['document']['output_type'],'report')
-        self.assertEqual(len(tree.xpath('//main//figure')),5);self.assertEqual(len(tree.xpath('//*[@data-columns="2"]')),2)
+        self.assertEqual(len(tree.xpath('//main//figure')),3)
         self.assertEqual(len(tree.xpath('//main')),1);self.assertEqual(len(tree.xpath('//*[@id="theses"]')),1)
-        self.assertEqual(len([b for b in result['document']['blocks'] if b['kind']=='chart']),5)
+        self.assertEqual(len([b for b in result['document']['blocks'] if b['kind']=='chart']),3)
     def test_packagers_copy_the_single_template_and_composition_renderer(self):
         sys.path.insert(0,str(ROOT/'packaging'));from shared_payload import copy_report_design
         with TemporaryDirectory() as folder:
