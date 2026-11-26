@@ -24,7 +24,7 @@ class StrategyReadingStructureTests(unittest.TestCase):
 
     def test_core_conclusion_is_the_complete_reviewed_main_answer(self):
         paper = self.paper()
-        core = paper.select_one('main .core-conclusion')
+        core = paper.select_one('main #summary')
         self.assertIsNotNone(core)
         self.assertEqual(core.h2.get_text(), '核心结论')
         answer = ''.join(part.get_text() for part in core.select('[data-core-answer-part]'))
