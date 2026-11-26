@@ -31,7 +31,7 @@ class StructuredAcquisitionTests(unittest.TestCase):
     def test_explicit_profile_decodes_to_existing_exact_request(self):
         before = copy.deepcopy(self.wire)
         actual = self.decode()
-        self.assertEqual(actual['data_requests'][0]['parameters'], identity_query_parameters('secname', '贵州茅台'))
+        self.assertEqual(actual['data_requests'][0]['parameters'], identity_query_parameters('secname', '贵州茅台', profile=fixture.IDENTITY_CANDIDATE_PROFILE))
         self.assertEqual(self.wire, before)
 
     def test_filtered_out_tools_cannot_return(self):
@@ -60,20 +60,41 @@ class StructuredAcquisitionTests(unittest.TestCase):
         with self.assertRaises(ContractError): decode_acquisition_output(self.wire, schema, description)
 
     def test_semantic_financial_search_uses_registered_syntax_and_actual_codes(self):
-        self.task['objects'] = ['600519.SH']
-        contract = data_request_contract(self.task)
+        # This legacy route remains readable, but is not the default fixed API.
+        task = self.base.agent.create('研究贵州茅台600519.SH半年报盈利质量', objects=['600519.SH'])
+        task.pop('fixed_financial_route_version', None)
+        task.pop('financial_acquisition_route_version', None)
+        contract = data_request_contract(task)
         contract['tools'] = [tool for tool in contract['tools'] if tool['operation'] == 'smart_stock_picking']
-        schema = acquisition_output_schema(self.task, dict(data_request_contract=contract))
+        description = dict(data_request_contract=contract)
+        schema = acquisition_output_schema(task, description)
+        selection = dict(query_kind='financial_single', code='600519.SH', year=2026,
+                         report_period='半年报', fields=['营业收入', '净利润'])
         request = dict(id='financial', source='ifind', operation='smart_stock_picking', question_ids=['q1'],
-                       selection_reason='核对原始数据', parameters=dict(searchtype='stock',
-                       searchstring='600519.SH2026年半年报营业收入、净利润'))
+                       selection_reason='核对原始数据', parameters=selection)
         wire = dict(version=1, binding_ref=schema['properties']['binding_ref']['enum'][0],
                     data_requests=[request], stop_reason='')
         self.assertTrue(_matches(wire, schema))
-        for query in ('贵州茅台2026年半年报营业收入', '600000.SH2026年半年报营业收入',
-                      '600519.SH2026半年报营业收入', '600519.SH2026年半年报自由现金流'):
-            request['parameters']['searchstring'] = query
-            self.assertFalse(_matches(wire, schema), query)
+        result = decode_acquisition_output(wire, schema, description)
+        self.assertEqual(result['data_requests'][0]['parameters'], dict(searchtype='stock',
+                         searchstring='600519.SH2026年半年报营业收入、净利润'))
+        for invalid in (dict(selection, code='贵州茅台'), dict(selection, code='600000.SH'),
+                        dict(selection, report_period='H1'), dict(selection, fields=['自由现金流'])):
+            candidate = copy.deepcopy(wire)
+            candidate['data_requests'][0]['parameters'] = invalid
+            self.assertFalse(_matches(candidate, schema), invalid)
+
+    def test_fixed_financial_default_does_not_advertise_the_legacy_semantic_detour(self):
+        from researchhelper.financial_sources import financial_query_shapes
+        task = self.base.agent.create('研究贵州茅台600519.SH盈利质量', objects=['600519.SH'], research_mode='current')
+        self.assertEqual(task['fixed_financial_route_version'], 1)
+        for shape in financial_query_shapes(task):
+            self.assertEqual(shape['available_codes'], [])
+            self.assertEqual(shape['query_field_names'], [])
+            self.assertNotIn('financial_batch', shape)
+            self.assertEqual(shape['model_request_encoding']['kinds'], ['object_discovery'])
+        contract = data_request_contract(task)
+        self.assertTrue(any(tool['operation'] == 'get_limit_policy' for tool in contract['tools']))
 
     def test_actual_transport_charges_once_and_decodes_only_registered_profile(self):
         reply = dict(model='deepseek-flash', choices=[dict(index=0, finish_reason='tool_calls',
@@ -107,7 +128,7 @@ class StructuredAcquisitionTests(unittest.TestCase):
         from researchhelper.output_schema import planning_output_schema, decode_planning_output
         schema = planning_output_schema(self.task)
         self.assertEqual(schema['properties']['version']['enum'], [3])
-        wire = dict(version=3, main_question=copy.deepcopy(self.base.wire['questions'][0]),
+        wire = dict(version=3, main_question=copy.deepcopy(self.base.wire['main_question']),
                     additional_questions=[], data_requests=[copy.deepcopy(self.base.request)], calculations=[])
         result = decode_planning_output(wire, schema)
-        self.assertEqual(result['data_requests'][0]['parameters'], identity_query_parameters('secname', '贵州茅台'))
+        self.assertEqual(result['data_requests'][0]['parameters'], identity_query_parameters('secname', '贵州茅台', profile=fixture.IDENTITY_CANDIDATE_PROFILE))
