@@ -1,13 +1,149 @@
 """One versioned knowledge authority; indexes are derived, tasks cannot publish."""
 
 import copy
+import re
+import unicodedata
 
 from .contracts import (ContractError, METHOD_REGISTRY, fingerprint, DOCUMENT_CONTENT_INTENT,
                         FINANCIAL_AMOUNT_UNITS, method_definition_for_knowledge, canonical)
 
 GENERAL_DEFINITION_SCOPE = "general_definition"
+DRAFT_DEFINITION_POLICY = "draft_definition_branches_version"
 CATALOGUE_POLICY = 'knowledge_catalogue_revision'
-CATALOGUE_REVISION = 3
+CATALOGUE_REVISION = 5
+
+
+_DEFINITION_LEAD = re.compile(
+    r'^(?:请帮我|帮我|请)?(?:简单|简要|分别)?(?:解释(?:一下)?|说明(?:一下)?|讲讲|介绍(?:一下)?|'
+    r'区分|对比(?:一下)?|比较(?:一下)?|什么是|什么叫|何谓|(?:如何|怎么)(?:理解|区分))(?:一下)?')
+_DEFINITION_END = re.compile(
+    r'(?:分别)?(?:有什么区别|有何区别|有什么不同|有何不同|区别是什么|区别在哪(?:里)?|'
+    r'为什么(?:会)?(?:不一样|不同|不相等|有差异)|分别指什么|是什么意思|指的是什么|是什么|的含义|有差别|的区别|差别)$')
+_DEFINITION_INSTRUCTIONS = re.compile(
+    r'([,。;?!\n]+)(?:请勿联网|(?:请)?(?:不要联网|不得联网|无需联网|禁止联网|不联网|仅离线)|'
+    r'(?:只|仅)(?:使用|用)本地知识|(?:生成|给我|写一份)(?:一份)?(?:简短|简要)?报告)$')
+_BRANCH_FACT_REQUEST = r'核对|查询|查一下|查看|列出|给出'
+_BRANCH_BREAK = re.compile(
+    r'(?P<sentence>[。；;！？?!\n]+)|(?P<join>(?:[，,、]\s*)?(?:并(?:且)?|再|然后|接着|另外|同时))'
+    r'(?=\s*(?:请|帮我)?(?:解释|说明|比较|分析|研究|' + _BRANCH_FACT_REQUEST + r'))')
+_BRANCH_LEAD = re.compile(r'^\s*(?:先|再|然后|接着|另外|同时)\s*')
+_BRANCH_FACT_LEAD = re.compile(r'^(?:请|帮我)?(?:' + _BRANCH_FACT_REQUEST + ')')
+_BRANCH_FORM_ONLY = re.compile(r'(?:请|帮我)?(?:生成|给我|写)(?:一份)?(?:简要|简短|详细)?报告')
+_NAV = r'(?:基金)?(?:单位净值|份额净值|净值|nav)'
+_TRADE_PRICE = r'(?:二级市场|场内|市场|交易|成交)?价格'
+_VERSUS = r'(?:和|与|及|跟|、)'
+_ETF = r'etf(?:基金)?的?'
+_CPI = r'(?:cpi|居民消费价格指数)'
+_DEFINITION_TOPICS = {
+    'rh_k_etf_measures': re.compile(
+        rf'(?:{_ETF}(?:{_NAV}(?:{_VERSUS}(?:{_ETF}|其)?{_TRADE_PRICE})?|'
+        rf'{_TRADE_PRICE}{_VERSUS}(?:{_ETF}|其)?{_NAV})(?:{_VERSUS}(?:总收益|总回报))?|'
+        rf'{_NAV}{_VERSUS}{_ETF}{_TRADE_PRICE}|{_TRADE_PRICE}{_VERSUS}{_ETF}{_NAV})'),
+    'rh_k_etf_premium_measures': re.compile(
+        rf'{_ETF}(?:折溢价|净值折溢价|折价{_VERSUS}溢价|溢价{_VERSUS}折价|'
+        rf'iopv(?:{_VERSUS}{_NAV})?)'),
+    'rh_k_price_return_measures': re.compile(
+        rf'(?:未复权的?)?(?:价格|股价)(?:变化|涨跌|收益){_VERSUS}(?:含分红的?)?(?:总收益|总回报)'),
+    'rh_k_pmi_diffusion': re.compile(r'(?:制造业)?(?:pmi|采购经理指数)(?:的?扩散指数)?'),
+    'rh_k_cpi_reading': re.compile(rf'{_CPI}(?:的?(?:同比{_VERSUS}(?:{_CPI})?环比|环比{_VERSUS}(?:{_CPI})?同比|同比|环比))?'),
+}
+
+
+_ETF_ARBITRAGE_QUESTION = re.compile(
+    rf'(?:为什么|为何)?{_ETF}(?:折溢价|折价|溢价)'
+    r'(?:通常)?(?:为什么|为何|如何|怎样)?(?:通常)?(?:会|可能)?(?:收敛|缩小|收窄)')
+_MECHANISM_TOPICS = {
+    'rh_k_bank_rate_repricing': (('净息差', '净利息收入', '银行资产负债', '银行盈利', '银行利润'),
+                                 ('利率', 'lpr', '降息', '加息', '存款', '贷款', '重定价')),
+    'rh_k_inflation_transmission': (('cpi', '居民消费价格', '通胀', '物价'),
+                                    ('利率', '购买力', '消费', '利润', '资产', '企业', '传导')),
+    'rh_k_rate_transmission': (('利率', '降息', '加息', '货币政策', 'lpr'),
+                               ('估值', '融资', '贷款', '信贷', '资产价格', '折现', '债券', '需求', '盈利')),
+    'rh_k_cash_profit': (('现金流', '回款', '应收', '库存', '存货', '营运资金'),
+                         ('利润', '盈利', '权责发生', '现金转换', '资本开支')),
+    'rh_k_cost_pass': (('铜价', '原材料', '采购价'), ('成本', '利润', '加工费', '套保', '定价')),
+    'rh_k_etf_exposure': (('etf', '指数基金'), ('跟踪误差', '跟踪差异', '复制', '暴露', '跟踪偏离')),
+}
+_MECHANISM_EXPLANATION = re.compile(r'解释|说明|为什么|为何|如何(?:影响|传导)|怎样(?:影响|传导)')
+_MECHANISM_SUBJECT_OR_ACTION = re.compile(
+    r'\d{4}|此次|本次|近期|今年|目前|当前|当期|最近|最新|今天|昨天|已发生|实际|哪个|多少|'
+    r'核对|查询|查一下|列出|预测|建议|买入|卖出|增持|减持|买点|投资机会|投资判断|投资价值|配置|'
+    r'财报|公告|某公司|该公司|本公司')
+_NEGATED_EXPLANATION = re.compile(r'(?:无需|不必|不要|不用|不需要|别)(?:再)?(?:解释|说明|分析|讨论)')
+_INFLATION_CHANNELS = {
+    '利率路径': ('利率', '利差', '融资', '债券', '估值', '股票', '资产'),
+    '利润路径': ('利润', '盈利', '成本', '企业'),
+    '购买力路径': ('购买力', '消费支出', '居民收入', '居民消费', '实际收入'),
+}
+
+
+def _mechanism_topics(text):
+    from .draft_sources import _unquoted_local_scope
+
+    for clause in re.split(r'[。；;！？!?\n]', _unquoted_local_scope(text).casefold()):
+        if _NEGATED_EXPLANATION.search(clause):
+            continue
+        matches = [ident for ident, groups in _MECHANISM_TOPICS.items()
+                   if all(any(word in clause for word in group) for group in groups)]
+        if 'rh_k_bank_rate_repricing' in matches and 'rh_k_rate_transmission' in matches:
+            matches.remove('rh_k_rate_transmission')
+        for ident in matches:
+            yield ident, clause
+
+
+def _definition_topic(question, *, arbitrage=False):
+    # Accept a whole standalone question. A concept mentioned in a sentence
+    # requesting a date, an actual reading or further analysis is insufficient.
+    core = unicodedata.normalize('NFKC', question.strip()).casefold()
+    core = re.sub(r'[^\S\n]+', '', core)
+    asked = False
+    while core:
+        asked |= core.endswith('?')
+        core = core.rstrip('。;,.!?\n')
+        directive = _DEFINITION_INSTRUCTIONS.search(core)
+        if directive is None:
+            break
+        asked |= '?' in directive.group(1)
+        core = core[:directive.start()]
+    lead = _DEFINITION_LEAD.match(core)
+    if lead:
+        core = core[lead.end():]
+    if (arbitrage and _ETF_ARBITRAGE_QUESTION.fullmatch(core)
+            and (lead or asked or re.search(r'为什么|为何|如何|怎样', core))):
+        return 'rh_k_etf_measures'
+    ending = _DEFINITION_END.search(core)
+    if ending:
+        core = core[:ending.start()]
+    if not (asked or lead or ending):
+        return None
+    return next((ident for ident, pattern in _DEFINITION_TOPICS.items() if pattern.fullmatch(core)), None)
+
+
+def draft_definitions_enabled(task):
+    version = task.get(DRAFT_DEFINITION_POLICY)
+    return type(version) is int and version == 1
+
+
+def definition_only(task):
+    questions = task['questions']
+    return bool(questions) and all(q.get('answer_scope') == GENERAL_DEFINITION_SCOPE for q in questions)
+
+
+def cited_definitions(task):
+    """In a frozen report, only the adopted answers name definition sources."""
+    refs = {(ref['id'], ref['version']) for q in task['questions']
+            if q.get('answer_scope') == GENERAL_DEFINITION_SCOPE and q.get('status') == '已回答'
+            for ref in q.get('knowledge_refs', [])}
+    return [item for item in task.get('knowledge', {}).get('entries', [])
+            if (item['id'], item['version']) in refs]
+
+
+def definition_title(task):
+    if not task.get('questions') or not definition_only(task):
+        return None
+    entries = cited_definitions(task)
+    return entries[0]['title'] if len(entries) == 1 else None
+
 
 
 def catalogue_revision(value=CATALOGUE_REVISION):
@@ -208,6 +344,22 @@ ENTRIES += [
              "source_version": "2019-12-15 source version; no later shock parameters adopted",
              "publication_date": None, "summary_status": "项目机制概括；非境内监管参数、当前银行事实或原文摘录"},
          revision_reason="针对LPR与银行研究增加有来源的双向重定价核验，不设默认利好或自动敏感性计算"),
+    dict(copy.deepcopy(_DOMAIN_COMMON), id="rh_k_mortgage_repricing", catalogue_introduced=5, type="机制",
+         title="商业性个人住房贷款的基准与重定价", scope=["事件", "行业", "宏观", "混合"],
+         domains=["宏观传导", "银行", "住房金融"],
+         aliases=["LPR", "贷款市场报价利率", "住房贷款", "房贷", "房贷重定价"],
+         retrieval_requirements=[["住房贷款", "房贷", "房屋按揭"], ["LPR", "贷款报价利率", "重定价", "利率"]],
+         content="浮动利率房贷基于合同约定的定价基准和加点。重定价日按最近一个月的LPR调整基准，重定价周期及调整方式由合同约定。",
+         conditions="查合同的利率类型、挂钩期限、上次和下次重定价日及加点。将新发贷款定价与存量合同执行利率区分。",
+         channels=["重定价周期决定新报价进入存量浮动贷款执行利率的时点。",
+                   "前次合同采用的基准与重定价日最近一期报价的差异决定这次基准变化。",
+                   "加点调整和基准变化是不同渠道，可分别影响实际利率。"],
+         counterexample="报价较上月持平，但若存量合同上一轮重定价时采用了不同基准，到下一重定价日仍可能变化。",
+         verification_indicators=["原合同采用的LPR及重定价日", "挂钩期限、加点和变更约定", "新发放贷款加权平均利率"],
+         source="https://www.shanghai.gov.cn/gwk/search/content/ffeb9a788d6847048bbf1bc404812949",
+         publisher="中国人民银行", publication_date="2024-09-29", publication_date_status="公告署期",
+         temporal_scope="中国人民银行公告〔2024〕第11号，第三条自2024年11月1日起适用。",
+         revision_reason="补充中国商业性个人住房贷款定价条款与存量传导机制"),
 ]
 ENTRIES.append(dict(copy.deepcopy(_DOMAIN_COMMON), id="rh_k_index_change", type="方法",
     title="已观测指数区间变化", scope=["指数", "ETF", "事件", "行业", "宏观", "混合"],
@@ -475,6 +627,30 @@ _MACRO_READING_ENTRIES = [
 ENTRIES.extend(_MACRO_READING_ENTRIES)
 RETAINED_VERSIONS.update({(item['id'],item['version']):copy.deepcopy(item) for item in _MACRO_READING_ENTRIES})
 
+# Register the pricing explanation alongside the existing definitions.
+# Catalogues 1–3 and their already adopted entries keep their original text.
+_etf_measures.update(version=3, previous_version=2, catalogue_introduced=4,
+    revision_reason='解释净值与交易价格偏离的形成及收敛条件，保留原回报口径。',
+    content=_etf_measures['content'].replace('二者可能不相等。', '二者可能不相等。'
+        '交易价格随底层资产价格和二级市场买卖需求变动，官方净值按基金的估值时点计算。'
+        '按同一份额、币种和可比时点比较，市场价格高于单位净值为溢价，低于单位净值为折价。'
+        '符合条件的申购赎回及套利有助于缩小偏离，实际收敛受交易成本、流动性和申赎条件约束。'),
+    source_reference=dict(_etf_measures['source_reference'],
+        sections=['How do ETFs work?', 'Market Prices versus NAV', 'Arbitrage']),
+    source=_etf_measures['source']+'；上海证券交易所，ETF瞬时套利策略',
+    additional_source_references=[*_etf_measures['additional_source_references'], {
+        'url': 'https://etf.sse.com.cn/fund/learning/strategy/c/5704303.shtml',
+        'publisher': '上海证券交易所', 'sections': ['ETF瞬时套利策略'], 'publication_date': '2022-06-23',
+    }])
+RETAINED_VERSIONS[(_etf_measures['id'], 3)] = copy.deepcopy(_etf_measures)
+
+_etf_premium = next(item for item in ENTRIES if item['id'] == 'rh_k_etf_premium_measures')
+_etf_premium.update(version=2, previous_version=1, catalogue_introduced=4,
+    revision_reason='补充折价、溢价的方向及盘中参考净值的含义。',
+    content=_etf_premium['content'].replace('ETF市场价格与基金份额净值可能不同。',
+        '对同一ETF份额，市场价格高于可比的单位净值称为溢价，低于可比的单位净值称为折价。'
+        'IOPV是按申购赎回清单等信息估算的盘中参考值；官方单位净值按基金估值规则和估值时点计算。'))
+RETAINED_VERSIONS[(_etf_premium['id'], 2)] = copy.deepcopy(_etf_premium)
 
 def _runtime_available(entry):
     """Normal research has public access only, including retained revisions.
@@ -603,6 +779,75 @@ class ResearchKnowledge:
             selection_rule='knowledge_needs仅逐字选择candidates中的id。计算方法的knowledge_id、条目标题或模型自拟名称不能代替。此目录尚未被任务采用；明确选择后仍须由知识库锁定和核验版本。',
             missing_rule='没有适用定义时保留缺口，不猜id，不把缺少市场证据的原问题改成通用定义；独立事实和分析问题继续保持原范围。')
 
+    def standalone_definition(self, task):
+        """Return the exact registered definition for a whole conceptual question."""
+        from .draft_sources import local_scope_text
+
+        question = task['question']
+        arbitrage = task_catalogue_revision(task) >= 4
+        ident = _definition_topic(question, arbitrage=arbitrage)
+        if ident is None:
+            stripped = local_scope_text(question, network_only=True).lstrip(' \t\r\n，,、。；;！？!?')
+            ident = _definition_topic(stripped, arbitrage=arbitrage)
+        if not ident:
+            return None
+        if any(item['id'] == ident for item in self.planning_definitions(task)['candidates']):
+            return ident
+        return None
+
+    def explicit_definition_branches(self, task):
+        """Identify independently asked definitions while preserving the other clauses."""
+        from .draft_sources import _unquoted_local_scope, local_scope_text
+        from .market_series import market_source_directive, nav_source_scope_enabled
+
+        text = local_scope_text(task['question'], network_only=True)
+        if local_scope_text(text) != text:
+            return None
+        separators = list(_BRANCH_BREAK.finditer(_unquoted_local_scope(text)))
+        if not separators:
+            return None
+
+        def branch_text(part):
+            return _BRANCH_LEAD.sub('', part.strip(' \t\r\n，,、'))
+
+        arbitrage = task_catalogue_revision(task) >= 4
+
+        def definition(part):
+            return _definition_topic(part, arbitrage=arbitrage)
+
+        # A connective only separates clauses next to a complete definition.
+        # In particular, a marker inside “不再查询” must retain its negation.
+        branches, start = [], 0
+        for index, separator in enumerate(separators):
+            left = branch_text(text[start:separator.start()])
+            next_start = separators[index+1].start() if index+1 < len(separators) else len(text)
+            right = branch_text(text[separator.end():next_start])
+            if (separator['sentence'] or definition(left)
+                    or _BRANCH_FACT_LEAD.match(left) and definition(right)):
+                branches.append(left)
+                start = separator.end()
+        branches.append(branch_text(text[start:]))
+        branches = [part for part in branches if part and not _BRANCH_FORM_ONLY.fullmatch(part)
+                    and not (nav_source_scope_enabled(task) and market_source_directive(part))]
+        if not 2 <= len(branches) <= 50:
+            return None
+        topics = [definition(part) for part in branches]
+        if not any(topics):
+            return None
+        available = {item['id'] for item in self.planning_definitions(task)['candidates']}
+        if not any(topic in available for topic in topics):
+            return None
+        specs = []
+        for part, topic in zip(branches, topics, strict=True):
+            if topic in available:
+                specs.append(dict(question=part, kind='fact', answer_scope=GENERAL_DEFINITION_SCOPE,
+                                  knowledge_needs=[topic]))
+            elif _BRANCH_FACT_LEAD.match(part):
+                specs.append(dict(question=part, kind='fact'))
+            else:
+                specs.append(part)
+        return specs
+
     def definition_contract(self, task, question):
         """An explicit knowledge-only scope, never a replacement for facts."""
         if (question.get("answer_scope") != GENERAL_DEFINITION_SCOPE or question.get("kind") != "fact" or
@@ -711,6 +956,43 @@ class ResearchKnowledge:
                 if (not entry_type or entry_type == '混合' or entry_type in entry['scope'])
                 and (task.get('synthetic') is True or '合成验收' not in entry.get('source',''))}, None
 
+    def draft_mechanisms(self, task):
+        """Select locked explanations and channels addressed by the required questions."""
+        from .draft_sources import local_scope_text, _unquoted_local_scope
+
+        required = [row for row in task.get('questions', []) if row.get('required', True)]
+        questions = [row['question'] for row in required if row.get('kind') == 'mechanism']
+        if not questions:
+            if not (task.get('question_origin') == 'default' and task.get('intent') == '综合研究'
+                    and len(required) == 1 and required[0]['question'] == task['question']
+                    and required[0].get('answer_scope') != GENERAL_DEFINITION_SCOPE
+                    and not any(task.get(key) for key in ('materials', 'pending_materials', 'objects'))):
+                return []
+            text = _unquoted_local_scope(local_scope_text(task['question'])).strip(' \n，,。！？!?；;')
+            if (re.search(r'[。；;！？!?\n]', text) or not _MECHANISM_EXPLANATION.search(text)
+                    or _MECHANISM_SUBJECT_OR_ACTION.search(text)):
+                return []
+            questions = [text]
+        topics = {}
+        for question in questions:
+            for ident, clause in _mechanism_topics(question):
+                topics.setdefault(ident, []).append(clause)
+        if not topics:
+            return []
+        entries, _ = self._draft_entries(task)
+        selected = []
+        for ident, clauses in topics.items():
+            entry = entries.get(ident)
+            if not entry or entry['type'] != '机制':
+                continue
+            channels = entry.get('channels', ())
+            if ident == 'rh_k_inflation_transmission':
+                labels = {label for label, words in _INFLATION_CHANNELS.items()
+                          if any(word in clause for word in words for clause in clauses)}
+                channels = [line for line in channels if line.partition('：')[0] in labels] or channels
+            selected.append((entry, channels))
+        return selected
+
     def draft_context(self, task, *, limit=3200):
         """A bounded projection shared by App writing and the Skill host.
 
@@ -729,6 +1011,10 @@ class ResearchKnowledge:
             entries=[], omitted_count=0)
         if notice:
             result['notice'] = notice
+        from .research_methods import method_guidance
+        guidance = method_guidance(task)
+        if guidance and len(canonical(dict(result, research_methods=guidance))) <= limit:
+            result['research_methods'] = guidance
         priority = {'机制': 0, '指标': 1, '方法': 2, '概念': 3}
         for entry in sorted(entries.values(), key=lambda row: priority.get(row['type'], 4)):
             projected = {key: copy.deepcopy(entry.get(key, '')) for key in (
