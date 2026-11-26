@@ -33,7 +33,14 @@ class ModelQuestionContractTests(unittest.TestCase):
 
     def test_schema_is_derived_from_the_validator(self):
         schema = question_contract()
-        self.assertEqual(schema["registered_method_ids"], sorted(METHOD_REGISTRY))
+        self.assertEqual(schema["registered_method_ids"], sorted(set(METHOD_REGISTRY) - {"fee_difference_v1"}))
+        self.assertIn("fee_difference_v2", schema["registered_method_ids"])
+        legacy = copy.deepcopy(self.task)
+        legacy["fee_method_catalogue_version"] = 1
+        old_methods = question_contract(legacy)["registered_method_ids"]
+        self.assertIn("fee_difference_v1", old_methods)
+        self.assertNotIn("fee_difference_v2", old_methods)
+        self.assertNotIn("fee_difference_v1", schema["registered_method_ids"])
         self.assertEqual(schema["fields"], sorted(QUESTION_FIELDS))
         self.assertEqual(schema["kinds"], list(QUESTION_KINDS))
         self.assertEqual(schema["no_calculation_example"]["method_needs"], [])
