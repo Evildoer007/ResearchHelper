@@ -7,26 +7,107 @@ by their own evidence contracts. No model or provider is invoked here.
 
 from __future__ import annotations
 
+from calendar import monthrange
+from datetime import date
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
+from typing import NamedTuple
 
-from .contracts import (ContractError, DOCUMENT_CONTENT_INTENT, DOCUMENT_CONTENT_SCOPE,
+from .contracts import (ContractError, DOCUMENT_CONTENT_INTENT, DOCUMENT_CONTENT_SCOPE, FINANCIAL_AMOUNT_UNITS,
                         METHOD_REGISTRY, calculation_dependency_hash, calculation_quantity_paths, document_content_answer,
                         method_reference_quantities, analysis_quantity_paths,
                         fingerprint, validate_evidence)
+from .data_requirements import SCALED_COUNT_UNITS
 from .evidence import evidence_binding
 
 
-_NUMBER = r"[+\-−＋－]?(?:(?:\d+(?:,\d{3})*(?:\.\d+)?|\.\d+)(?:[eE][+\-]?\d+)?|[零〇一二两三四五六七八九十百千万亿]+(?:点[零〇一二两三四五六七八九]+)?)"
-_UNITS = sorted({
+_SIGN = r"[+\-−＋－]?"
+_ARABIC_MAGNITUDE = r"(?:\d+(?:,\d{3})*(?:\.\d+)?|\.\d+)(?:[eE][+\-]?\d+)?"
+_CHINESE_MAGNITUDE = r"[零〇一二两三四五六七八九十百千万亿]+(?:点[零〇一二两三四五六七八九]+)?"
+_NUMBER = _SIGN + '(?:' + _ARABIC_MAGNITUDE + '|' + _CHINESE_MAGNITUDE + ')'
+_UNITS = {
     '个百分点/年', '个百分点', '百分点/年', '基点/年', '%/年', '％/年', '元/股', '美元/吨', '元/吨',
-    '万亿元', '千亿元', '百亿元', '十亿元', '亿元', '千万元', '百万元', '万元',
-    '亿美元', '万美元', '美元', '港元', '欧元', '人民币元', '元',
+    *FINANCIAL_AMOUNT_UNITS, '万亿元', '千亿元', '百亿元', '十亿元',
+    '亿美元', '万美元', '美元', '港元', '欧元', '人民币元',
     '百万股', '万股', '亿股', '股', '万吨', '亿吨', '吨', '百分点', '基点',
     '%', '％', '倍', '万份', '亿份', '份', '点',
-}, key=len, reverse=True)
-_QUANTITY = re.compile(r'(?<![\d.,])(?P<number>' + _NUMBER + r')\s*(?P<unit>' + '|'.join(map(re.escape, _UNITS)) + r')')
+}
+
+
+def _unit_alternatives(units):
+    ordered = sorted(units, key=lambda unit: (-len(unit), unit))
+    return '|'.join(map(re.escape, ordered))
+
+
+def _quantity_expression(units):
+    return re.compile(r'(?<![\d.,])(?P<number>' + _NUMBER + r')\s*(?P<unit>' + _unit_alternatives(units) + r')')
+
+
+_QUANTITY = _quantity_expression(_UNITS)
+_DRAFT_UNITS = SCALED_COUNT_UNITS.union(_UNITS)
+_DRAFT_QUANTITY = _quantity_expression(_DRAFT_UNITS)
 _PERCENT_WORDS = re.compile(r'百分之(?P<number>' + _NUMBER + r')')
+_DRAFT_DENOMINATOR = re.compile(r'[/／]\s*(?:交易日|工作日|季度|[年月周日天股份手户人吨台件米]|[A-Za-z]+)')
+DRAFT_CLAUSE_BOUNDARY = re.compile(r'([，；。！？;!?\n]+|(?<!\d),|,(?!\d))')
+ORIGINAL_QUANTITY_QUALIFIER_POLICY = 'original_quantity_qualifier_version'
+ORIGINAL_QUANTITY_QUALIFIER_VERSION = 2
+_RANGE_NUMBER = _SIGN + _ARABIC_MAGNITUDE
+_RANGE_UNITS = _unit_alternatives(_DRAFT_UNITS)
+_HORIZONTAL = r'[ \u00a0\u202f\u3000]*'
+_RANGE_JOIN_SPACE = _HORIZONTAL + r'(?:\r?\n' + _HORIZONTAL + r')?'
+_QUANTITY_RANGE = re.compile(
+    rf'(?<![\d.,A-Za-z_])(?P<first>{_RANGE_NUMBER})(?:{_HORIZONTAL}(?P<first_unit>{_RANGE_UNITS}))?'
+    rf'(?P<before>{_RANGE_JOIN_SPACE})(?P<join>至|到|[~～—–－-])(?P<after>{_RANGE_JOIN_SPACE})'
+    rf'(?P<last>{_RANGE_NUMBER}){_HORIZONTAL}(?P<last_unit>{_RANGE_UNITS})'
+)
+_RANGE_CONTEXT = re.compile(r'(?:介于|区间|范围|分布|波动)[^。；，\n]{0,12}$')
+_CHANGE_CONTEXT = re.compile(r'(?:由|从)\s*$')
+_CLOCK_CONTEXT = re.compile(r'(?:上午|下午|凌晨|中午|晚上|早上)\s*$')
+_QUANTITY_PREFIX = re.compile(
+    r'(?:(?P<maximum>(?:不|未|没有)(?:超过|高于|大于|多于)|至多|不超|<=|≤|＜＝)'
+    r'|(?P<minimum>(?:不|未|没有)(?:低于|小于|少于)|至少|>=|≥|＞＝)'
+    r'|(?P<greater>超过|高于|大于|多于|超|>|＞)'
+    r'|(?P<less>低于|小于|少于|不足|不到|<|＜)'
+    r'|(?P<approximate>大约|约为|约有|约达|约合|约占|将近|接近|'
+    r'(?<![签预邀解违履续契公合条要立缔爽订改赴失承])约|(?<![最附临逼靠贴邻远亲年])近))'
+    r'\s*(?:人民币|美元|港币|欧元)?\s*$'
+)
+_QUANTITY_SUFFIX = re.compile(
+    r'\s*(?:(?P<minimum>及?以上)|(?P<maximum>及?以下|以内)'
+    r'|(?P<approximate>左右|上下(?!游)|附近))'
+)
+_DRAFT_STATEMENT_BOUNDARY = re.compile(r'[；。！？;!?\n]+')
+_DRAFT_CODE = re.compile(r'(?<!\d)(?:\d{5,6}\.(?:SH|SZ|BJ|HK|OF)|\d{4}\.HK)(?![A-Z])', re.I)
+_DRAFT_PERIOD = re.compile(
+    r'(?<![\d.])(?:19|20)\d{2}(?:-\d{2}-\d{2}|/\d{2}/\d{2}|-\d{2}(?![\d-])|\d{4}(?!\d)'
+    r'|年(?:\d{1,2}月(?:\d{1,2}日)?)?|(?=[至—–~-](?:19|20)\d{2}))')
+_DRAFT_REPORTING_SPAN = re.compile(
+    r'(?:(?<![A-Za-z\d.])(?P<year>(?:19|20)\d{2})年?\s*|(?<![A-Za-z\d.上下前后每任个第近去过共续]))'
+    r'(?:(?P<first>1[0-2]|0?[1-9])月?\s*[至到—–~～-]\s*(?P<last>1[0-2]|0?[1-9])月'
+    r'|前(?P<cumulative>[两二三四234])个?季(?:度)?'
+    r'|(?P<filing>[一三13])季报'
+    r'|(?:第?(?P<quarter>[一二三四1234])季(?:度)?|[Qq](?P<quarter_number>[1-4])(?!\d))'
+    r'|(?P<half>上半年|半年度|半年报|中报|下半年|[Hh][12](?!\d))'
+    r'|全年|年度|年报)(?P<as_of>期末|末)?'
+)
+_DRAFT_CHINESE_DAY = r'(?:19|20)\d{2}年\d{1,2}月\d{1,2}日'
+_DRAFT_FULL_DAY = r'(?:(?:19|20)\d{2}(?:-\d{2}-\d{2}|/\d{2}/\d{2})|' + _DRAFT_CHINESE_DAY + ')'
+_DRAFT_DAY_SUFFIX = r'(?![\d.Tt]|\s+\d{1,2}:)'
+_DRAFT_DAY_POINT = re.compile(r'(?<![\d.])' + _DRAFT_FULL_DAY + _DRAFT_DAY_SUFFIX)
+_DRAFT_DAY_POINT_WITH_CODE = re.compile(
+    r'(?<![\d.])(?:' + _DRAFT_FULL_DAY + _DRAFT_DAY_SUFFIX
+    + '|' + _DRAFT_CHINESE_DAY + r'(?=' + _DRAFT_CODE.pattern + '))', re.I)
+_DRAFT_DAY_SPAN = re.compile(r'(?<![\d.])(?P<first>' + _DRAFT_FULL_DAY
+                             + r')\s*[至到—–~～-]\s*(?P<last>' + _DRAFT_FULL_DAY + ')')
+_DRAFT_SHORT_CHINESE_DAY_SPAN = re.compile(
+    r'(?<![\d.])(?P<year>(?:19|20)\d{2})年(?P<month>\d{1,2})月(?P<day>\d{1,2})[日号]?'
+    r'\s*[至到—–~～-]\s*(?:(?P<end_month>\d{1,2})月)?(?P<end_day>\d{1,2})[日号]')
+_DRAFT_SHORT_NUMERIC_DAY_SPAN = re.compile(
+    r'(?<![\d.])(?P<year>(?:19|20)\d{2})(?P<separator>[-/])(?P<month>\d{2})(?P=separator)(?P<day>\d{2})'
+    r'\s*[至到—–~～]\s*(?P<end_month>\d{2})(?P=separator)(?P<end_day>\d{2})'
+    r'(?![\d./%％-]|倍|元|个|[A-Za-z])')
+_BASE_PERIOD_CONNECTOR = re.compile(r'\s*(?:较|比|相比于?|相对|与|对比)\s*')
+_DRAFT_LIST_CONNECTOR = re.compile(r'\s*(?:、|，|,|和|与|及|以及)\s*')
 _FEE_METHODS = {'fee_difference_v1', 'fee_difference_v2', 'management_custody_fee_comparison_v1', 'management_custody_fee_summary_v1'}
 _DIGITS = dict(zip('零〇一二两三四五六七八九', [0, 0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9]))
 ANSWER_NUMERIC_FIELDS = ('answer',)
@@ -94,9 +175,12 @@ def numeric_segment_shape_diagnostics(segments, fields):
 # because the printed number and unit happen to match.
 _PRICE_CHANGE_METHODS = {'observed_price_return_v1', 'observed_index_change_v1'}
 _PRICE_LABEL = r'(?:未复权)?(?:价格(?:变化|变动|涨跌幅|涨跌|收益率)|指数(?:点位)?(?:区间)?(?:变化|变动|收益率)|(?:全收益|净全收益|价格)指数(?:点位)?(?:区间)?(?:变化|变动|收益率))'
-_OTHER_RETURN_LABEL = r'(?:持有人(?:总)?(?:回报|收益)|持有收益(?:率)?|(?:基金)?净值收益(?:率)?|总回报(?:率)?|总收益(?:率)?|投资收益(?:率)?|实际收益(?:率)?|年化收益(?:率)?|超额收益(?:率)?|(?:上涨|下跌|收益|盈利)概率|事件(?:因果|贡献)|因果贡献)'
+_RETURN_MODIFIER = r'(?:持有(?:人|期)?|投资|实际|年化|超额|累计|绝对|含分红(?:再投资)?|分红再投资|费后|复权)'
+_RETURN_LABEL = (rf'(?:(?:{_RETURN_MODIFIER}总?|总)(?:回报|收益)率?|(?:基金|单位)?净值收益率?'
+                 r'|(?:累计|复权)净值(?:涨跌幅|涨幅|跌幅|变化率?))')
+_OTHER_RETURN_LABEL = r'(?:' + _RETURN_LABEL + r'|(?:上涨|下跌|收益|盈利)概率|事件(?:因果|贡献)|因果贡献)'
 _QUANTITY_LABEL = re.compile(_PRICE_LABEL + '|' + _OTHER_RETURN_LABEL)
-_UNSUPPORTED_PRICE_SUFFIX = re.compile(r'^\s*(?:的)?' + _OTHER_RETURN_LABEL)
+_UNSUPPORTED_PRICE_SUFFIX = re.compile(r'^\s*(?:的|[（(]\s*)?' + _OTHER_RETURN_LABEL)
 
 
 def measure_scope_contract():
@@ -207,18 +291,119 @@ def _is_document_count(suffix, *, expanded=False, citations=False):
     return bool(match and not tail.startswith(('基金', '份额', '股', '证券')))
 
 
-def _quantities(text, *, document_count_grammar=0):
+def quantity_qualifiers_enabled(task):
+    version = task.get(ORIGINAL_QUANTITY_QUALIFIER_POLICY)
+    if version is None:
+        return False
+    if type(version) is not int or version not in (1, ORIGINAL_QUANTITY_QUALIFIER_VERSION):
+        _fail('原文数量限定规则版本未登记')
+    return True
+
+
+def quantity_ranges_enabled(task):
+    return quantity_qualifiers_enabled(task) and task[ORIGINAL_QUANTITY_QUALIFIER_POLICY] == ORIGINAL_QUANTITY_QUALIFIER_VERSION
+
+
+class QuantityQualifier(NamedTuple):
+    kind: str
+    start: int
+    end: int
+
+
+def literal_quantity_qualifiers(text, start, end):
+    """Read explicit qualifiers attached to one literal number and its unit."""
+    prefixes = []
+    left = max(0, start - 40)
+    while prefix := _QUANTITY_PREFIX.search(text, left, start):
+        prefixes.append(QuantityQualifier(prefix.lastgroup, *prefix.span(prefix.lastgroup)))
+        start = prefix.start()
+    qualifiers = list(reversed(prefixes))
+    suffix = _QUANTITY_SUFFIX.match(text, end)
+    if suffix:
+        qualifiers.append(QuantityQualifier(suffix.lastgroup, *suffix.span(suffix.lastgroup)))
+    return tuple(qualifiers)
+
+
+class QuantityRange(NamedTuple):
+    start: int
+    end: int
+    first: Decimal
+    last: Decimal
+    first_unit: str
+    last_unit: str
+
+
+def _quantity_unit(unit):
+    return unit.replace('％', '%').replace('个百分点', '百分点')
+
+
+def literal_quantity_ranges(text):
+    """Read two written endpoints and their units, without choosing a point."""
+    for match in _QUANTITY_RANGE.finditer(text):
+        prefix = text[max(0, match.start()-28):match.start()]
+        end = match.end()
+        suffix = text[end:end+12].lstrip()
+        explicit_range = bool(_RANGE_CONTEXT.search(prefix) or suffix.startswith(('之间', '区间内', '范围内')))
+        join, before, after = match['join'], match['before'], match['after']
+        if not explicit_range and _CHANGE_CONTEXT.search(prefix):
+            continue
+        if join not in ('至', '到') and '\n' in before + after:
+            continue
+        if not explicit_range and join in ('-', '－') and before and not after:
+            # A separated signed value may be the next PDF table cell.
+            continue
+        if (not explicit_range and join in ('-', '－') and not match['first_unit']
+                and (before or after)):
+            continue
+        last_unit = _quantity_unit(match['last_unit'])
+        if last_unit == '份' and _is_document_count(text[end:], expanded=True, citations=True):
+            continue
+        if last_unit == '点' and _CLOCK_CONTEXT.search(prefix):
+            continue
+        if text[end:end+1] in ('/', '／'):
+            denominator = _DRAFT_DENOMINATOR.match(text, end)
+            if denominator:
+                end = denominator.end()
+                last_unit += '/' + denominator.group()[1:].strip()
+            else:
+                last_unit += '/'
+                end += 1
+        first_unit = _quantity_unit(match['first_unit']) if match['first_unit'] else last_unit
+        try:
+            first, last = _number(match['first']), _number(match['last'])
+        except ContractError:
+            continue
+        yield QuantityRange(match.start(), end, first, last, first_unit, last_unit)
+
+
+def split_draft_clauses(text, *, protect_ranges=False):
+    """Keep an original range together when a PDF wraps after its join word."""
+    if not protect_ranges or '\n' not in text:
+        return DRAFT_CLAUSE_BOUNDARY.split(text)
+    wrapped = [span for span in literal_quantity_ranges(text) if '\n' in text[span.start:span.end]]
+    parts, start = [], 0
+    for boundary in DRAFT_CLAUSE_BOUNDARY.finditer(text):
+        if any(span.start <= boundary.start() and boundary.end() <= span.end for span in wrapped):
+            continue
+        parts.extend((text[start:boundary.start()], boundary.group()))
+        start = boundary.end()
+    parts.append(text[start:])
+    return parts
+
+
+def _quantities(text, *, document_count_grammar=0, strict_units=True, scaled_counts=False):
     result = []
-    for expression in (_QUANTITY, _PERCENT_WORDS):
+    quantity = _DRAFT_QUANTITY if scaled_counts else _QUANTITY
+    for expression in (quantity, _PERCENT_WORDS):
         for match in expression.finditer(text):
-            if (expression is _QUANTITY and match.group('unit') == '份' and
+            if (expression is quantity and match.group('unit') == '份' and
                     _is_document_count(text[match.end():], expanded=document_count_grammar in (1,2),
                                        citations=document_count_grammar==2)):
                 # Counted originals and response files are not fund shares.
                 # Only an explicit document noun qualifies; bare shares,
                 # per-share NAV, percentages and money remain source-bound.
                 continue
-            if expression is _QUANTITY and match.group('unit') == '点':
+            if expression is quantity and match.group('unit') == '点':
                 prefix = text[:match.start()]
                 # Ordinal/list prose and explicitly qualified clock times are
                 # not index quantities. Bare financial point claims still need
@@ -227,13 +412,276 @@ def _quantities(text, *, document_count_grammar=0):
                 prose = prefix.endswith('第') or match.group('number') == '一' and prefix.endswith(('这', '那'))
                 if prose or clock:
                     continue
-            if text[match.end():].startswith(('/', '／')):
-                _fail('数量单位包含未登记的分母')
+            end = match.end()
+            unit = '%' if expression is _PERCENT_WORDS else _quantity_unit(match.group('unit'))
+            remainder = text[end:]
+            if remainder.startswith(('/', '／')):
+                if strict_units:
+                    _fail('数量单位包含未登记的分母')
+                denominator = _DRAFT_DENOMINATOR.match(remainder)
+                if denominator:
+                    end += denominator.end()
+                    unit += '/' + denominator.group()[1:].strip()
+                elif not re.match(r'[/／]\s*' + _NUMBER, remainder):
+                    # An unfamiliar denominator is unbound, not a plain amount.
+                    end += 1
+                    unit += '/'
             token = match.group('number')
-            result.append({'start': match.start(), 'end': match.end(), 'text': match.group(),
-                           'value': _number(token), 'unit': '%' if expression is _PERCENT_WORDS else match.group('unit').replace('％', '%').replace('个百分点', '百分点'),
+            result.append({'start': match.start(), 'end': end, 'text': text[match.start():end],
+                           'value': _number(token), 'unit': unit,
                            'digits': len(token.partition('.')[2]) if '.' in token and 'e' not in token.lower() else None})
     return sorted(result, key=lambda item: item['start'])
+
+
+def draft_quantities(text, *, scaled_counts=False):
+    """Find recognizable draft quantities without turning syntax into a delivery gate."""
+    return _quantities(text, document_count_grammar=2, strict_units=False, scaled_counts=scaled_counts)
+
+
+class DraftPeriod(NamedTuple):
+    year: str | None
+    end: str
+    start: str = ''
+    statistic: str = ''
+
+
+class DraftQuantityScope(NamedTuple):
+    code: str | None
+    period: DraftPeriod | None
+    base: DraftPeriod | None = None
+    list_context: str = ''
+
+
+def _date_key(text):
+    return ''.join(part.zfill(2) for part in re.findall(r'\d+', text))
+
+
+def _month_span(year, first, last, *, as_of=False):
+    # Reporting periods describe calendar months. A yearless February stays
+    # month-precise because its final day cannot be known.
+    ending = f'{last:02d}'
+    if year or last != 2:
+        ending += f'{monthrange(int(year or 2000), last)[1]:02d}'
+    return DraftPeriod(year, ending, '' if as_of else f'{year or ""}{first:02d}01')
+
+
+def draft_day_intervals(text):
+    """Return the source spans and dates of full or abbreviated day ranges."""
+    matches = [(match, _date_key(match['first']), _date_key(match['last']))
+               for match in _DRAFT_DAY_SPAN.finditer(text)]
+    for pattern in (_DRAFT_SHORT_CHINESE_DAY_SPAN, _DRAFT_SHORT_NUMERIC_DAY_SPAN):
+        for match in pattern.finditer(text):
+            year, month = match['year'], match['month']
+            first = year + month.zfill(2) + match['day'].zfill(2)
+            last = year + (match['end_month'] or month).zfill(2) + match['end_day'].zfill(2)
+            matches.append((match, first, last))
+    intervals = []
+    for match, first, last in matches:
+        try:
+            start = date(int(first[:4]), int(first[4:6]), int(first[6:]))
+            end = date(int(last[:4]), int(last[4:6]), int(last[6:]))
+        except ValueError:
+            continue
+        if start <= end:
+            intervals.append((*match.span(), start, end))
+    return sorted(intervals)
+
+
+def draft_day_points(text, intervals, *, adjacent_security_code=False):
+    """Read complete literal dates outside the ranges already recognized."""
+    pattern = _DRAFT_DAY_POINT_WITH_CODE if adjacent_security_code else _DRAFT_DAY_POINT
+    for match in pattern.finditer(text):
+        start, end = match.span()
+        if any(left < end and start < right for left, right, _, _ in intervals):
+            continue
+        key = _date_key(match.group())
+        try:
+            day = date(int(key[:4]), int(key[4:6]), int(key[6:]))
+        except ValueError:
+            continue
+        yield start, end, day
+
+
+def _draft_periods(text):
+    spans = [(begin, end, DraftPeriod(f'{last.year:04d}', f'{last.month:02d}{last.day:02d}',
+                                    first.isoformat().replace('-', '')))
+             for begin, end, first, last in draft_day_intervals(text)]
+    for match in _DRAFT_REPORTING_SPAN.finditer(text):
+        if any(start <= match.start() < end for start, end, _ in spans):
+            continue
+        as_of = bool(match['as_of'])
+        statistic = ''
+        if match['first']:
+            first, last = int(match['first']), int(match['last'])
+            if first > last:
+                continue
+        elif match['cumulative']:
+            first, last = 1, 3 * _number(match['cumulative'])
+            statistic = 'YTD'
+        elif quarter := match['quarter'] or match['quarter_number']:
+            last = 3 * _number(quarter)
+            first = last - 2
+            statistic = 'Q'
+        elif match['filing']:
+            first, last = 1, 3 * _number(match['filing'])
+            # The third-quarter report can include both its single-quarter
+            # and year-to-date columns. A caption only identifies the end.
+            as_of = last == 9
+        elif match['half']:
+            first, last = (7, 12) if match['half'] in ('下半年', 'H2', 'h2') else (1, 6)
+            statistic = 'H'
+        else:
+            first, last = 1, 12
+            statistic = 'Y'
+        if as_of and text[match.end():].lstrip().startswith('累计'):
+            first, as_of = 1, False
+            statistic = 'YTD'
+        period = _month_span(match['year'], int(first), int(last), as_of=as_of)._replace(
+            statistic='end' if as_of else statistic)
+        spans.append((match.start(), match.end(), period))
+    for match in _DRAFT_PERIOD.finditer(text):
+        if not any(start < match.end() and match.start() < end for start, end, _ in spans):
+            key = _date_key(match.group())
+            statistic = {4: 'Y', 6: 'M'}.get(len(key), '')
+            spans.append((match.start(), match.end(), DraftPeriod(key[:4], key[4:], statistic=statistic)))
+    return sorted(spans, key=lambda item: item[0])
+
+
+def _respective_quantity_scope(text, start):
+    if text.rfind('分别', 0, start) < 0:
+        return None
+    prefix = _DRAFT_STATEMENT_BOUNDARY.split(text[:start])[-1]
+    marker = prefix.rfind('分别')
+    if marker < 0:
+        return None
+    periods = []
+    for begin, end, period in reversed(_draft_periods(prefix[:marker])):
+        if periods and not _DRAFT_LIST_CONNECTOR.fullmatch(prefix[end:periods[-1][0]]):
+            break
+        periods.append((begin, period))
+    if len(periods) < 2:
+        return None
+    after_marker = prefix[marker + len('分别'):] + _DRAFT_STATEMENT_BOUNDARY.split(text[start:])[0]
+    numbers = []
+    for number in draft_quantities(after_marker):
+        if numbers and not _DRAFT_LIST_CONNECTOR.fullmatch(after_marker[numbers[-1]['end']:number['start']]):
+            break
+        numbers.append(number)
+    if len(numbers) != len(periods):
+        return None
+    offset = len(prefix) - marker - len('分别')
+    context = prefix[:marker] + after_marker[:numbers[0]['start']]
+    codes = {code.upper() for code in _DRAFT_CODE.findall(context)}
+    if len(codes) > 1:
+        return None
+    for number, (_, period) in zip(numbers, reversed(periods)):
+        if number['start'] == offset:
+            return DraftQuantityScope(next(iter(codes), None), period, list_context=context)
+    return None
+
+
+def draft_quantity_scope(text, start):
+    """Resolve only explicit code and period wording beside the quantity."""
+    paired = _respective_quantity_scope(text, start)
+    if paired is not None:
+        return paired
+    prefix = DRAFT_CLAUSE_BOUNDARY.split(text[:start])[-1]
+    suffix = DRAFT_CLAUSE_BOUNDARY.split(text[start:])[0]
+    codes = _DRAFT_CODE.findall(prefix) or _DRAFT_CODE.findall(suffix)
+    code = codes[-1].upper() if codes else None
+    periods = _draft_periods(prefix)
+    if not periods:
+        return DraftQuantityScope(code, None)
+    last_start, last_end, period = periods[-1]
+    if len(periods) > 1:
+        _, prior_end, prior = periods[-2]
+        if _BASE_PERIOD_CONNECTOR.fullmatch(prefix[prior_end:last_start]):
+            if (not period.end and period.year and prior.end
+                    and prefix[last_end:].lstrip().startswith(('同期', '同季度', '同月'))):
+                start = period.year + prior.start[-4:] if prior.start else ''
+                period = DraftPeriod(period.year, prior.end, start)
+            return DraftQuantityScope(code, prior, period)
+        # A parenthetical date may give an endpoint for the preceding duration.
+        if prior.start and not period.start and prior.year == period.year and prior.end == period.end:
+            period = prior
+    return DraftQuantityScope(code, period)
+
+
+def _financial_claim_period(period):
+    if period is None or period.start:
+        return period
+    if not period.end:
+        return _month_span(period.year, 1, 12)
+    if len(period.end) == 2:
+        month = int(period.end)
+        if 1 <= month <= 12:
+            return _month_span(period.year, month, month)
+    return period
+
+
+def _period_matches(wanted, actual, *, require_duration):
+    if wanted is None:
+        return True
+    if (wanted.year and wanted.year != actual.year) or not actual.end.startswith(wanted.end):
+        return False
+    return not require_duration or not wanted.start or actual.start.endswith(wanted.start)
+
+
+def _row_periods(row):
+    value = str(row.get('period') or '')
+    periods = [period for _, _, period in _draft_periods(value)]
+    if not periods and re.fullmatch(r'\d{4}', value):
+        periods = [DraftPeriod(value, '')]
+    if row.get('period_kind') == 'cumulative':
+        periods = [period._replace(start=period.year + '0101')
+                   if not period.start and period.year and len(period.end) == 4 else period for period in periods]
+    return periods
+
+
+def draft_quantity_source_matches(row, scope, *, financial=False, inputs=()):
+    if scope.code and str(row.get('code', '')).upper() != scope.code:
+        return False
+    wanted = _financial_claim_period(scope.period) if financial else scope.period
+    if scope.base is not None:
+        if row.get('method') not in ('raw_change_v1', 'raw_difference_v1') or len(inputs) != 2:
+            return False
+        base = _financial_claim_period(scope.base) if financial else scope.base
+        if not _row_matches_period(inputs[0], base, financial):
+            return False
+    if wanted is None:
+        return True
+    if not financial and wanted.start and row.get('method') == 'raw_change_v1' and len(inputs) == 2:
+        from .draft_sources import _sequence_day
+        start, end = (_sequence_day(item.get('period')) for item in inputs)
+        if start is None or end is None:
+            return False
+        actual = DraftPeriod(str(end.year), end.strftime('%m%d'), start.strftime('%Y%m%d'))
+        return _period_matches(wanted, actual, require_duration=True)
+    if financial and inputs:
+        current = [item for item in inputs if item['period'] == row.get('period')]
+        return bool(current) and all(_row_matches_period(item, wanted, True) for item in current)
+    return _row_matches_period(row, wanted, financial)
+
+
+def _row_matches_period(row, wanted, financial):
+    require_duration = financial and row.get('period_kind') != 'point_in_time'
+    return any(_period_matches(wanted, period, require_duration=require_duration) for period in _row_periods(row))
+
+
+def draft_quantity_scopes_match(claim, source, *, financial=False):
+    """A document paraphrase must preserve the literal comparison periods."""
+    if claim.code and source.code != claim.code:
+        return False
+    for wanted, actual in ((claim.period, source.period), (claim.base, source.base)):
+        if wanted is None:
+            continue
+        if actual is None:
+            return False
+        if financial:
+            wanted, actual = _financial_claim_period(wanted), _financial_claim_period(actual)
+        if not _period_matches(wanted, actual, require_duration=True):
+            return False
+    return True
 
 
 def _statement_quantities(text, task):
