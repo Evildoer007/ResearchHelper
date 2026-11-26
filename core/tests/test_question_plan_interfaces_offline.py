@@ -1,5 +1,6 @@
 """Local API and isolated Skill acceptance for question-led research."""
 
+import base64
 import hashlib
 import json
 import shutil
@@ -11,7 +12,11 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from researchhelper.cases import CUTOFF, evidence
+from researchhelper.contracts import evidence_requirements
+from researchhelper.cases import CUTOFF
+from tests.skill_fixture_support import build_skill_fixture
+from tests.test_autonomous_supplement_interfaces_offline import mock_host_review
+from tests.host_fixture_support import PUBLICATION, policy_spec
 from researchhelper.service import make_server
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,6 +29,7 @@ class QuestionPlanInterfaces(unittest.TestCase):
         self.addCleanup(folder.cleanup)
         self.directory = Path(folder.name)
         self.server = make_server(self.directory / "store", ROOT)
+        mock_host_review(self, self.server.agent)
         thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         thread.start()
         self.thread = thread
@@ -54,14 +60,18 @@ class QuestionPlanInterfaces(unittest.TestCase):
             "questions": [dict(self.questions[0], evidence_needs=["原文条款"])], "reason": "补充定位需求",
             "expected_input_hash": task["input_hash"]})
         self.assertEqual(revised["plan_version"], 2)
-        original = evidence("local", "原文", "原文于2026年7月19日生效。")
+        text = "原文于2026年7月19日生效。"
+        saved = self.post(f"/api/tasks/{task['id']}/material", {"name": "policy.txt",
+            "base64": base64.b64encode((PUBLICATION + "\n\n" + text).encode()).decode()})
+        original = policy_spec(saved["materials"][-1], "local", "原文", text, ["q1"])
+        original["review"]["evidence_need_ids"] = {"q1": [row["id"] for row in evidence_requirements(revised["questions"][0])]}
         self.post(f"/api/tasks/{task['id']}/start", {"host_result": {
-            "evidence": [original], "answers": {"q1": {"answer": "2026年7月19日生效。", "refs": ["local"]}}}})
+            "evidence_specs": [original], "answers": {"q1": {"answer": "2026年7月19日生效。", "refs": ["local"]}}}})
         worker = self.server.agent.workers[task["id"]]
         worker.join(10)
         self.assertFalse(worker.is_alive())
         final = self.server.agent.archive.get(task["id"])
-        self.assertEqual(final["status"], "已完成", final.get("error"))
+        self.assertEqual(final["status"], "已完成", (final.get("error"), final["gaps"], final["rejected_evidence"]))
         self.assertEqual(final["theses"], [])
         self.assertEqual(final["ledger"]["used"]["model_calls"], 0)
         self.assertEqual(final["ledger"]["used"]["data_requests"], 0)
@@ -77,41 +87,55 @@ class QuestionPlanInterfaces(unittest.TestCase):
 
     def test_isolated_skill_plan_run_and_export_do_not_write_installation(self):
         installation = self.directory / "installation"
-        shutil.copytree(ROOT / "skill" / "researchhelper", installation)
-        shutil.copytree(ROOT / "core/src/researchhelper", installation / "researchhelper", ignore=shutil.ignore_patterns("__pycache__"))
-        for relative in ("app/web/report.css", "assets/vendor/echarts.min.js"):
-            target = installation / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(ROOT / relative, target)
+        build_skill_fixture(installation)
         before = {str(p.relative_to(installation)): hashlib.sha256(p.read_bytes()).hexdigest()
                   for p in installation.rglob("*") if p.is_file()}
         project = self.directory / "independent-project"
-        script = f"""
-import importlib.util, json, socket
+        script = r'''
+import json, socket, sys
 from pathlib import Path
 socket.socket.connect = lambda *_: (_ for _ in ()).throw(AssertionError('External call forbidden'))
-entry = Path({str(installation / 'scripts/session.py')!r})
-spec = importlib.util.spec_from_file_location('isolated_skill', entry)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
-session = module.Session({str(project)!r})
-from researchhelper.cases import evidence, CUTOFF
-questions = [{{'id':'q1','question':'原文日期','kind':'fact'}}]
-task = session.create('核查原文日期', questions=questions, cutoff=CUTOFF)
-revised = session.plan(task['id'], [dict(questions[0], evidence_needs=['原文条款'])], '补充条款定位', task['input_hash'])
-final = session.run(task['id'], [evidence('local','原文','2026年7月19日生效')],
-                    {{'q1':{{'answer':'2026年7月19日生效。','refs':['local']}}}})
-assert final['status'] == '已完成', final.get('error')
-assert not final['theses'] and final['plan_version'] == 2
-assert final['ledger']['used']['model_calls'] == final['ledger']['used']['data_requests'] == 0
-target = session.export(task['id'])
-assert target.is_file() and target.with_suffix('.json').is_file()
-assert '2026年7月19日生效' in target.read_text()
-assert Path(module.ResearchAgent.__module__.replace('.', '/')).name == 'engine'
-import researchhelper.engine
-assert str(researchhelper.engine.__file__).startswith({str(installation)!r})
-assert session.archive.root == Path({str(project / 'data/researchhelper')!r})
-"""
+installation = Path(INSTALLATION_PLACEHOLDER)
+sys.path.insert(0, str(installation))
+import core.session as module
+session = module.Session(PROJECT_PLACEHOLDER)
+from researchhelper.cases import CUTOFF
+try:
+ questions = [{'id':'q1','question':'原文日期','kind':'fact'}]
+ task = session.create('核查原文日期', questions=questions, cutoff=CUTOFF)
+ revised = session.plan(task['id'], [dict(questions[0], evidence_needs=['原文条款'])], '补充条款定位', task['input_hash'])
+ publication = '发布日期：2026年7月19日。'
+ text = '2026年7月19日生效。'
+ material = session.material(task['id'], 'policy.txt', (publication+'\n\n'+text).encode())
+ record = material
+ spec = dict(id='local', artifact_id=record['id'], object='原文', text=text,
+  record_locator={'part':'段落2'}, period='合成条款期', nature='合同政策条款', unit='不适用', question_ids=['q1'],
+  published_at='2026-07-19', publication=dict(at='2026-07-19',precision='日',timezone='Asia/Shanghai',certainty='已确认',
+   basis='合成原件的明确日期',basis_ref=dict(kind='material',artifact_id=record['id'],snapshot_hash=record['snapshot_hash'],part='段落1',quote=publication)),
+  review=dict(question_ids=['q1'],allowed_natures=['合同政策条款'],conditions=['固定合成原件的软件协议检查'],reason='逐字核对'))
+ from researchhelper.contracts import evidence_requirements
+ spec['review']['evidence_need_ids'] = {'q1':[row['id'] for row in evidence_requirements(revised['questions'][0])]}
+ checkpoint = session.run(task['id'], evidence_specs=[spec], answers={'q1':{'answer':text,'refs':['local']}}, defer_delivery=True)
+ request = session.argument_review_inputs(task['id'])['request']
+ assert request['targets'] and all(target['text']==text for target in request['targets'])
+ wire = dict(version=request['version'],review_hash=request['review_hash'],questions=[dict(question_id='q1',status='answered',missing_evidence=[],reason='固定合成原件，不代表金融质量')],
+  reviews=[dict(target_id=target['id'],segments=[dict(text=target['text'],verdict='supported',basis_refs=['evidence:local'],explanation='固定合成条款逐字对应')]) for target in request['targets']])
+ session.review_arguments(task['id'],wire)
+ final = session.deliver(task['id'])
+ assert final['status'] == '已完成', (final.get('error'),final['gaps'])
+ assert not final['theses'] and final['plan_version'] == 2
+ assert final['ledger']['used']['model_calls'] == final['ledger']['used']['data_requests'] == 0
+ target = session.export(task['id'])
+ assert target.is_file() and target.with_suffix('.json').is_file()
+ assert '2026年7月19日生效' in target.read_text()
+ assert Path(module.ResearchAgent.__module__.replace('.', '/')).name == 'engine'
+ import researchhelper.engine
+ assert str(researchhelper.engine.__file__).startswith(str(installation))
+ assert session.archive.root == Path(PROJECT_STORE_PLACEHOLDER)
+finally:
+ session.agent.close_runtime()
+'''
+        script = script.replace("INSTALLATION_PLACEHOLDER", repr(str(installation))).replace("PROJECT_PLACEHOLDER", repr(str(project))).replace("PROJECT_STORE_PLACEHOLDER", repr(str(project / "data/researchhelper")))
         result = subprocess.run([PYTHON, "-I", "-B", "-c", script], cwd=self.directory, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
         after = {str(p.relative_to(installation)): hashlib.sha256(p.read_bytes()).hexdigest()
