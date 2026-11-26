@@ -37,19 +37,21 @@ class MissingAPIContextSelectionTests(unittest.TestCase):
         return [variant for variant in (schema or self.schema)['properties']['selections']['items']['anyOf']
                 if variant['properties']['kind']['enum'] == ['api']]
 
-    def test_existing_currency_is_not_a_candidate_but_missing_fund_id_is(self):
+    def test_existing_currency_is_not_a_candidate_but_missing_valuation_date_is(self):
         offered = set().union(*(fields(variant) for variant in self.api_variants()))
         self.assertNotIn('currency', offered)
-        self.assertIn('fund_id', offered)
+        self.assertNotIn('fund_id', offered)
+        self.assertIn('valuation_date', offered)
         self.assertNotIn('price_kind', offered)
 
-    def test_missing_fund_id_remains_explicit_and_does_not_change_price(self):
+    def test_missing_valuation_date_remains_explicit_and_does_not_change_price(self):
         result = schema_module.decode_original_spans(self.fixture.wire, self.schema,
                                                     (self.task, self.views))['evidence_specs'][0]
-        self.assertEqual(result['calculation_context']['fund_id'], '510500')
+        self.assertEqual(result['calculation_context']['fund_id'], '510500.SH')
         self.assertEqual(result['calculation_context']['currency'], 'CNY')
         self.assertEqual(result['calculation_context_basis']['currency']['kind'], 'api')
-        self.assertEqual(result['calculation_context_basis']['fund_id']['kind'], 'material')
+        self.assertEqual(result['calculation_context_basis']['valuation_date']['kind'], 'material')
+        self.assertEqual(result['calculation_context']['valuation_date'], '2026-06-30')
         self.assertNotIn('source_check', result)
         self.assertFalse(self.task['calculations'])
 
@@ -81,7 +83,7 @@ class MissingAPIContextSelectionTests(unittest.TestCase):
         enum = choice['api_schema']['properties']['evidence_specs']['items']['anyOf'][0]['properties']['api_cell_selections']['items']['enum']
         enum.append(second['candidate_id'])
         groups = schema_module._missing_api_context_variants(choice, [choice, original],
-                    ['currency', 'fund_id', 'price_kind'], False)
+                    ['currency', 'valuation_date', 'price_kind'], False, self.task)
         self.assertEqual(len(groups), 2)
         grouped = {}
         for group in groups:
@@ -98,7 +100,7 @@ class MissingAPIContextSelectionTests(unittest.TestCase):
     def test_other_fund_original_never_supplies_current_cell_context(self):
         choice, original = copy.deepcopy(schema_module._original_span_choices(self.task, self.views))
         original['description']['source']['object_binding']['value'] = '600519.SH'
-        variants = schema_module._missing_api_context_variants(choice, [choice, original], ['fund_id'], False)
+        variants = schema_module._missing_api_context_variants(choice, [choice, original], ['valuation_date'], False, self.task)
         self.assertTrue(variants)
         self.assertTrue(all(not fields(variant) for variant in variants))
 
@@ -144,7 +146,7 @@ class MissingAPIContextSelectionTests(unittest.TestCase):
                 result, receipt = model_object(service, self.task, 'extract', self.fixture.payload, PHASE_FIELDS['extract'])
             request.assert_called_once()
             self.assertEqual(result['evidence_specs'][0]['calculation_context']['currency'], 'CNY')
-            self.assertEqual(result['evidence_specs'][0]['calculation_context']['fund_id'], '510500')
+            self.assertEqual(result['evidence_specs'][0]['calculation_context']['fund_id'], '510500.SH')
             self.assertEqual(receipt['output_protocol'], 'strict_original_spans_v1')
 
     def test_new_missing_only_schema_uses_actual_responses_decoder(self):
