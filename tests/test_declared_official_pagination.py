@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from tests import ROOT
+from tests import ROOT, read_retained_export
 from researchhelper.contracts import ContractError,fingerprint
 from researchhelper.engine import ResearchAgent
 from researchhelper.archive import ResearchArchive
@@ -27,13 +27,13 @@ FIXTURE=ROOT/'result/acceptance/one-sentence-research-1cr8hfby/task.json'
 
 class DeclaredOfficialPaginationTests(unittest.TestCase):
     def setUp(self):
-        raw=FIXTURE.read_bytes();self.before=hashlib.sha256(raw).hexdigest()
+        raw=read_retained_export(FIXTURE);self.before=hashlib.sha256(raw).hexdigest()
         self.task=json.loads(raw);self.task['official_catalogue_pagination_version']=1
         self.guard=patch('socket.socket.connect',side_effect=AssertionError('Offline only'))
         self.guard.start();self.addCleanup(self.guard.stop)
 
     def tearDown(self):
-        self.assertEqual(hashlib.sha256(FIXTURE.read_bytes()).hexdigest(),self.before)
+        self.assertEqual(hashlib.sha256(read_retained_export(FIXTURE)).hexdigest(),self.before)
 
     def test_real_homepage_declares_bounds_without_financial_or_completeness_approval(self):
         before=copy.deepcopy(self.task);view=catalogue_pagination(self.task)
