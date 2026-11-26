@@ -15,7 +15,8 @@
 *{box-sizing:border-box}
 body{margin:0;background:#F2F4F6;color:var(--ink);line-height:1.8;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
 main{max-width:var(--content);padding:28px 32px 32px;margin:24px auto;background:var(--paper);border-top:3px solid var(--red);min-width:0;overflow-wrap:anywhere}
-a{color:var(--red)}
+a{color:var(--SERIES_BENCH_DEEP);text-decoration:none}
+a:hover{color:var(--SERIES_MAIN_DEEP)}
 h1,h2,h3,h4{font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif;text-wrap:balance;color:#1D2D43}
 h1{font-size:28px;line-height:1.35;margin:0 0 10px;max-width:36ch;font-weight:700;letter-spacing:0}
 .report-header{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--rule)}
@@ -62,12 +63,15 @@ dd{margin:0 0 10px}
 .thesis-answer>p:first-child{margin-top:0}
 .thesis-answer:last-child{margin-bottom:0}
 .basis-references{font-size:14px;color:var(--muted)}
-.quantity-link{color:inherit;text-decoration:underline dotted;text-decoration-color:currentColor;text-underline-offset:3px;font-weight:500}
-.quantity-link:hover{text-decoration-style:solid;text-decoration-color:var(--red)}
+/* Let a cited value travel with its unit, with an escape for very narrow paper. */
+.quantity-link,.quantity-with-unit{display:inline-block;max-inline-size:100%;overflow-wrap:anywhere}
+.quantity-with-unit .quantity-link{display:inline}
+.quantity-link{color:var(--SERIES_BENCH_DEEP);font-weight:650}
+.quantity-link:hover{color:var(--SERIES_MAIN_DEEP)}
 .source-quotation{display:block;align-content:center;min-height:44px;margin:12px 0;color:var(--TEXT_SECONDARY);font-size:14px;line-height:1.7;text-decoration:none;max-width:75ch}
 .source-quotation q{font-style:normal}
 .source-quotation q::before,.source-quotation q::after{content:none}
-.source-quotation:hover{color:var(--ink);text-decoration:underline;text-underline-offset:3px}
+.source-quotation:hover{color:var(--SERIES_MAIN_DEEP)}
 .source-quotation-reused{display:block}
 .source-quotation-repeat{display:inline-flex;align-items:center;min-width:44px;min-height:44px;font-size:14px}
 .argument-boundary{font-size:14px;color:var(--muted);margin-top:16px}
@@ -75,7 +79,7 @@ dd{margin:0 0 10px}
 .report-source-line{border-top:1px solid var(--rule);padding-top:14px;margin-top:16px}
 .figure-source{margin-bottom:0}
 figcaption a,.argument-heading h2 a,.argument-heading h3 a,.example-logic h2 a{color:inherit;text-decoration:none}
-figcaption a:hover,.argument-heading h2 a:hover,.argument-heading h3 a:hover,.example-logic h2 a:hover{text-decoration:underline;text-underline-offset:4px}
+figcaption a:hover,.argument-heading h2 a:hover,.argument-heading h3 a:hover,.example-logic h2 a:hover{color:var(--SERIES_MAIN_DEEP)}
 figcaption a,.figure-source a,.report-source-line a{display:inline-block;min-height:44px;align-content:center}
 [hidden]{display:none!important}
 .report-inspecting{overflow:hidden}
@@ -191,6 +195,9 @@ figcaption{font-weight:700;font-size:16px;line-height:1.6;color:#28496F}
 
 /* Two-period financial data reads across, while every raw value stays present. */
 .report-data-scroll{overflow:auto}
+.report-observation-delta th,.report-observation-delta td:nth-child(2){white-space:nowrap}
+.report-observation-delta td:nth-child(3),.report-observation-delta td:nth-child(4){font-variant-numeric:tabular-nums}
+@media screen and (max-width:700px){.report-observation-delta table{min-width:560px}}
 .financial-comparison-table caption{font-size:14px;padding:8px 0}
 .table-unit{float:right;color:var(--muted);font-weight:400}
 .financial-comparison-table th,.financial-comparison-table td{min-width:0;padding:8px;font-size:14px}
@@ -208,7 +215,10 @@ figure{container-type:inline-size}
 .evidence-ledger th:first-child{min-width:58px;text-align:left}
 .evidence-ledger tbody tr:hover{background:var(--NOTE_BG,#F4F5F7)}
 .evidence-ledger a{color:inherit;text-decoration:none}
-.evidence-ledger a:hover{color:var(--SERIES_MAIN,#B83C46);text-decoration:underline}
+.evidence-ledger a:hover{color:var(--SERIES_MAIN_DEEP)}
 .evidence-ledger a:focus-visible{outline:2px solid var(--SERIES_MAIN,#B83C46);outline-offset:3px}
 @container(min-width:680px){.evidence-layout[data-ledger-columns="2"],.evidence-layout[data-ledger-columns="3"]{grid-template-columns:minmax(0,1.25fr) minmax(0,1fr)}}
 @media print{.evidence-ledger{overflow:visible}.evidence-ledger th,.evidence-ledger td{padding:3px 5px!important}.evidence-layout{break-inside:avoid}}
+
+.draft-tracking-rule{margin:10px 0;padding-top:7px;border-top:1px solid var(--rule);font-size:inherit;line-height:1.6;break-inside:avoid}
+.draft-tracking-rule p{margin:3px 0;overflow-wrap:anywhere}
