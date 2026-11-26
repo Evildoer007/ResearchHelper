@@ -81,12 +81,17 @@ class DraftFigureTests(unittest.TestCase):
         self.assertEqual(spec['values'], sorted([row['value'] for row in facts], reverse=True)[:15])
         content = copy.deepcopy(self.content)
         content['draft']['facts'] = facts
+        content['source_records'] = [dict(source,task_id=content['task_id'],research_version=content['research_version'])]
         content.pop('content_hash', None);content['content_hash'] = fingerprint(content)
         html = render(content, ROOT)
-        self.assertEqual(html.count('<tr><td>'), 300)
+        from lxml import html as html_parser
+        tree=html_parser.document_fromstring(html)
+        self.assertEqual(len(tree.get_element_by_id('complete-report-data').xpath('.//tbody/tr')),300)
+        self.assertFalse(tree.xpath('//main//figure'))
+        self.assertEqual(len(spec['data_refs']),15)
         self.assertTrue('000001.SZ' in html)
 
-    def test_actual_financial_report_preserves_text_and_places_cashflow_beside_its_logic(self):
+    def test_actual_financial_report_keeps_cashflow_prose_and_original_amounts(self):
         before = copy.deepcopy(self.content)
         html = render(self.content, ROOT)
         self.assertEqual(self.content, before)
@@ -99,13 +104,14 @@ class DraftFigureTests(unittest.TestCase):
         detail = render(self.content, ROOT, report_profile='detailed')
         tree = html_parser.document_fromstring(detail)
         third = tree.get_element_by_id('logic-3')
-        self.assertTrue(third.xpath('.//div[@class="chart"]'))
-        self.assertIn('经营活动产生的现金流量净额', third.text_content())
-        self.assertGreaterEqual(len(tree.xpath('//main//div[@class="chart"]')), 5)
+        self.assertIn('经营活动现金流量净额', third.text_content())
+        self.assertFalse(tree.xpath('//main//div[@class="chart"]'))
+        source = tree.get_element_by_id('data')
+        for row in self.content['draft']['facts']:
+            self.assertTrue(source.xpath('.//tr[@data-observation-id=$ref]', ref=row['id']))
         for logic in self.content['draft']['logics']:
             self.assertIn(logic['analysis'], html)
             self.assertIn(logic['analysis'], detail)
-        self.assertIn('connectNulls:false', detail)
         self.assertNotIn('<details', html)
         self.assertNotIn('<details', detail)
         self.assertEqual(self.content, before)
