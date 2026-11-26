@@ -20,6 +20,7 @@ class CurrentDemoSyncTests(unittest.TestCase):
         self.base = Path(temporary.name).resolve()
         self.root = self.base / 'ResearchHelper'
         self.root.mkdir()
+        (self.root / 'VERSION').write_text('0.1.0\n')
         self.desktop = self.base / 'desktop-demo'
         self.desktop.mkdir()
         self.trash = self.base / 'Trash'
@@ -65,9 +66,9 @@ class CurrentDemoSyncTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch.object(sync, 'DESTINATION', self.desktop).start()
 
-    def bind_source(self):
-        manifest = {'source': 'ResearchHelper', 'version': '0.10.0',
-                    'runtime': {'protocol_id': 'researchhelper.module-request'}, 'files': {
+    def bind_source(self, version='0.1.0'):
+        manifest = {'source': 'ResearchHelper', 'version': version,
+                    'runtime': {'version': version, 'protocol_id': 'researchhelper.module-request'}, 'files': {
                         file.relative_to(self.source).as_posix(): sync.digest(file)
                         for file in self.source.rglob('*') if file.is_file() and file.name != 'manifest.json'}}
         (self.source / 'manifest.json').write_text(json.dumps(manifest))
@@ -98,6 +99,7 @@ class CurrentDemoSyncTests(unittest.TestCase):
         before = [sync.untouched_state(target, {'index.html', 'public/workspace.js'}) for target in self.targets]
         result = self.run_sync()
         self.assertEqual(result['status'], 'synced_offline_candidate')
+        self.assertEqual(result['version'], '0.1.0')
         self.assertFalse(result['native_ui_verified'])
         self.assertFalse(result['published'])
         self.assertEqual(result['files_verified'], 8)
@@ -108,6 +110,12 @@ class CurrentDemoSyncTests(unittest.TestCase):
         recovery = Path(result['recovery_directory'])
         self.assertFalse(list(recovery.rglob('*.sqlite')))
         self.assertEqual((recovery / '0/index.html').read_text(), 'previous retained entry')
+
+    def test_new_source_version_controls_demo_validation_and_sync_receipt(self):
+        (self.root / 'VERSION').write_text('0.2.0\n')
+        self.assert_rejected_unchanged()
+        self.bind_source('0.2.0')
+        self.assertEqual(self.run_sync()['version'], '0.2.0')
 
     def test_repeat_is_idempotent_without_new_backup(self):
         self.run_sync()
@@ -242,3 +250,72 @@ class CurrentDemoSyncTests(unittest.TestCase):
             return result
         with patch.object(sync.shutil, 'copyfile', side_effect=change_receipt):
             self.assert_rejected_unchanged()
+
+    def permanent_policy(self):
+        folder=self.root/'packaging'
+        folder.mkdir(exist_ok=True)
+        (folder/'release-retention.json').write_text(json.dumps(dict(
+            schema='researchhelper.release-retention.v2',macos='current_candidate_only',recovery='permanent')))
+
+    def test_permanent_policy_defaults_to_the_owned_recovery_namespace(self):
+        self.permanent_policy()
+        original=self.contents()
+        result=sync.sync_current(self.candidate_path,self.package_path,self.browser_path,root=self.root)
+        backup=Path(result['recovery_directory'])
+        self.assertEqual(backup.parent,self.root/'result/demo-sync-recovery')
+        self.assertEqual((backup/'0/index.html').read_bytes(),original[0]['index.html'])
+        self.assertEqual(list(self.trash.iterdir()),[])
+        for target in self.targets:
+            self.assertEqual((target/'.local/private.sqlite').read_bytes(),b'private original')
+        self.assertEqual(result['status'],'synced_offline_candidate')
+
+    def test_explicit_owned_namespace_is_created_and_remains_idempotent(self):
+        recovery=self.root/'result/demo-sync-recovery'
+        first=sync.sync_current(self.candidate_path,self.package_path,self.browser_path,root=self.root,recovery=recovery)
+        backups=list(recovery.iterdir())
+        second=sync.sync_current(self.candidate_path,self.package_path,self.browser_path,root=self.root,recovery=recovery)
+        self.assertEqual(Path(first['recovery_directory']).parent,recovery)
+        self.assertEqual(second['changed_files'],0)
+        self.assertIsNone(second['recovery_directory'])
+        self.assertEqual(list(recovery.iterdir()),backups)
+
+    def test_other_in_repository_recovery_paths_cannot_mutate_targets(self):
+        original=self.contents()
+        for recovery in (self.root,self.root/'demo',self.root/'result/reports',
+                         self.root/'result/demo-sync-recovery/nested'):
+            with self.subTest(recovery=recovery),self.assertRaises(ValueError):
+                sync.sync_current(self.candidate_path,self.package_path,self.browser_path,
+                                  root=self.root,recovery=recovery)
+            self.assertEqual(self.contents(),original)
+
+    def test_linked_owned_namespace_is_rejected_before_target_mutation(self):
+        self.permanent_policy()
+        recovery=self.root/'result/demo-sync-recovery'
+        recovery.symlink_to(self.trash,target_is_directory=True)
+        original=self.contents()
+        with self.assertRaises(ValueError):
+            sync.sync_current(self.candidate_path,self.package_path,self.browser_path,root=self.root)
+        self.assertEqual(self.contents(),original)
+        self.assertEqual(list(self.trash.iterdir()),[])
+
+    def test_project_recovery_retains_complete_rollback_after_a_copy_failure(self):
+        self.permanent_policy()
+        original=self.contents();commit=sync.commit_file;calls=[]
+        def fail_second(staged,target):
+            calls.append(target)
+            if len(calls)==2:raise OSError('Controlled project recovery copy failure')
+            commit(staged,target)
+        with patch.object(sync,'commit_file',side_effect=fail_second),self.assertRaises(OSError):
+            sync.sync_current(self.candidate_path,self.package_path,self.browser_path,root=self.root)
+        self.assertEqual(self.contents(),original)
+        backup=next((self.root/'result/demo-sync-recovery').iterdir())
+        receipt=json.loads((backup/'ResearchHelper-recovery.json').read_text())
+        self.assertEqual(receipt['status'],'failed')
+        self.assertEqual(receipt['rollback_conflicts'],[])
+
+    def test_legacy_default_uses_only_the_selected_temporary_home_trash(self):
+        legacy=self.base/'.Trash';legacy.mkdir()
+        with patch.object(sync.Path,'home',return_value=self.base):
+            result=sync.sync_current(self.candidate_path,self.package_path,self.browser_path,root=self.root)
+        self.assertEqual(Path(result['recovery_directory']).parent,legacy)
+        self.assertFalse((self.root/'result/demo-sync-recovery').exists())
