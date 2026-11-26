@@ -98,7 +98,7 @@ class ResearchBriefTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("source_research_brief_skill", ROOT / "core/session.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        directory = tempfile.TemporaryDirectory(prefix="brief-host-project-", dir=ROOT / "result/acceptance")
+        directory = tempfile.TemporaryDirectory(prefix="brief-host-project-")
         self.addCleanup(directory.cleanup)
         session = module.Session(directory.name)
         task = session.create("核对合成政策与对象影响", entry="事件", intent="验证观点", cutoff=CUTOFF)
