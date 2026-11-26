@@ -41,6 +41,6 @@ Skill源码在SKILL.md、core/session.py、references和agents。项目级安装
 
 源码目录不放按日期累积的修补说明、旧Qt或报价实现、一次性迁移脚本、重复发行副本。docs只维护当前说明；references只维护宿主需要的指南；接口细节以实际工具Schema为准。
 
-测试保留现用用例及其依赖。旧版单次发布脚本退出现用目录，真实数据样本仍被回归测试使用时保留。当前报告、原件、生产库、现用App、Skill与两份demo不是清理对象。
+测试保留现用用例及其依赖。共享测试类在定义文件收集，显式派生的本地测试类保留其独立场景。真实研究回放保留原始输入依赖，缺少原件不计为通过。旧版单次发布脚本退出现用目录，真实数据样本仍被回归测试使用时保留。当前报告、原件、生产库、现用App、Skill与两份demo不是清理对象。
 
 不修改OptionHelper、DataFetcher或InvestBuddy，不重置Git、不自动push。清理清单与恢复位置统一记录在result/maintenance/repository-cleanup-20261028。
