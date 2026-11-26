@@ -11,7 +11,8 @@ from researchhelper.data_requirements import reported_duration_label
 from researchhelper.financial_sources import (financial_table_candidates,financial_context_cells,
     financial_statement_unit_scope,financial_statement_unit_scope_enabled,
     financial_reporting_currency_choices,validate_financial_metric_number,
-    financial_reporting_standard_choices,validate_financial_standard_basis,expand_financial_value_references)
+    financial_reporting_standard_choices,validate_financial_standard_basis,expand_financial_value_references,
+    validate_financial_statement_scope)
 from researchhelper.pdf_material import duration_statement_part,aligned_statement_part,TABLE_EXTRACT_VERSIONS
 
 fixture=importlib.import_module((__package__+'.' if __package__ else '')+'financial_duration_fixture')
@@ -97,6 +98,39 @@ class FinancialStatementUnitScopeTests(unittest.TestCase):
         self.rebind_projection()
         self.assertIsNone(financial_statement_unit_scope(self.record,'第67页期间列式文本'))
 
+    def test_unscoped_unit_cannot_come_from_another_page_or_a_later_table(self):
+        cell=next(cell for cell in self.cells() if cell['metric']=='revenue')
+        proposal=copy.deepcopy(cell['proposal_fields'])
+        proposal['calculation_context']=dict(metric='revenue',period=proposal['period'])
+        locator=proposal['record_locator']
+        anchor=dict(part=locator['part'],quote=proposal['text'])
+        validate_financial_metric_number(proposal,self.record,anchor,task=self.task)
+
+        locator.pop('financial_unit_scope')
+        locator['unit_part']='第7页'
+        proposal.update(raw_unit='元',unit='元')
+        with self.assertRaises(ContractError):
+            validate_financial_metric_number(proposal,self.record,anchor,task=self.task)
+
+        page=next(p for p in self.record['snapshot']['material']['parts'] if p['locator']=='第67页')
+        page['text']+='\n其他明细表\n单位：元'
+        self.rebind_projection()
+        locator['unit_part']='第67页'
+        with self.assertRaises(ContractError):
+            validate_financial_metric_number(proposal,self.record,anchor,task=self.task)
+        self.assertEqual({cell['metric'] for cell in self.cells()},{'operating_cash_flow'})
+
+    def test_local_unit_after_statement_caption_takes_precedence(self):
+        page=next(p for p in self.record['snapshot']['material']['parts'] if p['locator']=='第67页')
+        page['text']='其他明细表\n单位：元\n'+page['text']
+        self.rebind_projection()
+        self.assertEqual({cell['metric'] for cell in self.cells()},{'operating_cash_flow'})
+
+        page['text']=page['text'].replace('2、合并利润表','2、合并利润表\n单位：万元')
+        self.rebind_projection()
+        self.assertEqual({cell['metric']:cell['proposal_fields']['raw_unit'] for cell in self.cells()},
+                         dict(revenue='万元',operating_cost='万元',net_profit='万元',operating_cash_flow='千元'))
+
     def test_altered_scope_reference_is_rejected_at_numeric_validation(self):
         cell=self.cells()[0];proposal=copy.deepcopy(cell['proposal_fields'])
         proposal['calculation_context']=dict(metric=cell['metric'],period=proposal['period'])
@@ -104,6 +138,18 @@ class FinancialStatementUnitScopeTests(unittest.TestCase):
         proposal['record_locator']['financial_unit_scope']['unit']='元'
         with self.assertRaises(ContractError):
             validate_financial_metric_number(proposal,self.record,dict(part=proposal['record_locator']['part'],quote=proposal['text']),task=self.task)
+
+    def test_actual_table_cannot_use_the_inline_path_after_omitting_its_column(self):
+        cell = self.cells()[0]
+        proposal = copy.deepcopy(cell['proposal_fields'])
+        proposal.update(artifact_id=self.record['id'], calculation_context=dict(
+            metric=cell['metric'], period=proposal['period'], accounting_scope='consolidated'))
+        scope = proposal['record_locator']['financial_unit_scope']
+        anchor = dict(part=scope['target_part'], quote=scope['statement_caption'])
+        validate_financial_statement_scope(proposal, self.record, anchor)
+        proposal['record_locator'].pop('financial_column')
+        with self.assertRaises(ContractError):
+            validate_financial_statement_scope(proposal, self.record, anchor)
 
     def test_old_task_cannot_adopt_a_new_scope_reference(self):
         cell=self.cells()[0];proposal=copy.deepcopy(cell['proposal_fields']);proposal['artifact_id']=self.record['id']
