@@ -27,6 +27,10 @@ def ordinary(path):
     return path
 
 
+def directory_link(path):
+    return path.is_symlink() or path.is_junction()
+
+
 def payload_name(name):
     if not isinstance(name, str):
         raise RuntimeError('Skill清单文件名无效')
@@ -68,7 +72,7 @@ def empty_extra_directories(target, record):
     expected = {parent.as_posix() for name in set(record['files']) | {'manifest.json'}
                 for parent in PurePosixPath(name).parents if parent.as_posix() != '.'}
     extra = sorted(file.relative_to(target).as_posix() for file in target.rglob('*')
-                   if file.is_dir() and not file.is_symlink() and file.relative_to(target).as_posix() not in expected)
+                   if file.is_dir() and not directory_link(file) and file.relative_to(target).as_posix() not in expected)
     for name in extra:
         payload_name(name + '/empty-directory-marker')
         if any((target / name).iterdir()):
@@ -77,7 +81,7 @@ def empty_extra_directories(target, record):
 
 
 def verify_installation(target, *, preserve_empty_directories=False):
-    if target.is_symlink() or not target.is_dir():
+    if directory_link(target) or not target.is_dir():
         raise RuntimeError('既有Skill不是受控普通目录，拒绝覆盖')
     raw = target / 'manifest.json'
     if raw.is_symlink() or not raw.is_file():
@@ -89,8 +93,8 @@ def verify_installation(target, *, preserve_empty_directories=False):
     actual_files, actual_directories = set(), set()
     for file in target.rglob('*'):
         name = file.relative_to(target).as_posix()
-        if file.is_symlink():
-            raise RuntimeError('既有Skill含符号链接，拒绝覆盖')
+        if directory_link(file):
+            raise RuntimeError('既有Skill含链接，拒绝覆盖')
         if file.is_file():
             actual_files.add(name)
         elif file.is_dir():
@@ -136,13 +140,77 @@ def verify_archive(archive, expected_sha256):
 
 def check_discovery(discovery, target):
     for parent in (target.parent, discovery.parent.parent, discovery.parent):
-        if parent.is_symlink() or parent.exists() and not parent.is_dir():
+        if directory_link(parent) or parent.exists() and not parent.is_dir():
             raise RuntimeError('项目Skill或发现目录被其他路径占用')
-    if discovery.is_symlink():
+    if directory_link(discovery):
         if discovery.resolve() != target:
             raise RuntimeError('项目发现入口指向其他Skill，保留原入口')
     elif discovery.exists():
         raise RuntimeError('项目发现入口已有普通文件或目录，拒绝覆盖')
+
+
+def _windows_discovery_junction(discovery, target):
+    from _winapi import CreateJunction
+
+    # The staging folder is ours even if junction creation only partially
+    # succeeds. A Windows rename refuses an occupied discovery path.
+    with tempfile.TemporaryDirectory(prefix='.researchhelper-discovery-', dir=discovery.parent) as folder:
+        stage = Path(folder) / 'link'
+        CreateJunction(str(target), str(stage))
+        if not stage.is_junction() or stage.resolve() != target:
+            raise RuntimeError('Windows项目Skill目录联接不匹配')
+        stage.rename(discovery)
+
+
+def publish_discovery(discovery, target):
+    check_discovery(discovery, target)
+    if directory_link(discovery):
+        return False
+    discovery.parent.mkdir(parents=True, exist_ok=True)
+    if sys.platform == 'win32':
+        _windows_discovery_junction(discovery, target)
+    else:
+        discovery.symlink_to('../../.skills/researchhelper', target_is_directory=True)
+    return True
+
+
+def transfer_installation(source, destination, expected, *, preserve_empty_directories):
+    """Transfer verified files without a cross-folder directory rename.
+
+    A partial transfer rolls back only the bytes this operation moved. Unknown
+    concurrent files are never overwritten or removed. This matches the
+    repository's existing release-retention approach to directory transfers.
+    """
+    verify=lambda path:verify_installation(path,preserve_empty_directories=preserve_empty_directories)
+    if verify(source)!=expected:raise RuntimeError('Skill转移前的清单已变化')
+    record=manifest_record((source/'manifest.json').read_bytes(),legacy=True)
+    files=dict(record['files'],**{'manifest.json':expected})
+    directories=sorted([source]+[path for path in source.rglob('*') if path.is_dir()],key=lambda path:len(path.parts))
+    destination.mkdir(exist_ok=False);moved=[]
+    try:
+        for directory in directories:
+            target=destination/directory.relative_to(source)
+            target.mkdir(parents=True,exist_ok=True)
+            shutil.copystat(directory,target,follow_symlinks=False)
+        for name,value in sorted(files.items()):
+            original=source/name;target=destination/name
+            if original.is_symlink() or not original.is_file() or digest(original)!=value:
+                raise RuntimeError('Skill文件在转移期间变化，停止更新')
+            os.replace(original,target);moved.append(name)
+        if verify(destination)!=expected:raise RuntimeError('Skill转移后的清单不一致')
+        for directory in reversed(directories):directory.rmdir()
+    except BaseException:
+        for directory in directories:directory.mkdir(parents=True,exist_ok=True)
+        for name in reversed(moved):
+            original=source/name;target=destination/name
+            if original.exists() or original.is_symlink() or target.is_symlink() or digest(target)!=files[name]:
+                raise RuntimeError('Skill转移期间出现其他修改，保留安装与备份等待核对') from None
+            os.replace(target,original)
+        # rmdir preserves any unexpected file instead of erasing its directory.
+        for directory in sorted([path for path in destination.rglob('*') if path.is_dir()],key=lambda path:len(path.parts),reverse=True):
+            if not any(directory.iterdir()):directory.rmdir()
+        if not any(destination.iterdir()):destination.rmdir()
+        raise
 
 
 def install_project_skill(archive, *, project_root=ROOT, expected_sha256, recovery_root=None,
@@ -158,7 +226,7 @@ def install_project_skill(archive, *, project_root=ROOT, expected_sha256, recove
     discovery = root / '.agents/skills/researchhelper'
     check_discovery(discovery, target)
     verify = lambda path: verify_installation(path, preserve_empty_directories=preserve_empty_directories)
-    before = verify(target) if target.exists() or target.is_symlink() else None
+    before = verify(target) if target.exists() or directory_link(target) else None
     extras = empty_extra_directories(target, manifest_record((target / 'manifest.json').read_bytes(), legacy=True)) if before else []
     if any(name == extra or name.startswith(extra + '/') for extra in extras for name in manifest['files']):
         raise RuntimeError('新安装会占用未知空目录，保留原安装')
@@ -168,12 +236,9 @@ def install_project_skill(archive, *, project_root=ROOT, expected_sha256, recove
               'discovery': str(discovery), 'global_installation_changed': False,
               'research_data_changed': False, 'recovery': None, 'preserved_empty_directories': extras}
     if before == desired:
-        if not discovery.is_symlink():
-            discovery.parent.mkdir(parents=True, exist_ok=True)
-            discovery.symlink_to('../../.skills/researchhelper', target_is_directory=True)
+        publish_discovery(discovery, target)
         return record
-    recovery_root = ordinary(recovery_root if recovery_root is not None else
-        Path.home() / '.Trash' if sys.platform == 'darwin' else root / 'result/skill-installation-recovery')
+    recovery_root = ordinary(recovery_root if recovery_root is not None else root / 'result/skill-installation-recovery')
     if recovery_root == target or recovery_root.is_relative_to(target) or target.is_relative_to(recovery_root):
         raise RuntimeError('Skill恢复目录不能覆盖安装目录')
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -205,15 +270,12 @@ def install_project_skill(archive, *, project_root=ROOT, expected_sha256, recove
             backup = recovery_root / ('ResearchHelper-project-skill-' + stamp + '-' + before[:12])
             if backup.exists():
                 raise RuntimeError('恢复位置已存在，拒绝覆盖')
-            os.replace(target, backup)
-        elif target.exists() or target.is_symlink():
+            transfer_installation(target,backup,before,preserve_empty_directories=preserve_empty_directories)
+        elif target.exists() or directory_link(target):
             raise RuntimeError('复制期间出现既有Skill，未覆盖')
         os.replace(stage, target)
         promoted = True
-        if not discovery.is_symlink():
-            discovery.parent.mkdir(parents=True, exist_ok=True)
-            discovery.symlink_to('../../.skills/researchhelper', target_is_directory=True)
-            discovery_created = True
+        discovery_created = publish_discovery(discovery, target)
         check_discovery(discovery, target)
         assert verify(target) == desired
         record['recovery'] = str(backup) if backup else None
@@ -225,10 +287,13 @@ def install_project_skill(archive, *, project_root=ROOT, expected_sha256, recove
             if verify(target) != desired:
                 raise RuntimeError('新Skill在更新期间被修改，未覆盖；旧副本位于' + str(backup))
             os.replace(target, stage)
-        if backup and backup.exists() and not target.exists() and not target.is_symlink():
-            os.replace(backup, target)
-        if discovery_created and discovery.is_symlink() and discovery.resolve() == target:
-            discovery.unlink()
+        if backup and backup.exists() and not target.exists() and not directory_link(target):
+            transfer_installation(backup,target,before,preserve_empty_directories=preserve_empty_directories)
+        if discovery_created and directory_link(discovery) and discovery.resolve() == target:
+            if discovery.is_junction():
+                discovery.rmdir()
+            else:
+                discovery.unlink()
         raise
     finally:
         if stage.exists():
