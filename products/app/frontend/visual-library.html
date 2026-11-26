@@ -1,7 +1,8 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ResearchHelper图表方案</title><link rel="stylesheet" href="visual-gallery.css"></head><body>
-<header class="library-header"><div class="brand"><img src="app-icon.svg" alt="" width="38" height="38"><h1>图表方案</h1></div><div class="header-actions"><button id="apply" hidden>用于报告</button><button id="export-image">导出图片</button></div></header>
-<main><div id="palettes" class="palettes" role="group" aria-label="配色风格"></div><nav id="families" aria-label="图表类型"></nav><div id="targets" class="targets" hidden></div>
-<section class="preview"><div class="preview-heading"><div><h2 id="preview-title"></h2><p id="preview-purpose"></p></div><span id="data-origin" class="data-origin"></span></div><div id="active-chart" role="img"></div><div class="preview-footer"><span id="data-source"></span><button id="requirements" aria-label="查看数据要求">数据要求</button></div></section>
+<header class="library-header"><div class="brand"><img src="app-icon.svg" alt="" width="38" height="38"><h1>图表方案</h1></div><div class="header-actions"><button id="apply" hidden>应用到报告</button><button id="export-image">导出图片</button></div></header>
+<main><div id="targets" class="targets" role="group" aria-label="报告图表" hidden></div>
+<section class="preview"><div class="preview-heading"><h2 id="preview-title"></h2><label class="theme-control">配色<select id="theme-select"></select></label></div><div id="active-chart" role="img"></div><div class="preview-footer"><p><strong id="data-origin"></strong><span id="data-source"></span></p><button id="requirements" aria-label="查看数据要求">数据要求</button></div></section>
+<nav id="families" aria-label="图表用途"></nav>
 <div id="cards" class="scheme-grid"></div><p id="feedback" role="status" aria-live="polite"></p></main>
 <dialog id="requirements-dialog"><div class="dialog-heading"><h2>数据要求</h2><button id="close-requirements" aria-label="关闭">×</button></div><p id="requirements-text"></p></dialog>
 <script src="echarts.min.js"></script><script src="visual-catalog-data.js"></script><script src="visual-library.js"></script><script src="visual-gallery-data.js"></script><script src="visual-gallery.js"></script></body></html>
