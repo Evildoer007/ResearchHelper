@@ -83,12 +83,13 @@ def configuration_lock(path):
         return _LOCKS.setdefault(str(Path(path).absolute()), threading.RLock())
 
 
-def owned_bytes(path, *, maximum=131072):
+def owned_bytes(path, *, maximum=131072, allow_multiple_links=False):
     path = Path(path)
     if path.is_symlink():
         raise ContractError("本机配置不能使用软链接")
     try:
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(path, flags)
     except FileNotFoundError:
         if path.is_symlink():
             raise ContractError("本机配置不能使用软链接") from None
@@ -97,7 +98,9 @@ def owned_bytes(path, *, maximum=131072):
         raise ContractError("本机配置无法安全读取") from None
     try:
         metadata = os.fstat(descriptor)
-        if (not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1 or
+        if maximum is None:
+            maximum = metadata.st_size
+        if (not stat.S_ISREG(metadata.st_mode) or (not allow_multiple_links and metadata.st_nlink != 1) or
                 os.name != "nt" and metadata.st_uid != os.getuid() or metadata.st_size > maximum):
             raise ContractError("本机配置文件状态异常")
         raw = os.read(descriptor, maximum + 1)
