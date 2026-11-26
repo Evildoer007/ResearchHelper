@@ -18,8 +18,8 @@ class RequestedAssetDiagnosticInputTests(unittest.TestCase):
                 for topic in ('证券行业股票','算力产业链股票'):
                     params=dict(searchstring=topic,searchtype='stock')
                     self.assertEqual(validate_source_request(task,'ifind','smart_stock_picking',params),params)
-                task['question']='仅检查行业和产业链，不指定主题'
+                generic=agent.create('仅检查行业和产业链，不指定主题',entry='混合',research_mode='current')
                 with self.assertRaises(ContractError):
-                    validate_source_request(task,'ifind','smart_stock_picking',dict(searchstring='证券行业股票',searchtype='stock'))
+                    validate_source_request(generic,'ifind','smart_stock_picking',dict(searchstring='证券行业股票',searchtype='stock'))
             finally:
                 agent.close_runtime()
