@@ -3,6 +3,7 @@
 import sys
 import hashlib
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.dont_write_bytecode = True
@@ -11,11 +12,13 @@ sys.path.insert(0, str(INSTALLATION))
 if (INSTALLATION / 'core/src/researchhelper').is_dir():
     from core.bootstrap import configure_imports
     configure_imports()
-from researchhelper.archive import project_store
+from researchhelper.archive import project_store, project_workspace_path
 from researchhelper.engine import ResearchAgent
-from researchhelper.contracts import ContractError, canonical, context, fingerprint
+from researchhelper.contracts import ContractError, ExecutionTimeExhausted, canonical, context, fingerprint, recovery_time_block
 from researchhelper.evidence import snapshot_record, data_request_contract
+from researchhelper.source_catalogue import source_catalogue
 from researchhelper.planning import plan_preservation_contract, question_contract, research_brief
+from researchhelper.runtime import StoreLease
 from researchhelper.reasoning import evidence_contract, analysis_contract, calculation_plan_contract, extractable_source_views
 from researchhelper.settings import DataSettings
 from researchhelper.source_reader import retained_reading
@@ -60,38 +63,149 @@ class Session:
         self.agent = ResearchAgent(self.archive, INSTALLATION, offline=not allow_network, source_credentials=credentials,
             isolate_sources=allow_network, isolate_materials=True, require_argument_support=True, draft_first=True)
 
+    @contextmanager
+    def _executing(self, task_id):
+        """Only this task is exclusive, including recovery after a host exits."""
+        if not isinstance(task_id, str) or not task_id:
+            raise ContractError('研究任务标识无效')
+        lease = StoreLease(self.archive.root, task_id=task_id)
+        try:
+            yield self.agent.recover_interrupted_task(task_id)
+        finally:
+            lease.close()
+
     def create(self, question, **options):
         options.setdefault("research_mode", "historical" if options.get("cutoff") else "current")
         return self.agent.create(question, **options)
 
-    def follow_up(self, task_id, message):
+    def follow_up(self, task_id, message, *, expected_revision=None):
         """Prepare a related question; the host still owns all reasoning."""
-        return self.agent.follow_up(task_id, message, start=False)
+        return self.agent.follow_up(task_id, message, start=False, expected_revision=expected_revision)
 
     def plan(self, task_id, questions, reason, expected_input_hash=None):
         return self.agent.revise_plan(task_id, questions, reason, expected_input_hash)
 
-    def tools(self, task_id, *, reading_hash=None):
+    @staticmethod
+    def _delivery_recovery(task):
+        """Describe local work only after completed prose or content was retained."""
+        if task['status'] not in ('失败','已取消'):
+            return None
+        from researchhelper.draft_workflow import has_composed_draft, retained_submission
+
+        content = bool(task.get('pending_content'))
+        composed = not content and has_composed_draft(task)
+        submission = not (content or composed) and retained_submission(task) is not None
+        if not (content or composed or submission):
+            return None
+        result = dict(action='retry_save(task_id)',retained_content=content or composed,
+            retained_submission=submission,local_composition=submission,
+            local_presentation_only=content,local_model_calls=False,data_requests=False)
+        if composed:
+            result['local_report_packaging'] = True
+        return result
+
+    def tools(self, task_id, *, reading_hash=None, scope='all'):
         """Read the same implemented request grammar used by the App planner."""
+        if scope not in ('all', 'first_report', 'acquisition'):
+            raise ContractError('工具范围须为all、acquisition或first_report')
+        if scope != 'all' and reading_hash is not None:
+            raise ContractError('原件选择绑定须使用完整工具')
         task = self.archive.get(task_id)
+        if scope == 'acquisition':
+            from researchhelper.draft_workflow import _include_conversation, _include_update, direct_readout
+            from researchhelper.draft_sources import (acquisition_coverage,
+                direct_financial_requests, stated_financial_supplements, stated_latest_requests,
+                stated_window_requests)
+            from researchhelper.knowledge import ResearchKnowledge
+            from researchhelper.planning import draft_research_context, draft_research_scope
+
+            first_report = task.get('draft_first_version') == 1
+            result = dict(research_brief=research_brief(task),
+                data_requests=data_request_contract(task, first_report=first_report),
+                source_catalogue=source_catalogue(task), research_context=draft_research_context(task),
+                knowledge_context=ResearchKnowledge().draft_context(task),
+                acquisition_coverage=acquisition_coverage(task))
+            if first_report:
+                result['prepare'] = 'draft(task_id, defer_delivery=True, data_requests=[])'
+                result['research_scope'] = draft_research_scope(task)
+                from researchhelper.official_sources import (direct_fomc_rate_request, fomc_statement_requests,
+                                                             research_fomc_rate_request)
+                from researchhelper.economic_sources import research_economic_searches, research_economic_scopes
+
+                if not self.agent.offline:
+                    statement_scope = direct_fomc_rate_request(task) or research_fomc_rate_request(task)
+                    if statement_scope is not None:
+                        result['stated_official_requests'] = fomc_statement_requests(task, statement_scope)
+                    if scopes := research_economic_scopes(task):
+                        result['stated_economic_searches'] = research_economic_searches(task, scopes)
+                from researchhelper.financial_sources import direct_financial_scope
+
+                readout = None if task.get('host_checkpoint') else direct_readout(task)
+                if not readout and not self.agent.offline and not task.get('host_checkpoint'):
+                    fallback = direct_readout(task, policy_without_model=True)
+                    if fallback and fallback[0] == 'valuation_research':
+                        readout = fallback
+                if readout is not None:
+                    kind, plan = readout
+                    result['direct_report'] = 'draft(task_id)'
+                    if kind == 'compound' and plan['financial'] and (plan['points'] or plan['latest']):
+                        result['direct_financial_market_report'] = 'draft(task_id)'
+                if not self.agent.offline and (scope := direct_financial_scope(task)) is not None:
+                    result['direct_financial_report'] = direct_financial_requests(task, result['acquisition_coverage'], scope)
+                else:
+                    requests = stated_financial_supplements(task, result['acquisition_coverage'])
+                    if requests:
+                        result['stated_financial_requests'] = requests
+                requests = stated_window_requests(task, include_financial=False)
+                if requests:
+                    result['stated_window_requests'] = requests
+                requests = stated_latest_requests(task, result['acquisition_coverage'])
+                if requests:
+                    result['stated_latest_requests'] = requests
+            _include_update(task, result, include_prior_findings=False)
+            rule = _include_conversation(task, result, include_prior_findings=False)
+            if rule:
+                result['conversation_rule'] = rule
+            return result
+        if scope == 'first_report' and task.get('draft_first_version') != 1:
+            raise ContractError('当前任务没有首稿工具，请读取默认完整工具')
         reading = retained_reading(task, reading_hash) if reading_hash is not None else None
         result = {"questions": question_contract(task), "plan_preservation": plan_preservation_contract(task),
                 "research_brief": research_brief(task),
-                "data_requests": data_request_contract(task),
+                "data_requests": data_request_contract(task, first_report=scope == 'first_report'),
+                "source_catalogue": source_catalogue(task),
                 "calculations": calculation_plan_contract(task),
                 "evidence": evidence_contract(task, reading['views'] if reading else None), "analysis": analysis_contract(task),
                 "argument_support": {"required": argument_review_required(task),
                     "prepare": "run(defer_delivery=True)", "inputs": "argument_review_inputs",
-                    "submit": "review_arguments", "deliver": "deliver", "local_model_calls": False},
+                    "submit": "review_arguments", "resume": "resume(defer_delivery=True)",
+                    "deliver": "deliver", "local_model_calls": False},
                 "version_review": self.agent.review_baseline(task) if task.get("update_from") else None}
+        if task["status"] == "待开始" and task["batch"] == 0:
+            result['material_selection'] = dict(remove='remove_material(task_id, name, digest, expected_version=..., expected_revision=..., retained_files=...)',
+                expected_version=task['version'], expected_revision=task['revision'], originals_retained=True, local_model_calls=False)
+        recovery = self._delivery_recovery(task)
+        blocked = recovery_time_block(task, save_only=recovery is not None)
+        if blocked:
+            result['recovery_block'] = dict(code=ExecutionTimeExhausted.code, reason=blocked)
+        if recovery is not None:
+            if blocked:
+                recovery['action'] = None
+            result['delivery_recovery'] = recovery
+        elif not blocked and task['status'] in ('失败', '已取消'):
+            from researchhelper.draft_workflow import has_retained_draft_data
+            if has_retained_draft_data(task):
+                result['delivery_recovery'] = dict(action='finish_draft(task_id)',
+                    retained_data=True, local_model_calls=False, data_requests=False)
         if task.get('delivery'):
             result['report_corrections'] = dict(read='report_corrections(task_id, version)',
                 history='report_history(task_id)',
                 record='correct_report(task_id, reason, version, expected_digest=...)',
                 frozen_report_unchanged=True, local_model_calls=False)
         if task.get('draft_first_version') == 1:
-            result['first_report'] = dict(acquire='draft(defer_delivery=True, data_requests=...)',
-                read='status().draft_observations and sources()', write='draft(report=...)',
+            result['first_report'] = dict(prepare='draft(task_id, defer_delivery=True, data_requests=[])',
+                acquire='draft(task_id, defer_delivery=True, data_requests=...)',
+                read='tools(task_id, scope="first_report").first_report.writing_context and sources(task_id)', write='draft(task_id, report=...)',
                 report_fields=['title', 'conclusion', 'logics', 'risks'],
                 logic_fields=['title', 'implication', 'risk'],
                 logic_body_fields=['argument', 'analysis'],
@@ -102,11 +216,22 @@ class Session:
             from researchhelper.publication_content import client_report_brief, report_writing_example
             result['first_report']['writing_brief']=client_report_brief(task)
             result['first_report']['report_example']=report_writing_example(task)
+            if type(task.get('draft_tracking_version')) is int and task['draft_tracking_version'] == 1:
+                from researchhelper.contracts import tracking_contract
+                result['first_report']['tracking_contract'] = tracking_contract()
+                result['first_report']['optional_logic_fields'].append('tracking')
+            from researchhelper.draft_workflow import _include_conversation, _include_update
+            _include_update(task, result['first_report'])
+            conversation_rule = _include_conversation(task, result['first_report'])
+            if conversation_rule:
+                result['first_report']['conversation_rule'] = conversation_rule
             from researchhelper.planning import draft_research_scope, draft_research_context
             result['first_report']['research_context'] = draft_research_context(task)
-            scope = draft_research_scope(task)
-            if scope is not None:
-                result['first_report']['research_scope'] = scope
+            from researchhelper.draft_sources import acquisition_coverage
+            result['first_report']['acquisition_coverage'] = acquisition_coverage(task, include_retained_economic=True)
+            research_scope = draft_research_scope(task)
+            if research_scope is not None:
+                result['first_report']['research_scope'] = research_scope
                 result['first_report']['optional_report_fields'].append('report_scope')
             from researchhelper.knowledge import ResearchKnowledge
             result['first_report']['knowledge_context']=ResearchKnowledge().draft_context(task)
@@ -117,6 +242,8 @@ class Session:
             result['first_report']['arithmetic_methods']=registered_methods()
             from researchhelper.draft_sources import observations,request_field_context,observation_context
             facts=observations(task)
+            from researchhelper.draft_sources import client_writing_context
+            result['first_report']['writing_context']=client_writing_context(task,facts)
             result['first_report']['interpretation_context']=interpretation_context(task,facts)
             observed_context=observation_context(task,facts)
             if observed_context:
@@ -125,7 +252,7 @@ class Session:
             request_context=request_field_context(task)
             if request_context:
                 result['first_report']['request_context']=request_context
-            result['first_report']['read_calculations']='status().draft_analysis，原值算术不等于金融适用性通过。'
+            result['first_report']['read_calculations']='writing_context.calculations；status().draft_analysis保留原始记录，不代替当前算术核对；原值算术不等于金融适用性通过。'
             result['first_report']['visuals']=dict(catalogue='visuals()',styled_export='export(visual_theme=...) or export(visual_profile=...)',source_data_unchanged=True,selection='按每条逻辑的实际引用独立配图',coverage='冻结呈现文档的figure_coverage',missing_data='有明确传导条件时可附mechanism.steps；不补造数值，不阻断正文',extra_model_calls=0)
         from researchhelper.planning import research_outline_contract
         outline = research_outline_contract(task)
@@ -157,6 +284,16 @@ class Session:
                 result['financial_originals'] = dict(schema=schema, prompt=original_batch_prompt(
                     dict(untrusted_sources=reading['views'], evidence_contract=result['evidence']), task),
                     decode='select_financial_originals', financial_approval=False, local_model_calls=False)
+        if scope == 'first_report':
+            # This is a disclosure projection, not a smaller data capability.
+            # Keep the exact shared request grammar, planning context and local
+            # recovery actions. Formal evidence/review schemas remain available
+            # through the unchanged default scope.
+            fields = ('research_brief', 'data_requests', 'source_catalogue', 'first_report',
+                      'plan_preservation', 'planning_definitions', 'initial_source_readiness',
+                      'negative_catalogue_searches', 'research_outline', 'version_review',
+                      'delivery_recovery', 'recovery_block', 'report_corrections', 'material_selection')
+            return {key: value for key, value in result.items() if key in fields}
         return result
 
     def select_api_cells(self, task_id, binding_hash, submission, *, reading_hash=None):
@@ -202,8 +339,18 @@ class Session:
         and sources, then submit the host's report in a second draft() call.
         This path never invokes the App model or requires argument approval.
         """
-        return self.agent.start(task_id, dict(draft_report=report,
-            data_requests=[] if data_requests is None else data_requests), defer_delivery=defer_delivery)
+        with self._executing(task_id) as task:
+            if (report is None and defer_delivery is False
+                    and (data_requests is None or isinstance(data_requests,list) and not data_requests)):
+                if self._delivery_recovery(task) is not None:
+                    return self.agent.retry_save(task_id)
+                if data_requests is None and not task.get('host_checkpoint'):
+                    from researchhelper.draft_workflow import direct_readout
+
+                    if direct_readout(task, policy_without_model=not self.agent.offline) is not None:
+                        return self.agent.start(task_id)
+            return self.agent.start(task_id, dict(draft_report=report,
+                data_requests=[] if data_requests is None else data_requests), defer_delivery=defer_delivery)
 
     def report_history(self, task_id):
         """Read saved report versions with their original correction notes."""
@@ -226,17 +373,41 @@ class Session:
     def cancel(self, task_id):
         return self.agent.cancel(task_id)
 
-    def resume(self, task_id, **host_outputs):
-        return self.run(task_id, **host_outputs) if host_outputs else self.agent.start(task_id)
+    def resume(self, task_id, *, defer_delivery=False, **host_outputs):
+        """Resume retained inputs; deferring delivery is not a new submission."""
+        if not isinstance(defer_delivery, bool):
+            raise ContractError("宿主研究检查点须明确指定，不能隐式延迟交付")
+        if host_outputs:
+            return self.run(task_id, defer_delivery=defer_delivery, **host_outputs)
+        with self._executing(task_id) as task:
+            if self._delivery_recovery(task) is not None:
+                if defer_delivery and not recovery_time_block(task, save_only=True):
+                    raise ContractError("报告正文已保留，请使用retry_save完成保存")
+                return self.agent.retry_save(task_id)
+            return self.agent.start(task_id, defer_delivery=defer_delivery)
+
+    def retry_save(self, task_id):
+        """Complete retained prose, HTML and saving without model or data dispatch."""
+        with self._executing(task_id):
+            return self.agent.retry_save(task_id)
+
+    def finish_draft(self, task_id):
+        """Finish an interrupted draft from this version's observations and public originals."""
+        with self._executing(task_id):
+            return self.agent.start(task_id, retained_data_only=True)
 
     def update(self, task_id, cutoff=None):
         """Prepare only: read this version, reason in the host, then call run."""
         return self.agent.prepare_update(task_id, cutoff)
 
     def material(self, task_id, name, payload):
-        task = self.agent.add_material(task_id, name, payload)
-        records = task["materials"] + task.get("pending_materials", [])
-        return next(x for x in reversed(records) if x.get("name") == Path(name).name and x["hash"] == hashlib.sha256(payload).hexdigest())
+        """Return the parsed material associated with this upload."""
+        return self.agent.add_material(task_id, name, payload, return_record=True)
+
+    def remove_material(self, task_id, name, digest, *, expected_version, expected_revision, retained_files=None):
+        """Exclude an unstarted input; its original stays archived without being adopted."""
+        return self.agent.remove_material(task_id, name, digest, expected_version=expected_version,
+            expected_revision=expected_revision, retained_files=retained_files)
 
     def snapshot(self, task_id, source, operation, parameters, response):
         task = self.agent.add_snapshot(task_id, source, operation, parameters, response)
@@ -301,14 +472,20 @@ class Session:
                 payload["data_requests"] = supplement.get("data_requests", [])
             if calculations is None:
                 payload["calculations"] = supplement.get("calculations", [])
-        return self.agent.start(task_id, payload, defer_delivery=defer_delivery)
+        with self._executing(task_id):
+            return self.agent.start(task_id, payload, defer_delivery=defer_delivery)
 
     def deliver(self, task_id):
         """Freeze a saved host checkpoint without replacing its research outputs."""
-        task = self.archive.get(task_id)
-        if not task.get("host_checkpoint") or task.get("delivery"):
-            raise ContractError("只有未交付的宿主研究检查点可以直接收束")
-        return self.agent.start(task_id)
+        with self._executing(task_id) as task:
+            if not task.get("host_checkpoint") or task.get("delivery"):
+                raise ContractError("只有未交付的宿主研究检查点可以直接收束")
+            return self.agent.start(task_id)
+
+    def research_methods(self, task_id=None):
+        """Read the public method library or the method references for one task."""
+        from researchhelper.research_methods import catalogue, method_selection
+        return catalogue() if task_id is None else method_selection(self.archive.get(task_id))
 
     def visuals(self, family=None):
         """Read presentation choices only when the host needs them; no model call."""
@@ -320,15 +497,15 @@ class Session:
     def export(self, task_id, version=None, *, visual_theme=None, visual_profile=None, profile=None, format="html"):
         if version is not None and (type(version) is not int or version < 1):
             raise ContractError("报告版本无效")
-        task = self.archive.get(task_id)
-        number = task["version"] if version is None else version
+        number = self.archive.get(task_id)["version"] if version is None else version
         report = self.agent.export(task_id, number)
+        output = ('result', 'researchhelper', task_id)
         if profile is not None or format!='html' or visual_profile is not None:
             from researchhelper.artifact_exporter import export_report
-            receipt=export_report(report['content'],self.agent.resources,
-                self.project/'result'/'researchhelper'/task_id/'exports',
+            directory = project_workspace_path(self.project, INSTALLATION, *output, 'exports')
+            receipt=export_report(report['content'],self.agent.resources,directory,
                 profile='standard' if profile is None else profile,format=format,
-                theme='research' if visual_theme is None else visual_theme,visual_profile=visual_profile)
+                theme=visual_theme,visual_profile=visual_profile)
             return Path(receipt['path'])
         html=report['html']
         if visual_theme is not None:
@@ -337,6 +514,6 @@ class Session:
             from researchhelper.reports import render
             html=render(report['content'],self.agent.resources,visual_profile=dict(theme=visual_theme))
         from researchhelper.artifact_exporter import save_frozen_html
-        directory = self.project / "result" / "researchhelper" / task_id
+        directory = project_workspace_path(self.project, INSTALLATION, *output)
         filename = f"research-v{number}"+("-"+visual_theme if visual_theme else "")+".html"
         return save_frozen_html(report["content"],html,directory,filename)
