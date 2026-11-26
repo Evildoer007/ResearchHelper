@@ -37,17 +37,40 @@ class TaskActionContextTests(unittest.TestCase):
 
     def test_stale_and_invalid_contexts_rejected_before_every_mutator(self):
         task = self.task()
+        task['status'] = '失败'
+        self.server.agent.archive.save(task)
         expected = context(task)
         malformed = [None, [], {}, dict(expected, version=True), dict(expected, batch=False),
                      dict(expected, id='other-task'), dict(expected, version=task['version'] + 1),
                      dict(expected, batch=task['batch'] + 1), dict(expected, cutoff='2000-01-01'),
                      dict(expected, input_hash='wrong'), dict(expected, secret='DO_NOT_ECHO')]
         for action, method in (('start', 'start'), ('resume', 'start'), ('cancel', 'cancel'),
-                               ('update', 'update'), ('retry-save', 'retry_save')):
+                               ('update', 'update'), ('retry-save', '_save_retained_report')):
             for value in malformed:
                 with self.subTest(action=action, value=value), patch.object(self.server.agent, method) as operation:
                     self.reject(task, action, value)
                     operation.assert_not_called()
+
+    def test_local_draft_accepts_only_its_task_binding_and_never_starts_online(self):
+        task = self.task()
+        path = '/api/tasks/' + task['id'] + '/finish-draft'
+        expected = context(task)
+        with patch.object(self.server.agent,'start',return_value=task) as start:
+            for payload in ({}, {'expected_task': dict(expected,batch=7)},
+                            {'expected_task': expected, 'host_result': {'data_requests': []}},
+                            {'expected_task': expected, 'expected_execution': self.execution()}):
+                with self.assertRaises(HTTPError) as error:
+                    self.request(path,payload)
+                self.assertEqual(error.exception.code,400)
+                error.exception.close()
+            start.assert_not_called()
+            self.request(path,{'expected_task': expected})
+            start.assert_called_once_with(task['id'],asynchronous=True,retained_data_only=True)
+        self.login('sales')
+        with self.assertRaises(HTTPError) as error:
+            self.request(path,{'expected_task': expected})
+        self.assertIn(error.exception.code,(403,404))
+        error.exception.close()
 
     def test_matching_context_reaches_existing_operation_once(self):
         task = self.task()
