@@ -1,27 +1,27 @@
 """Full returned catalogue rows, not all-market completeness or new facts."""
-import hashlib
 import json
 import unittest
 from unittest.mock import patch
 
-from tests import ROOT
+from tests.fee_disclosure_fixture import fee_task
 from researchhelper.catalog_metadata import POLICY, QUERY_POLICY, QUERY_COLUMNS, scope_basis
 from researchhelper.contracts import ContractError, fingerprint
 from researchhelper.planning import input_fingerprint
 from researchhelper.reasoning import analysis_contract
 
-ORIGINAL = ROOT/'result/acceptance/autonomous-data-phase-6hjk3w0z/task.json'
-
 
 class CatalogQueryResultBasisTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.digest = hashlib.sha256(ORIGINAL.read_bytes()).hexdigest()
-        cls.retained = json.loads(ORIGINAL.read_text())
+        cls.retained = fee_task(multiple_catalogue_rows=True)
+        cls.retained.pop(POLICY, None)
+        cls.retained.pop(QUERY_POLICY, None)
+        cls.retained['input_hash'] = input_fingerprint(cls.retained)
+        cls.original_digest = fingerprint(cls.retained)
 
     @classmethod
     def tearDownClass(cls):
-        assert hashlib.sha256(ORIGINAL.read_bytes()).hexdigest() == cls.digest
+        assert fingerprint(cls.retained) == cls.original_digest
 
     def setUp(self):
         self.task = dict(self.retained, **{POLICY:1, QUERY_POLICY:1})
