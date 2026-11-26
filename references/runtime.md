@@ -1,47 +1,50 @@
 # 研究运行
 
-本文只说明Skill如何调用现有内核。字段、枚举、来源能力和方法条件以本任务的session.tools(task_id)为准，不在文档中复制接口Schema或历次修补记录。
+字段、来源及方法以session.tools(task_id)为准。宿主负责语言推理，内核取数、计算和交付。
 
-## 一、开始研究
+## 一、创建与首稿
 
-使用core/session.py中的Session。研究数据归属于使用项目的data/researchhelper，报告与导出副本归属于result/researchhelper。安装目录只读，不读取App、OptionHelper或其他项目的凭据与数据库。
+使用core/session.py的Session。安装目录只读，研究数据位于使用项目的data/researchhelper，结果位于result/researchhelper；不读取App或其他项目的凭据、生产库。默认离线，实际取数须显式启用allow_network，使用本项目配置或用户提供的内存凭据。
 
-Session默认离线。用户要求实际取数时，宿主显式设置allow_network并采用当前研究项目的独立配置或用户提供的内存凭据。宿主负责语言推理，内核负责取数、登记算术、保存与导出，不另外启动App模型。
+session.create保留原问题、对象和意图。只有明确历史要求才传cutoff。
 
-session.create保存原问题、研究对象、意图及截止时点。当前研究是默认值；明确要求历史时点时才指定cutoff。个股、ETF、指数、行业、产业链、事件、宏观与混合问题共用同一流程，证据要求按问题选择。
+独立询问ETF价格与净值、折溢价、价格变化与总收益、CPI同比环比或制造业PMI时，创建后用session.resume生成带出处的通用口径报告。涉及实际标的、时点、读数或附件时按下列步骤取证。
 
-## 二、先取得资料并交付首稿
+尚未启动的任务可用remove_material移除本次不采用的上传文件，须提供文件名、内容哈希及当前任务的version和revision；同一内容的其他保留文件通过retained_files明确提供。原件继续留存，不作为本次输入。已经执行的任务与冻结报告不通过此操作改写。
 
-1. 用session.tools(task_id)读取first_report和data_requests，只查看本任务实际需要的工具。
-2. 用session.draft(task_id,data_requests=...,defer_delivery=True)取得资料。优先复用iFinD固定行情、财务与已登记数据接口，PDF只在确实需要原文且接口不足时按需取得。
-3. 从session.status读取draft_observations与draft_analysis，用session.sources定位原始响应或材料。读不到的字段保留缺口，不用空表证明现实不存在，不猜证券代码、单位或披露日期。
-4. 根据已有资料撰写核心结论、几条不同的策略逻辑及风险。每条逻辑解释判断、依据、机制、投资含义和验证条件。数据与计算引用使用本任务实际ID。
-5. 用session.draft(task_id,report=...)保存，再用session.export取得文件。缺数、未知单位、提取不齐或尚未独立复核不阻断首次交付；未回答部分留在底稿，不能伪称全面核验通过。
+1. 读取session.tools(task_id,scope="acquisition")。按prepare以空请求准备本地知识，再读本轮取数范围。此步无需数据或模型调用。
+2. 用session.draft(task_id,data_requests=...,defer_delivery=True)取得资料，优先iFinD固定API。stated_window_requests列出本轮可直接查询的收盘、ETF单位净值和宏观区间。宏观指标仅有名称时，读取本轮目录查询结果后重新获取取数工具，核对是否已有唯一匹配的区间请求。检查acquisition范围的acquisition_coverage，按预算补取有用缺项，复用已获响应。
+3. 用session.tools(task_id,scope="first_report")读取first_report.writing_context中的当前原值及有效calculations，用sources定位原件。追问指向旧论点时，写作阶段可读对应原版摘录。
+4. 按research_scope、writing_brief及report_example组织核对、比较、机制或投资逻辑，用session.draft(task_id,report=...)保存，再用export获取实际文件。缺数、未知单位、提取不齐和未独立复核不阻断首稿；不能将草稿称为全面核验通过。
 
-首稿字段由first_report给出。定性判断也可以先交付；不为凑数强制固定论点数量、通用估值门槛或完整财务报表。
+已有同版资料且研究中断时，可用session.finish_draft本地出稿。财报原值同时显示报表范围、所属期间和原单位，数字可定位到原表。
 
-## 三、按需深化
+## 二、按需深化
 
-session.run消费宿主提交的证据、问题回答、计算与论点。正式深化之前读取同版tools中的evidence、calculations、analysis和argument_support；需要原件选择时，以实际reading_hash绑定本轮读取范围和选择Schema。
+需要正式证据、计算或独立论证复核时，再读取默认tools(task_id)中的完整契约。session.run提交新的研究输入；涉及原件选择时，使用本轮reading_hash和实际读取范围，不猜选择编号。argument_support按工具提供的prepare、inputs和submit执行。
 
-部分材料未采用、未找到和格式不适用是不同状态。只修正受影响的字段与步骤，不删掉独立可用材料，也不把内部失败信息重复写进对客正文。深化结果与首次草稿分别保留；旧研究继续使用创建时锁定的规则，不为让旧任务通过而改版本标记。
+继续已有底稿使用session.resume(task_id,defer_delivery=True)，沿用已提交输入，不新增补证轮次；完成后用session.deliver保存同版报告。run不是空提交恢复入口。未采用、未找到、提取失败和来源未披露各有不同含义，只限制受影响的部分，不删除独立可用资料，也不把内部错误重复写进对客正文。
 
-需要独立论证复核时，按argument_support提供的prepare、inputs和submit顺序完成，session.deliver保存同版报告。此步骤不能重新成为首次出稿的门槛。
+## 三、预算与恢复
 
-## 四、预算、取消与更新
+有限预算、交付预留和补证轮次由当前任务工具给出。取消、恢复不重置累计用量；复用已保存响应与登记计算，不为排版、配色或导出重新调用模型。session.cancel停止后续派发，工作进程停止后才继续保存或恢复。
 
-默认上限为100次数据请求、8次模型调用、600秒，预留1次模型调用和60秒交付，最多两轮补证。宿主复用已保存原件和已执行计算，不为格式、配色或导出重新调用模型。
+App在规划后保存检查点。相同任务恢复时继续未完成步骤，不重付已有规划或重发已完成请求；研究输入或来源依赖改变时重新规划，仍保留累计用量。只复用版本、问题、截止时点、来源、知识及完整写作上下文均适用的检查点，不给旧记录补写新标记。
 
-session.cancel停止继续派发；恢复沿用原账本、任务和版本。宿主已有新输出时按同版Schema继续提交，不重置预算或重放已完成请求。
+原文已保存但整理、呈现或落盘失败时，按delivery_recovery.action调用session.retry_save继续本地交付。Skill未提交新正文或新请求时，resume及默认draft也使用这条恢复路径。交付预留时间可用于本地保存；总时长不足时，recovery_block提供原因，已取得的资料、原文和旧交付仍可读取。此时停止重试。依赖一致时复用已保存的正文。HTML缺失、内容指纹不符或旧记录缺少页面指纹时，仅重新排版。转换失败保留HTML，保存成功才确认生成。
 
-App自动研究在取数规划完成后保存检查点。取消或重启同一任务时继续未完成请求，复用已有原件，不再次支付同一规划。研究输入、材料或原有来源依赖改变时，重新规划并保留累计用量；检查点缺失或不适用时沿用现有出稿流程，不新增阻断。
+## 四、更新与追问
 
-session.update创建待研究的新版本，之后由宿主读取工具、取得新资料并继续研究。问题、对象范围或意图发生实质变化时另建关联任务。旧结论与旧HTML保持冻结，新版本失败不破坏旧交付。
+session.update创建待研究的新版本，之后重新读取工具和当前资料。旧报告与条件冻结，新版本失败不破坏旧交付；旧任务恢复仍使用其锁定规则，显式更新才采用现行规则。
 
-保存失败只重试保存；转换失败保留HTML。成功保存后才能向用户确认已生成报告。详细格式见[报告交付](delivery.md)，证据边界见[取证与分析](evidence.md)。
+更新时，取数阶段的active_update.tracking_inputs提供原观察指标、来源与窗口。写作阶段的active_update.previous_report提供绑定原任务、版本、截止时点和内容哈希的历史公开表述。依据本轮资料判断是否维持原结论，分别保留两版条件。
 
-## 已保存报告更正
+更新取得本版账号策略与实际证券映射。相同查询已在本版成功返回时，旧响应只留作历史，不重复进入本版写作或计算；新响应缺值不能从旧响应补齐。刷新失败时可以沿用仍适用且有明确期间的旧值，但保留来源版本和取得时间，不冒充本次取得。
 
-session.report_history(task_id)列出保存版本及其更正，不包含未交付的检查点。session.report_corrections(task_id,version)读取独立注释；session.correct_report(task_id,reason,version,expected_digest=...)将已知错误绑定到所选报告。expected_digest取该版delivery.digest，不拿其他任务或新版本的标识替代。更正不会重新取数、消耗模型额度或修改已冻结正文。改正文使用新版本，不用更正记录伪称原报告已修复。
+session.follow_up按新消息创建关联任务，重新确定核对、比较、机制或研究用途。原对象可保留入口，替换或增加对象时以本轮research_scope为准；旧上下文仅解释指代，证据、原件、批准及投资意图不自动继承。父报告和原账本不改写。
 
-新建初稿任务和主动更新的新版本采用第7版原始数据读取规则。iFinD固定财务字段以该字段请求的D参数标记报告期，响应time不替代报告期；未知期间保留原值并限制相应计算。旧版本不自动升级，单位与首次公开时间仍须分别判断。
+已展示父轮结果时，可将该任务的revision传入expected_revision。父轮已改变时先重读。conversation_parent记录原任务、版本、修订和报告标识。
+
+## 五、已保存报告更正
+
+报告更正与版本冻结见[报告交付](delivery.md)，取证边界见[取证与分析](evidence.md)。
