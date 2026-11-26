@@ -1,6 +1,7 @@
 """Versioned visual choices never mutate research or fabricate chart inputs."""
 import copy,hashlib,json,tempfile,unittest
 from pathlib import Path
+from urllib.parse import urlsplit
 from types import SimpleNamespace
 from unittest.mock import Mock
 from tests import ROOT
@@ -25,12 +26,24 @@ class VisualLibraryTests(unittest.TestCase):
 
     def test_single_catalogue_matches_browser_derived_file(self):
         self.assertEqual(browser_catalogue(),(ROOT/'products/app/frontend/visual-catalog-data.js').read_text())
-        c=catalogue();self.assertEqual((len(c['schemes']),len(c['themes'])),(40,10))
-        self.assertEqual(len({r['id'] for r in c['schemes']}),40)
-        self.assertTrue(all(r['requires'] and r['purpose'] and r['renderer']=='echarts_svg' for r in c['schemes']))
+        c=catalogue();self.assertEqual((len(c['schemes']),len(c['themes'])),(46,11))
+        self.assertNotIn('dumbbell', {row['id'] for row in c['schemes']})
+        self.assertEqual(len({r['id'] for r in c['schemes']}),len(c['schemes']))
+        families = [family for group in c['groups'] for family in group['families']]
+        self.assertEqual(set(families), {row['family'] for row in c['schemes']})
+        self.assertEqual(len(families), len(set(families)))
+        for row in c['schemes']:
+            parsed = urlsplit(row['reference'])
+            with self.subTest(scheme=row['id']):
+                self.assertTrue(row['requires'] and row['purpose'])
+                self.assertEqual(row['renderer'], 'echarts_svg')
+                self.assertEqual(parsed.scheme, 'https')
+                self.assertIn(parsed.netloc, {'plotly.com', 'matplotlib.org', 'seaborn.pydata.org'})
+                self.assertNotIn('template', row)
 
     def test_catalogue_is_defensive_and_theme_unknown_is_not_substituted(self):
-        c=catalogue();c['schemes'].clear();self.assertEqual(len(catalogue()['schemes']),40)
+        c=catalogue();before=len(c['schemes']);c['schemes'].clear()
+        self.assertEqual(len(catalogue()['schemes']),before)
         self.assertIsNone(theme('unknown'));p=theme('research');p['colors'].clear()
         self.assertGreater(len(theme('research')['colors']),0)
 
@@ -42,7 +55,29 @@ class VisualLibraryTests(unittest.TestCase):
         self.assertEqual(sum(len(r['values']) for r in figures[0]['data']['series']),27)
         self.assertEqual(figures[1]['data']['matrix'],[r['values'] for r in figures[0]['data']['series']])
         self.assertEqual(set(figures[1]['data_refs']),{r['id'] for r in content['draft']['facts']})
+        by_id = {row['id']: row for row in content['draft']['facts']}
+        self.assertEqual(figures[0]['series_point_refs'], figures[1]['series_point_refs'])
+        for series, cells in zip(figures[0]['data']['series'], figures[0]['series_point_refs'], strict=True):
+            for day, value, refs in zip(figures[0]['data']['labels'], series['values'], cells, strict=True):
+                ref, = refs
+                original = by_id[ref]
+                self.assertEqual((original['period'], original['label'], original['value']),
+                                 (day, series['name'], value))
         self.assertEqual(content,before)
+
+    def test_macro_matrix_aligns_valid_date_aliases_and_rejects_duplicate_periods(self):
+        content = copy.deepcopy(self.macro)
+        expected = catalogue_figures(content,[])
+        facts = content['draft']['facts']
+        code = facts[0]['code']
+        for row in facts:
+            if row['code']==code:
+                row['period'] = row['period'].replace('-','/')
+        before = copy.deepcopy(content)
+        self.assertEqual(catalogue_figures(content,[]),expected)
+        self.assertEqual(content,before)
+        facts.append(dict(facts[0],id='duplicate-date',period=facts[0]['period'].replace('/','-')))
+        self.assertEqual(catalogue_figures(content,[]),[])
 
     def test_partial_or_conflicting_macro_does_not_fabricate_matrix(self):
         for change in ('missing','unit','foreign'):
@@ -57,7 +92,8 @@ class VisualLibraryTests(unittest.TestCase):
         content=copy.deepcopy(self.hk);facts=[]
         for i,row in enumerate(content['draft']['facts']):
             for field,delta in [('open',-.5),('close',0),('low',-1),('high',1)]:
-                facts.append(dict(row,id=f'C{i}-{field}',field=field,value=row['value']+delta))
+                facts.append(dict(row,id=f'C{i}-{field}',field=field,value=row['value']+delta,
+                                  locator=dict(row['locator'],field=field)))
         content['draft']['facts']=facts
         return content
 
@@ -65,10 +101,23 @@ class VisualLibraryTests(unittest.TestCase):
         content=self.candles();before=copy.deepcopy(content);figures=ohlc_figures(content,[])
         self.assertEqual(figures[0]['scheme'],'candlestick');self.assertEqual(len(figures[0]['data']['values']),5)
         self.assertEqual(set(figures[0]['data_refs']),{r['id'] for r in content['draft']['facts']})
+        self.assertEqual(figures[0]['point_refs'][0],['C0-open','C0-close','C0-low','C0-high'])
         self.assertEqual(content,before)
 
+    def test_candles_use_the_same_calendar_labels_as_other_market_charts(self):
+        content = self.candles()
+        facts = content['draft']['facts']
+        day = facts[0]['period']
+        for row in facts:
+            if row['period']==day:
+                row['period'] = day.replace('-','/')
+        figure, = ohlc_figures(content,[])
+        self.assertIn(day,figure['data']['labels'])
+        self.assertNotIn(day.replace('-','/'),figure['data']['labels'])
+        self.assertEqual(facts[0]['period'],day.replace('-','/'))
+
     def test_incomplete_or_duplicate_ohlc_preserves_raw_fallback(self):
-        for change in ('missing','duplicate','bounds','nan','date','foreign','basis'):
+        for change in ('missing','duplicate','bounds','nan','date','foreign','basis','table','row','locator','date_alias'):
             content=self.candles();rows=content['draft']['facts']
             if change=='missing':rows.pop()
             elif change=='duplicate':rows.append(copy.deepcopy(rows[0]))
@@ -76,9 +125,24 @@ class VisualLibraryTests(unittest.TestCase):
             elif change=='nan':rows[2]['value']=float('nan')
             elif change=='date':rows[0]['period']='invalid'
             elif change=='foreign':rows[0]['artifact_id']='foreign'
-            else:rows[0]['series_basis']='other'
+            elif change=='basis':rows[0]['series_basis']='other'
+            elif change=='table':rows[0]['locator']['table']+=1
+            elif change=='row':rows[0]['locator']['row']+=1
+            elif change=='locator':rows[0].pop('locator')
+            elif change=='date_alias':
+                rows.extend(dict(row,id=row['id']+'-alias',period=row['period'].replace('-','/'))
+                            for row in rows[:4])
             fallback=[dict(name='原始价格')]
             self.assertEqual(ohlc_figures(content,fallback),fallback,change)
+
+    def test_calculation_only_previous_close_does_not_replace_a_candle_cell(self):
+        content = self.candles()
+        facts = content['draft']['facts']
+        reference = next(row for row in facts if row['field']=='close')
+        facts.append(dict(reference, id='previous-close', previous_close_for=facts[4]['period']))
+        candle, = ohlc_figures(content, [])
+        self.assertNotIn('previous-close', candle['data_refs'])
+        self.assertEqual(len(candle['data']['values']), 5)
 
     def test_actual_close_only_report_never_becomes_ohlc(self):
         original=draft_figures(self.hk['draft']['facts'])
@@ -110,5 +174,5 @@ class VisualLibraryTests(unittest.TestCase):
             self.assertEqual(json.loads(styled.with_suffix('.json').read_text()),self.macro)
             self.assertEqual(styled.name,'research-v1-midnight.html')
             with self.assertRaises(ContractError):session.export('task',visual_theme='unregistered')
-        self.assertEqual(len(session.visuals()['schemes']),40)
+        self.assertEqual(session.visuals(), catalogue())
         self.assertTrue(all(row['family']=='趋势' for row in session.visuals('趋势')['schemes']))
