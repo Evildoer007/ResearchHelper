@@ -1,13 +1,14 @@
 """Explicit listed-unit proof, not a fabricated A/C category or live retry."""
 import copy
 from decimal import Decimal
-import json
 import tempfile
 import unittest
 
 from tests import ROOT
+from tests.legacy_replay_fixtures import ETF_CLOSE, ETF_CODE, ETF_NAV, ETF_VALUATION_DATE, listed_etf_task
 from researchhelper.archive import ResearchArchive
-from researchhelper.contracts import ContractError, METHOD_REGISTRY, calculate, fingerprint, validate_calculation_context
+from researchhelper.contracts import (ContractError, METHOD_REGISTRY, calculate, calculation_context_contract,
+    fingerprint, validate_calculation_context)
 from researchhelper.engine import ResearchAgent
 from researchhelper.evidence import candidate_evidence, listed_etf_unit_context_candidates
 from researchhelper.financial_sources import original_line_index, selected_original_span
@@ -17,15 +18,14 @@ from researchhelper.reasoning import evidence_contract, extractable_source_views
 from researchhelper.reports import compose
 
 
-RETAINED = ROOT / 'result/acceptance/one-sentence-research-8bhoacvp/task.json'
 METHOD = 'etf_daily_nav_premium_v1'
 
 
 class ListedETFUnitContextTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.original = RETAINED.read_bytes()
-        cls.saved = json.loads(cls.original)
+        cls.saved = listed_etf_task()
+        cls.original = fingerprint(cls.saved)
 
     def setUp(self):
         self.task = copy.deepcopy(self.saved)
@@ -38,24 +38,24 @@ class ListedETFUnitContextTests(unittest.TestCase):
         self.original_view = next(view for view in self.views if view['kind']=='filing')
 
     def tearDown(self):
-        self.assertEqual(RETAINED.read_bytes(), self.original)
+        self.assertEqual(fingerprint(self.saved), self.original)
 
     def selection(self):
         original = next(view for view in self.prompt['untrusted_sources'] if view['kind']=='filing')
         api = next(view for view in self.prompt['untrusted_sources'] if view['kind']=='api')
         api_source = next(source for source in self.prompt['evidence_contract']['sources'] if source['kind']=='api')
         lines = original_line_index(self.original_view)
-        nav = next(line for line in lines if line['part']=='第9页' and '基金份额净值为2.3272元' in line['text'])
-        currency = next(line for line in lines if line['part']=='第3页' and '单位：人民币元' in line['text'])
+        nav = next(line for line in lines if f'基金份额净值为{ETF_NAV}元' in line['text'])
+        currency = next(line for line in lines if '单位：人民币元' in line['text'])
         date = next(anchor for anchor in original['observation_anchors']
-                    if anchor['date']=='2026-06-30' and anchor['part']=='第9页')
+                    if anchor['date']==ETF_VALUATION_DATE and anchor['part']==nav['part'])
         identity = self.source['listed_etf_unit_candidates'][0]
         span = dict(start=nav['index'],end=nav['index'])
         proof = identity['span']
-        contexts = [dict(field='fund_id',value='588000',span=proof),
+        contexts = [dict(field='fund_id',value=ETF_CODE.split('.')[0],span=proof),
                     dict(field='share_class',value=identity['value'],span=proof),
                     dict(field='currency',value='CNY',span=dict(start=currency['index'],end=currency['index'])),
-                    dict(field='valuation_date',value='2026-06-30',span=span),
+                    dict(field='valuation_date',value=ETF_VALUATION_DATE,span=span),
                     dict(field='nav_kind',value='official',span=span)]
         requirements = self.payload['evidence_contract']['question_requirements']['q1']
         api_selection = dict(api_cell_selections=[api_source['cell_choices'][0]['candidate_id']],question_ids=['q1'],
@@ -63,12 +63,14 @@ class ListedETFUnitContextTests(unittest.TestCase):
                 reason='单位测试中的实际单元格引用，不是新增研究。',
                 evidence_need_texts=[dict(question_id='q1',texts=[requirements[0]['text']])]))
         numeric = dict(id='projected_listed_unit_nav',source_ref=original['source_ref'],kind='number',
-            object='588000.SH',nature='已实现事实',question_ids=['q1'],period='2026-06-30',
+            object=ETF_CODE,nature='已实现事实',question_ids=['q1'],period=ETF_VALUATION_DATE,
             observation_anchor=date['index'],text_span=span,number_occurrence=3,unit='元',unit_span=span,
             contexts=contexts,review=dict(scope='current_original_descriptive_only',
                 need_links=[dict(question_id='q1',need_ids=[requirements[1]['id']])]))
+        registered = api_source['cell_choices'][0]['calculation_context']
+        price_fields = calculation_context_contract(self.task, METHOD)['input_fields']['price']
         extras = [dict(context,source_ref=original['source_ref']) for context in contexts
-                  if context['field'] in ('fund_id','share_class','valuation_date')]
+                  if context['field'] in price_fields and context['field'] not in registered]
         return dict(version=3,binding_ref=self.prompt['span_binding_ref'],selections=[
             dict(source_ref=api['source_ref'],kind='api',selection=dict(version=2,evidence_specs=[api_selection]),
                  additional_contexts=extras),numeric])
@@ -82,7 +84,7 @@ class ListedETFUnitContextTests(unittest.TestCase):
     def test_actual_product_fields_offer_optional_identity_not_ac_category_or_approval(self):
         choices = self.source['listed_etf_unit_candidates']
         self.assertTrue(choices)
-        self.assertTrue(all(choice['value']=='listed_etf_unit:588000.SH' for choice in choices))
+        self.assertTrue(all(choice['value']=='listed_etf_unit:'+ETF_CODE for choice in choices))
         self.assertTrue(all(not choice['candidate_is_approval'] and not choice['ac_category_inferred'] for choice in choices))
         self.assertIn('交易代码',choices[0]['quote'])
         self.assertIn('基金运作方式',choices[0]['quote'])
@@ -91,16 +93,36 @@ class ListedETFUnitContextTests(unittest.TestCase):
     def test_actual_mixed_decoder_and_source_gates_reach_comparable_numeric_inputs(self):
         before = fingerprint(self.task)
         _, records = self.checked_inputs()
-        parameters = dict(METHOD_REGISTRY[METHOD]['parameters'],valuation_date='2026-06-30')
-        validate_calculation_context(METHOD,records,parameters)
+        self.assertEqual(records['price']['calculation_context']['fund_id'], ETF_CODE)
+        self.assertEqual(records['nav']['calculation_context']['fund_id'], ETF_CODE.split('.')[0])
+        parameters = dict(METHOD_REGISTRY[METHOD]['parameters'],valuation_date=ETF_VALUATION_DATE)
+        validate_calculation_context(METHOD,records,parameters,
+            context_contract=calculation_context_contract(self.task, METHOD))
         values = {field:record['value'] for field,record in records.items()}
         output = calculate(METHOD,values,parameters)
         expected = (Decimal(str(values['price']))/Decimal(str(values['nav']))-1)*100
         self.assertLessEqual(abs(Decimal(str(output['value']))-expected),Decimal(str(output['tolerance'])))
-        self.assertEqual(values,dict(price=2.344,nav=2.3272))
+        self.assertEqual(values,dict(price=ETF_CLOSE,nav=float(ETF_NAV)))
         self.assertEqual(before,fingerprint(self.task))
         self.assertFalse(self.task['calculations'])
-        self.assertEqual(self.task['status'],'部分完成')
+        self.assertEqual(self.task['status'],'待开始')
+
+    def test_alias_resolution_requires_the_same_registered_code_and_exchange(self):
+        _, records = self.checked_inputs()
+        parameters = dict(METHOD_REGISTRY[METHOD]['parameters'], valuation_date=ETF_VALUATION_DATE)
+        contract = calculation_context_contract(self.task, METHOD)
+        for looked_up, written in ((ETF_CODE, '510300'), (ETF_CODE, '510500.SZ'), ('510300', '510300')):
+            different = copy.deepcopy(records)
+            different['price']['calculation_context']['fund_id'] = looked_up
+            different['nav']['calculation_context']['fund_id'] = written
+            with self.subTest(looked_up=looked_up, written=written), self.assertRaises(ContractError):
+                validate_calculation_context(METHOD, different, parameters, context_contract=contract)
+
+    def test_legacy_comparison_keeps_its_exact_fund_id_rule(self):
+        _, records = self.checked_inputs()
+        parameters = dict(METHOD_REGISTRY[METHOD]['parameters'], valuation_date=ETF_VALUATION_DATE)
+        with self.assertRaisesRegex(ContractError, 'fund_id'):
+            validate_calculation_context(METHOD, records, parameters)
 
     def test_foreign_unit_or_unproved_prefixed_identifier_is_rejected(self):
         decoded, _ = self.checked_inputs()
@@ -109,7 +131,7 @@ class ListedETFUnitContextTests(unittest.TestCase):
         for mutation in ('foreign','missing_operation'):
             item = copy.deepcopy(spec)
             if mutation=='foreign': item['calculation_context']['share_class']='listed_etf_unit:510300.SH'
-            else: item['calculation_context_basis']['share_class']['quote']='交易代码 588000'
+            else: item['calculation_context_basis']['share_class']['quote']='交易代码 '+ETF_CODE.split('.')[0]
             with self.subTest(mutation=mutation), self.assertRaises(ContractError):
                 candidate_evidence(self.task,source,item)
 
@@ -127,12 +149,12 @@ class ListedETFUnitContextTests(unittest.TestCase):
     def test_multiple_classes_elsewhere_in_the_disclosure_block_aggregate_matching(self):
         view = copy.deepcopy(self.original_view)
         view['parts'].append(dict(locator='合成歧义段',text='下属各类基金份额，A类基金份额与C类基金份额净值分别披露。'))
-        self.assertEqual(listed_etf_unit_context_candidates(view,'588000.SH'),[])
+        self.assertEqual(listed_etf_unit_context_candidates(view,ETF_CODE),[])
 
     def test_another_explicit_trading_code_on_another_page_still_blocks_matching(self):
         view = copy.deepcopy(self.original_view)
         view['parts'].append(dict(locator='合成多对象段',text='交易代码 588080\n基金运作方式 交易型开放式'))
-        self.assertEqual(listed_etf_unit_context_candidates(view,'588000.SH'),[])
+        self.assertEqual(listed_etf_unit_context_candidates(view,ETF_CODE),[])
 
     def test_legacy_tasks_do_not_gain_new_model_identity_candidates(self):
         self.task.pop('listed_etf_unit_context_version')
