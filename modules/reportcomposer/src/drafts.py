@@ -2134,14 +2134,20 @@ def render(content, resources, visual_profile=None, report_profile='standard', *
             shown = (observation_presentation(row) if report_profile == 'standard' and readable_format
                      else dict(period=reader_period_label(row['period']), value=observation_value(row),
                                unit=observation_unit(row)))
+            unconfirmed_amount = (internal and analysis_field(row) in FINANCIAL
+                                  and shown['unit'] in UNKNOWN_FINANCIAL_UNITS)
             raw_reading = not internal and shown['unit'] in ('未确认', '原始单位待核对', '接口原值')
             label = ' '.join(dict.fromkeys(filter(None, (row.get('object_label') or row.get('code'),
                                                        shown['period'], scoped_label(row)))))
             value = inspection_link(target, shown['value'], '查看' + row['label'] + '的原始数据',
                                     observation_ref=row['id'])
+            lead, unit = '为', shown['unit']
+            if unconfirmed_amount:
+                lead, unit = '原值为', '（单位待核对）'
+            elif raw_reading:
+                lead, unit = '原始读数为', ''
             parts.append('<span data-observation-id="' + escape(row['id']) + '">' + escape(label)
-                         + ('原始读数为' if raw_reading else '为') + value
-                         + escape('' if raw_reading else shown['unit']) + '</span>')
+                         + lead + value + escape(unit) + '</span>')
         return '<p class="measured-reading">' + '，'.join(parts) + '。</p>'
 
     def observation_table(rows, target):
