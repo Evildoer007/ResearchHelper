@@ -1,13 +1,12 @@
 """Lossless source intervals and explicit method context; no financial approval."""
 import copy
-import hashlib
 import json
 import tempfile
 import unittest
 from unittest.mock import patch
 
-from tests import ROOT
-from researchhelper.contracts import ContractError, canonical
+from tests.fee_disclosure_fixture import fee_task, read_fee_task
+from researchhelper.contracts import ContractError, canonical, fingerprint
 from researchhelper.evidence import candidate_evidence, validate_calculation_context_basis, validate_reporting_period_basis
 from researchhelper.financial_sources import literal_interval, original_period_anchors
 from researchhelper.output_schema import (_original_span_choices, original_span_output_schema,
@@ -49,18 +48,28 @@ class LiteralIntervalEncodingTests(unittest.TestCase):
 class OriginalIntervalContextTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.retained = ROOT/'result/acceptance/autonomous-data-phase-5i8w290s/task.json'
-        cls.digest = hashlib.sha256(cls.retained.read_bytes()).hexdigest()
-        cls.task = dict(json.loads(cls.retained.read_text()), **{POLICY:1,'original_context_question_link_version':1,
-                                        'listed_etf_unit_context_version':1,'listed_report_unit_context_version':1})
+        cls.task = fee_task(has_trading_code=False)
+        cls.task['questions'][0]['method_needs'] = ['fee_difference_v2']
+        # Pin the earlier location and interval formats. The current fee
+        # candidate protocol is exercised separately on the same disclosures.
+        for flag in ('original_duration_anchor_version','original_fee_context_mapping_version',
+                     'original_local_span_version','original_whole_part_selection_version',
+                     'method_excerpt_selection_version','method_literal_address_version',
+                     'original_observation_reference_version','original_scope_wire_version',
+                     'original_explicit_unit_reference_version','independent_original_selections_version'):
+            cls.task.pop(flag,None)
+        cls.task.update(original_prompt_projection_version=1, **{POLICY:1})
         cls.task['input_hash'] = input_fingerprint(cls.task)
-        cls.views = cls.task['reasoning_state']['reading']['bundle']['views']
+        bundle = read_fee_task(cls.task)
+        cls.task.setdefault('reasoning_state',{})['reading'] = {'bundle':bundle}
+        cls.views = bundle['views']
+        cls.digest = fingerprint(cls.task['source_records'])
         cls.choices = _original_span_choices(cls.task,cls.views)
         cls.schema = original_span_output_schema(cls.task,cls.views)
 
     @classmethod
     def tearDownClass(cls):
-        assert hashlib.sha256(cls.retained.read_bytes()).hexdigest() == cls.digest
+        assert fingerprint(cls.task['source_records']) == cls.digest
 
     def wire(self,index=0):
         choice = self.choices[index]
