@@ -1,7 +1,8 @@
 """Actual spawned HTTP reader against a local TLS/SSE fixture, not DeepSeek.
 
-Only the four new cases are collected. Original fixture tests are preserved
-and exercised separately; this does not run a financial study or open UI.
+The four streaming cases use the SSE fixture. When pytest also collects the
+inherited transport controls, those retain their original JSON fixture. No
+financial study or foreground UI is used.
 """
 import copy
 import json
@@ -30,6 +31,10 @@ class LocalStreamService(IsolatedModelService):
 class StreamTLSFixture(portable.PortableModelTransport):
     def setUp(self):
         super().setUp()
+        # unittest's load_tests selects only the four cases below. Pytest also
+        # collects inherited controls; never force their JSON replies into SSE.
+        if not self._testMethodName.startswith('test_stream_'):
+            return
         self.service=LocalStreamService(self.settings,offline=False,
             journal=lambda task:self.journal.append(copy.deepcopy(task)))
         self.service.worker_target=portable.model_fixture_worker
