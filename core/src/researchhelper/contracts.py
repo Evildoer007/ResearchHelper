@@ -232,8 +232,54 @@ class ContractError(ValueError):
     pass
 
 
+class FollowupParentChanged(ContractError):
+    """The parent changed before the follow-up was saved."""
+
+
+class ExecutionTimeExhausted(ContractError):
+    """The existing version cannot continue within its cumulative time limit."""
+
+    code = "execution_time_exhausted"
+
+
+class LocalStateError(ContractError):
+    """Local startup can report a fixed cause without forwarding exception text."""
+
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+
+
+class DuplicateJSONField(ContractError):
+    """An object contains two values for a field, with no implied ordering."""
+
+
+def unique_json_object(pairs):
+    """Reject duplicate field names without storing or reporting their text."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise DuplicateJSONField("JSON包含重复字段，不能隐式覆盖")
+        result[key] = value
+    return result
+
+
 class MethodNotApplicable(ContractError):
     """Valid retained inputs outside a registered method's economic domain."""
+
+
+MAX_BROWSER_INTEGER = (1 << 53) - 1
+
+
+def browser_json_values(value, *, omit=()):
+    """Represent unsafe integers exactly in read-only browser data."""
+    if type(value) is int and abs(value) > MAX_BROWSER_INTEGER:
+        return str(value)
+    if isinstance(value, dict):
+        return {key: browser_json_values(item, omit=omit) for key, item in value.items() if key not in omit}
+    if isinstance(value, (list, tuple)):
+        return [browser_json_values(item, omit=omit) for item in value]
+    return value
 
 
 def canonical(value):
@@ -487,10 +533,31 @@ def budget(limits=None):
             "supplements": 0, "dispatches": []}
 
 
+MINIMUM_SAVE_SECONDS = .001
+_BUDGET_EPSILON = 1e-9
+
+
+def recovery_time_block(task, *, save_only=False):
+    """Read the total execution allowance, including time reserved for delivery."""
+    status = task.get("status")
+    if status not in ("失败", "已取消") and not (status == "待开始" and task.get("batch", 0) > 0):
+        return None
+    try:
+        remaining = task["ledger"]["limits"]["seconds"] - task["ledger"]["used"]["seconds"]
+    except (KeyError, TypeError):
+        return None
+    if save_only:
+        if remaining + _BUDGET_EPSILON < MINIMUM_SAVE_SECONDS:
+            return "剩余执行时间不足，待保存正文已保留。"
+    elif remaining <= 0:
+        return "执行时间已用尽，已取得的研究资料仍可查看。"
+    return None
+
+
 def charge(ledger, kind, amount=1, delivery=False):
     remaining = ledger["limits"][kind] - ledger["used"][kind]
     reserve = 0 if delivery else ledger["reserve"].get(kind, 0)
-    if amount < 0 or not math.isfinite(amount) or amount > remaining - reserve + 1e-9:
+    if amount < 0 or not math.isfinite(amount) or amount > remaining - reserve + _BUDGET_EPSILON:
         raise ContractError("预算不足，不能占用交付预留")
     ledger["used"][kind] += amount
 
@@ -918,7 +985,17 @@ def validate_calculation_context(method, bindings, parameters, *, context_contra
         if contexts["price"].get("price_kind") != "close" or contexts["nav"].get("nav_kind") != "official":
             raise ContractError("仅允许同估值时点收盘价与官方单位净值，不接受IOPV")
     elif method == "etf_daily_nav_premium_v1":
-        shared('fund_id')
+        bound_fund = records[0]['object']
+        if context_contract is not None and re.fullmatch(r'[0-9]{6}\.(?:SH|SZ)', bound_fund):
+            # Both records already belong to this exchange-qualified object.
+            # A filing may print only its six-digit code, while the quote
+            # includes the exchange. Preserve the source values and bind
+            # both to the verified object for comparison.
+            aliases = (bound_fund, bound_fund[:6])
+            if any(item.get('fund_id') not in aliases for item in contexts.values()):
+                raise ContractError('日度折溢价输入的基金代码与已核验对象不一致')
+        else:
+            shared('fund_id')
         shared('share_class')
         if any(contexts['price'][field].casefold() in ('unknown', 'unverified', '未知', '未核验', '未披露', '不适用')
                for field in ('fund_id', 'share_class')):
