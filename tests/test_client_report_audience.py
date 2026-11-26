@@ -4,13 +4,15 @@ This new suite leaves historical tests and frozen production reports untouched.
 The small fixture is explicitly synthetic; the saved Maotai replay is separate.
 """
 from copy import deepcopy
+import base64
 import json
 import socket
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 from lxml import html
 from tests import ROOT
-from researchhelper.contracts import canonical
+from researchhelper.contracts import canonical, fingerprint
 from researchhelper.draft_analysis import analyze
 from researchhelper.draft_workflow import _write
 from researchhelper.drafts import normalize_report,compose,source_binding
@@ -59,8 +61,9 @@ class ClientReportAudienceTests(unittest.TestCase):
     def test_client_keeps_business_narrative_and_moves_records_out_of_paper(self):
         before=canonical(self.content);result=design(self.content,ROOT);tree=html.document_fromstring(result['html'])
         visible=''.join(tree.xpath('//main//text()'))
-        for word in ('核心结论','策略逻辑一','策略逻辑二','策略逻辑三','风险提示','利润与现金流改善','单位一致为前提'):
+        for word in ('核心结论','策略逻辑一','策略逻辑二','策略逻辑三','风险提示','利润与现金流改善'):
             self.assertIn(word,visible)
+        self.assertIn('若报表披露口径不同，同比和比率需重新计算。',tree.get_element_by_id('risk').text_content())
         for word in ('研究草稿','原值','同尺度','核验','ResDesk','接口','内部口径','仅内部保存','完整原始数据'):
             self.assertNotIn(word,visible)
         self.assertFalse(tree.xpath('//main//table|//main//*[contains(@class,"evidence-ledger")]|//details|//summary'))
@@ -68,14 +71,61 @@ class ClientReportAudienceTests(unittest.TestCase):
         self.assertTrue(tree.xpath('//*[@id="complete-report-data"]//table'))
         self.assertEqual(before,canonical(self.content))
 
+    def test_offline_delivery_carries_the_bound_excerpt_and_omits_uncited_attachment_text(self):
+        from core.session import Session
+
+        cited = '2025年第三季度营业收入同比增长19%'
+        private_page = '未引用的内部附页RH-PRIVATE-PAGE'
+        private_tail = '同段未引用的文字RH-PRIVATE-TAIL'
+        workpaper = '仅在详版审阅的内部复核备注'
+        original = (private_page + '。\n\n' + cited + '。' + private_tail + '。').encode()
+        with TemporaryDirectory() as directory:
+            session = Session(directory)
+            try:
+                task = session.create('核对600519.SH第三季度营业收入的报告口径。',objects=['600519.SH'])
+                ident = task['id']
+                attachment = session.material(ident,'季度披露.txt',original)
+                final = session.draft(ident,report=dict(title='收入披露核对',conclusion=cited+'。',
+                    logics=[dict(title='第三季度营业收入',analysis=cited+'。',source_refs=[attachment['id']],
+                        workpaper_notes=[workpaper],risk='比较采用同一收入定义。')]),data_requests=[])
+                self.assertTrue(final.get('delivery'),final.get('error'))
+                self.assertEqual(final['ledger']['used']['model_calls'],0)
+                saved = session.archive.report(ident,1)
+                frozen = session.export(ident).read_text()
+                for profile in ('standard','detailed'):
+                    with self.subTest(profile=profile):
+                        page = session.export(ident,profile=profile).read_text()
+                        tree = html.document_fromstring(page)
+                        (link,) = tree.get_element_by_id('summary').xpath('.//a[@class="quantity-link"]')
+                        excerpt = tree.get_element_by_id(link.get('href')[1:])
+                        self.assertEqual(excerpt.xpath('./p[not(@class)]/text()'),[cited])
+                        self.assertEqual(excerpt.xpath('./p[@class="figure-source"]/text()'),['段落2'])
+                        risk_target = 'logic-1' if profile == 'detailed' else 'risk'
+                        self.assertIn('比较采用同一收入定义。',tree.get_element_by_id(risk_target).text_content())
+                        self.assertIn('用户提供材料',tree.xpath('//main/footer/p')[0].text_content())
+                        self.assertNotIn(private_page,page)
+                        self.assertNotIn(private_tail,page)
+                        self.assertNotIn(base64.b64encode(original).decode(),page)
+                        self.assertEqual(workpaper in page,profile=='detailed')
+                        if profile=='standard':
+                            self.assertEqual(page,frozen)
+                self.assertEqual(session.archive.report(ident,1),saved)
+                kept = session.archive.get(ident)['materials'][0]['snapshot']
+                self.assertEqual(base64.b64decode(kept['original_base64']),original)
+            finally:
+                session.agent.close_runtime()
+
     def test_no_unconfirmed_absolute_amounts_are_plotted_for_clients(self):
         result=design(self.content,ROOT);charts=[b['spec'] for b in result['document']['blocks'] if b['kind']=='chart']
-        self.assertEqual(len(charts),4)
-        self.assertEqual([row['figures'] for row in result['document']['figure_coverage'].values()],[1,1,2])
-        self.assertEqual(len(result['document']['dataset']['rows']),12)
-        self.assertEqual(result['document']['dataset']['rows'][0][3],10000000000)
-        self.assertTrue(all(s.get('field') not in ('financial_inputs','ths_revenue_stock','ths_np_atoopc_stock','ths_ncf_from_oa_stock') for s in charts))
-        self.assertTrue(any(s.get('kind')=='changes' for s in charts))
+        self.assertEqual(len(charts), 2)
+        coverage = result['document']['figure_coverage']
+        self.assertEqual([row['status'] for row in coverage.values()], ['numeric_text', 'numeric_text', 'numeric'])
+        self.assertEqual(set(coverage['logic-1']['data_refs']), {'D1', 'D2', 'D4', 'D5'})
+        self.assertEqual(set(coverage['logic-2']['data_refs']), {'D3', 'D6'})
+        self.assertEqual(len(result['document']['dataset']['rows']), 12)
+        self.assertEqual(result['document']['dataset']['rows'][0][3], 10000000000)
+        self.assertEqual({spec['field'] for spec in charts}, {'close', 'ths_pe_ttm_stock'})
+        self.assertFalse(html.document_fromstring(result['html']).xpath('//main//tr[@data-observation-id]'))
         pe=next(s for s in charts if s.get('field')=='ths_pe_ttm_stock')
         self.assertEqual(pe['unit'],'');self.assertEqual(pe['values'],[20.2,20.4,20.3])
 
@@ -96,13 +146,57 @@ class ClientReportAudienceTests(unittest.TestCase):
         tree=html.document_fromstring(design(content,ROOT)['html'])
         for logic in content['draft']['logics']:self.assertIn(logic['risk'],''.join(tree.xpath('//main//*[@id="risk"]//text()')))
 
+    def test_current_draft_deduplicates_risks_without_losing_scope_or_evidence(self):
+        from researchhelper.contracts import fingerprint
+        from researchhelper.publication_content import DRAFT_READING_POLICY, DRAFT_READING_VERSION
+
+        content = deepcopy(self.content)
+        draft = content['draft']
+        draft[DRAFT_READING_POLICY] = DRAFT_READING_VERSION
+        first, second, third = [item['risk'] for item in draft['logics']]
+        draft['logics'][1]['analysis'] += '\n' + second
+        distinct = draft['risks'][0]
+        extra = '实际结算日期尚未取得。'
+        draft['risks'].extend([first, second, distinct])
+        draft['reader_notes'].extend([extra, second, extra])
+        content['content_hash'] = fingerprint({k:v for k,v in content.items() if k != 'content_hash'})
+        before = canonical(content)
+        for profile in ('standard','detailed'):
+            with self.subTest(profile=profile):
+                result = design(content, ROOT, profile=profile)
+                tree = html.document_fromstring(result['html'])
+                main = tree.xpath('//main')[0].text_content()
+                for index, risk in enumerate((first, second, third), 1):
+                    self.assertEqual(main.count(risk), 1)
+                    target = f'logic-{index}' if profile == 'detailed' else 'risk'
+                    self.assertIn(risk, tree.get_element_by_id(target).text_content())
+                self.assertEqual(main.count(distinct), 1)
+                self.assertEqual(main.count(extra), 1)
+                self.assertIn(extra, tree.get_element_by_id('risk').text_content())
+                self.assertEqual(len(result['document']['dataset']['rows']), 12)
+                coverage = result['document']['figure_coverage']
+                expected = ('numeric_text' if profile == 'standard' else 'numeric_table', 'numeric_text', 'numeric')
+                self.assertEqual(tuple(row['status'] for row in coverage.values()), expected)
+                self.assertEqual(set(coverage['logic-2']['data_refs']), {'D3', 'D6'})
+                self.assertEqual(canonical(content), before)
+
     def test_normalizer_retains_workpaper_notes_but_rejects_nontext(self):
         facts=self.task['draft_report']['facts']
+        extra = '若应收账龄拉长，同一销售增量对应的收现压力会上升。'
         value=dict(title='研究',conclusion='结论',workpaper_notes=['备注','备注',{'bad':True}],reader_notes=['适用范围'],
-                   logics=[dict(title='逻辑',analysis='判断',workpaper_notes=['内部','内部',None])])
+                   logics=[dict(title='逻辑',analysis='判断',detail_analysis=extra,workpaper_notes=['内部','内部',None]),
+                           dict(title='另一判断',analysis='第二段',detail_analysis={'bad': True})])
         normalized=normalize_report(value,self.task,facts)
         self.assertEqual(normalized['workpaper_notes'],['备注']);self.assertEqual(normalized['reader_notes'],['适用范围'])
         self.assertEqual(normalized['logics'][0]['workpaper_notes'],['内部'])
+        self.assertEqual(normalized['logics'][0]['detail_analysis'], extra)
+        self.assertNotIn('detail_analysis', normalized['logics'][1])
+        content = deepcopy(self.content)
+        content['draft'].update(normalized)
+        content['content_hash'] = fingerprint({key: val for key, val in content.items() if key != 'content_hash'})
+        for profile in ('standard', 'detailed'):
+            paper = html.document_fromstring(design(content, ROOT, profile=profile)['html']).find('.//main')
+            self.assertEqual(extra in paper.text_content(), profile == 'detailed')
 
     def test_app_uses_shared_client_brief_without_extra_model_call(self):
         calls=[]
