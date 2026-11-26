@@ -79,12 +79,24 @@ class ExtractionRegistryScopeTests(unittest.TestCase):
         self.assertEqual(self.task["reasoning_state"]["extraction"], checkpoint)
 
     def test_existing_valid_checkpoint_is_not_invalidated_by_prompt_only_change(self):
+        self.extract()
+        checkpoint = copy.deepcopy(self.task["reasoning_state"]["extraction"])
+        ledger = copy.deepcopy(self.task["ledger"])
+        with patch.dict(PHASE_RULES, {"extract": PHASE_RULES["extract"] + "\n仅调整说明文字。"}):
+            self.extract()
+        self.assertEqual(len(self.model.messages), 1)
+        self.assertEqual(self.task["reasoning_state"]["extraction"], checkpoint)
+        self.assertEqual(self.task["ledger"], ledger)
+
+    def test_obsolete_semantic_checkpoint_is_recomputed_without_approving_evidence(self):
         views = extractable_source_views(self.task)
         digest = fingerprint({"input_hash": self.task["input_hash"], "sources": views,
                               "reader_version": 1, "api_candidate_version": 5})
         self.task["reasoning_state"] = {"extraction": {"input_digest": digest}}
         self.extract()
-        self.assertFalse(self.model.messages)
+        self.assertEqual(len(self.model.messages), 1)
+        self.assertNotEqual(self.task["reasoning_state"]["extraction"]["input_digest"], digest)
+        self.assertFalse(self.task["evidence"])
 
     def test_payload_cannot_mutate_global_field_definitions(self):
         before = copy.deepcopy(FIELD_REGISTRY)
