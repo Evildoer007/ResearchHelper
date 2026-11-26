@@ -36,8 +36,8 @@ def macos(*, pdf_renderer=None):
     return _builder('packaging/app/build_app.py').macos(output=OUTPUT, pdf_renderer=pdf_renderer)
 
 
-def windows():
-    return _builder('packaging/app/windows/build_windows.py').windows(output=OUTPUT)
+def windows(skill_archive):
+    return _builder('packaging/app/windows/build_windows.py').windows(output=OUTPUT, skill_archive=skill_archive)
 
 
 def release_record(artifacts):
@@ -72,7 +72,7 @@ def build(*, install_skill=False):
         if target == 'macos':
             artifacts['dmg'] = str(macos(pdf_renderer=pdf_renderer))
         else:
-            artifacts['setup'] = str(windows())
+            artifacts['setup'] = str(windows(artifacts['skill']))
     return release_record(artifacts)
 
 
