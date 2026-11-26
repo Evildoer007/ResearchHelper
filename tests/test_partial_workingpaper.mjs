@@ -1,16 +1,22 @@
-/* Read-only UI checks for the retained real failure; never restart research. */
+/* Check rejected-source grouping without a retained run or an App session. */
 import assert from 'node:assert/strict';
-import {readFile,writeFile,mkdtemp} from 'node:fs/promises';
+import {readFile} from 'node:fs/promises';
 import path from 'node:path';
+import {fileURLToPath} from 'node:url';
 import vm from 'node:vm';
 
-const root='/Users/haoranxu/Desktop/ResearchHelper';
-const output=await mkdtemp(path.join(root,'result/acceptance/partial-workingpaper-unit-'));
+const root=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const source=await readFile(path.join(root,'products/app/frontend/workspace.js'),'utf8');
-const task=JSON.parse(await readFile(path.join(root,'result/acceptance/installed-natural-research-941_jdsj/task.json'),'utf8'));
-const context={esc:value=>String(value??'').replace(/[&<>"']/g,character=>
+const task={id:'synthetic-workingpaper',version:1};
+const original={id:'synthetic-quote',kind:'api',source:'ifind',operation:'cmd_history_quotation',
+  task_id:task.id,research_version:task.version};
+task.source_records=[original];
+task.rejected_evidence=Array.from({length:61},(_,index)=>({id:'sample-'+(index+1),
+  artifact_id:original.id,object:'600000.SH',rejection:'证券身份映射valid_from缺失',question_ids:['q1']}));
+const context={window:{},esc:value=>String(value??'').replace(/[&<>"']/g,character=>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[character]))};
 vm.createContext(context);
+vm.runInContext(await readFile(path.join(root,'products/app/frontend/ui/research-data.js'),'utf8'),context);
 for(const [start,end] of [['collectionWorkingpaper','conclusion'],['sourceRecordName','sourceRecordButtons'],['sourceRecordButtons','openSource']]){
   const first=source.indexOf('function '+start+'('),last=source.indexOf('function '+end+'(',first);
   assert.ok(first>=0&&last>first,'production UI function exists: '+start);
@@ -20,7 +26,7 @@ const record={status:'failed',checks:[],model_calls:0,provider_calls:0,original_
 const check=(label,value)=>{assert.equal(value,true,label);record.checks.push(label)};
 try{
   const before=JSON.stringify(task),paper=context.collectionWorkingpaper(task);
-  check('real retained raw source remains reachable',paper.includes('留存资料')&&paper.includes(task.source_records[0].id));
+  check('retained raw source remains reachable',paper.includes('留存资料')&&paper.includes(task.source_records[0].id));
   check('61 same-source failures grouped once',paper.includes('61条')&&(paper.match(/缺少代码映射有效期起点/g)||[]).length===1);
   check('raw source never labelled approved',paper.includes('未通过核验，不能作为结论依据。')&&!paper.includes('已核验数据'));
   check('working record never mutates research',JSON.stringify(task)===before);
@@ -38,5 +44,4 @@ try{
   check('empty task has no artificial sources',context.collectionWorkingpaper({id:'blank',version:1})==='');
   record.status='passed';
 }catch(error){record.error=error.message;process.exitCode=1}
-const receipt=path.join(output,'receipt.json');await writeFile(receipt,JSON.stringify(record,null,2));
-console.log(JSON.stringify({status:record.status,checks:record.checks.length,receipt}));
+console.log(JSON.stringify({...record,checks:record.checks.length}));
