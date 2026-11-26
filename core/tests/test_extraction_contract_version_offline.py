@@ -1,4 +1,4 @@
-"""Version-26 counterparts; keep both version-25 tests untouched."""
+"""Phase protocols follow their current revisions independently of retained knowledge."""
 
 import copy
 import json
@@ -20,12 +20,11 @@ class ExtractionContractVersionTests(unittest.TestCase):
         fixture = answer_tests.fixtures.AnalysisOutputStructureTests()
         fixture.setUp()
         self.addCleanup(fixture.doCleanups)
-        self.assertEqual(RULES_VERSION, 26)
         for phase in PHASE_FIELDS:
             with self.subTest(phase=phase):
                 model = fixture.model(phase_output_example(phase))
                 _, receipt = model_object(model, fixture.task, phase, {}, PHASE_FIELDS[phase])
-                self.assertEqual(receipt["rules_version"], 26)
+                self.assertEqual(receipt["rules_version"], RULES_VERSION)
                 if phase == "analyze":
                     self.assertEqual(receipt["analysis_text_rules_version"], ANALYSIS_TEXT_RULES_VERSION)
                 else:
@@ -48,7 +47,7 @@ class ExtractionContractVersionTests(unittest.TestCase):
         for phase in ("plan", "supplement", "extract", "analyze"):
             host.output = phase_output_example(phase)
             _, receipt = model_object(host, fixture.task, phase, {}, PHASE_FIELDS[phase])
-            self.assertEqual(receipt["rules_version"], 26)
+            self.assertEqual(receipt["rules_version"], RULES_VERSION)
             if phase in ("plan", "supplement"):
                 self.assertEqual(receipt["calculation_contract_version"], CALCULATION_PLAN_VERSION)
             else:
@@ -60,12 +59,11 @@ class ExtractionContractVersionTests(unittest.TestCase):
         self.addCleanup(fixture.doCleanups)
         parent = fixture.parent()
         child = fixture.follow(parent)
-        self.assertEqual(RULES_VERSION, 26)
         for task in (parent, child):
             with patch("researchhelper.reasoning._record_output_contract") as record:
                 _, receipt = model_object(fixture.agent.model, task, "extract", {}, PHASE_FIELDS["extract"])
             diagnostic = record.call_args.args[3]
-            self.assertEqual(receipt["rules_version"], 26)
+            self.assertEqual(receipt["rules_version"], RULES_VERSION)
             if task is child:
                 self.assertEqual(receipt["conversation_rules_version"], CONVERSATION_RULES_VERSION)
                 self.assertEqual(diagnostic["conversation_rules_version"], CONVERSATION_RULES_VERSION)
@@ -88,5 +86,4 @@ class ExtractionContractVersionTests(unittest.TestCase):
         fees.ResearchKnowledge().validate_package(historical)
         self.assertEqual(fingerprint(old), fingerprint(fees.RETAINED_VERSIONS[(identifier, 1)]))
         self.assertEqual(fees.METHOD_REGISTRY[fees.METHOD]["implementation_version"], 1)
-        self.assertEqual(RULES_VERSION, 26)
         self.assertIn("raw_unit与unit仍填%", PHASE_RULES["extract"])
