@@ -43,12 +43,12 @@ iFinD固定API优先，行情与财务字段复用，不默认下载PDF，不使
 
 ## 四、构建与安装
 
-双击build-researchhelper-macos.command或build-researchhelper-windows.bat。macOS先生成安装包，再从实际DMG隔离启动App，验证机制、ETF和投资判断三类案例、标准和详细报告及五种导出，并与独立Skill核对数据；全部通过后更新项目Skill。开发使用现有MachineLearning环境，不另建环境。成品App不依赖用户的Conda或源码目录。
+双击build-researchhelper-macos.command或build-researchhelper-windows.bat。macOS从实际DMG隔离启动App，Windows在临时安装目录中启动内置服务。两个入口均验收机制、ETF和投资判断三类案例、标准版和详细版及五种导出，再逐版对照独立Skill的数据。通过后更新项目Skill。开发沿用现有MachineLearning环境，成品App内置运行时。
 
 |交付|位置|
 |---|---|
-|macOS安装包|[dist/ResearchHelper-0.10.0-arm64.dmg](dist/ResearchHelper-0.10.0-arm64.dmg)|
-|Skill安装包|[dist/ResearchHelper-Skill-0.10.0.zip](dist/ResearchHelper-Skill-0.10.0.zip)|
+|macOS安装包|[dist/ResearchHelper-0.1.0-arm64.dmg](dist/ResearchHelper-0.1.0-arm64.dmg)|
+|Skill安装包|[dist/ResearchHelper-Skill-0.1.0.zip](dist/ResearchHelper-Skill-0.1.0.zip)|
 |项目级Skill安装|.skills/researchhelper/|
 |已安装App|/Applications/ResearchHelper.app|
 |主项目demo|[demo/index.html](demo/index.html)|
@@ -64,4 +64,4 @@ App数据位于Application Support/ResearchHelper/research-v1；独立Skill数�
 
 根VERSION维护版本；依赖按锁文件核对；打包按明确白名单取源码。测试和可再生验收产物不进入运行包。docs维护当前说明，references维护按需指南，接口字段从实际工具读取，不再按每次修改追加历史文档。
 
-清理只移除已确认不再使用的内容，保留现版交付、实际报告和回归样本。清单及恢复映射放在result/maintenance，不另存整仓备份。当前状态和验收边界见[当前状态](docs/CURRENT_VERSION.md)。
+清理只移除已确认不再使用的内容，保留现版交付、实际报告和回归样本。清单及执行记录放在result/maintenance，不另存整仓备份。当前状态和验收边界见[当前状态](docs/CURRENT_VERSION.md)。
