@@ -7,6 +7,7 @@ import importlib.util
 import json
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from researchhelper import auth, service
 from researchhelper.auth import LocalAccount
@@ -38,7 +39,12 @@ class CurrentPresetAccountsTests(preset.PresetAccountsTests):
         with self.assertRaises(ContractError): self.account.setup('overwrite-admin','overwrite-sales')
         source = Path(service.__file__).resolve()
         self.assertEqual(source,ROOT/'core/src/researchhelper/service.py')
-        self.assertIn('authentication=True, runtime_configurable=True, preset_accounts=True',source.read_text())
+        # Check launch options independent of source formatting.
+        with patch.object(service, 'make_server', side_effect=StopIteration) as make_server:
+            with self.assertRaises(StopIteration):
+                service.serve()
+        for flag in ('authentication', 'runtime_configurable', 'preset_accounts'):
+            self.assertIs(make_server.call_args.kwargs[flag], True)
         with self.assertRaises(ContractError): service.make_server(self.temp.name,preset_accounts=True)
 
 
