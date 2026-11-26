@@ -1,28 +1,36 @@
 """Resolve obsolete state, not missing facts, methods or financial approval."""
 import copy
-import json
 import unittest
 
-from tests import ROOT
+from tests.argument_review_fixture import financial_review_fixture
 from researchhelper.engine import ResearchAgent
 
 
-RETAINED = ROOT / 'result/acceptance/one-sentence-research-wyh3lh1k/task.json'
 POLICY = 'evidence_gap_lifecycle_version'
 
 
 class EvidenceGapLifecycleTests(unittest.TestCase):
     def setUp(self):
-        self.original = RETAINED.read_bytes()
-        self.task = json.loads(self.original)
+        self.task, _ = financial_review_fixture()
         self.task[POLICY] = 1
-        self.task.update(gaps=[], gap_records=[], resolved_gap_records=[], optional_findings=[])
+        self.task['questions'][0]['status'] = '未回答'
+        self.task.update(gaps=[], gap_records=[], resolved_gap_records=[], optional_findings=[],
+                         calculations=[], calculation_specs=[])
+        # These three recorded extraction states exercise scope and ordering.
+        # The evidence itself is rebuilt and verified from synthetic originals.
+        batch = self.task['batch']
+        accepted = dict(research_phase='extract', status='成功', batch=batch,
+                        output_contract={'shape_accepted': True})
+        self.task['ledger']['dispatches'] = [
+            dict(accepted, batch=batch - 1), dict(accepted, status='失败'), accepted]
+        receipt = dict(phase='extract', task_id=self.task['id'], research_version=self.task['version'],
+                       batch=batch, input_hash=self.task['input_hash'])
+        self.task['reasoning_state'] = {'extraction': {'receipt': receipt}}
         self.agent = ResearchAgent.__new__(ResearchAgent)
         self.ledger = copy.deepcopy(self.task['ledger'])
         self.questions = copy.deepcopy(self.task['questions'])
 
     def tearDown(self):
-        self.assertEqual(RETAINED.read_bytes(), self.original)
         self.assertEqual(self.task['ledger'], self.ledger)
         self.assertEqual(self.task['questions'], self.questions)
 
@@ -76,11 +84,11 @@ class EvidenceGapLifecycleTests(unittest.TestCase):
         self.assertEqual(self.task['gaps'], ['独立来源仍缺失', '其他问题缺口', '新覆盖描述'])
 
     def extraction_state(self):
-        self.task['reasoning_state']['extraction'].update(question_ids=['q1'], accepted_dispatch=10)
+        self.task['reasoning_state']['extraction'].update(question_ids=['q1'], accepted_dispatch=2)
 
     def test_later_accepted_extraction_resolves_format_gap_not_core_question(self):
         self.gap('旧提取未完成', 'evidence_extraction')
-        self.task['gap_records'][-1]['failure_dispatch'] = 8
+        self.task['gap_records'][-1]['failure_dispatch'] = 1
         self.extraction_state()
         self.gap('核心问题缺少价格', 'question_coverage')
         self.agent._resolve_current_gaps(self.task)
@@ -91,11 +99,11 @@ class EvidenceGapLifecycleTests(unittest.TestCase):
         self.gap('新提取未完成', 'evidence_extraction')
         self.extraction_state()
         original = copy.deepcopy(self.task['reasoning_state']['extraction'])
-        for change in ({}, dict(accepted_dispatch=7), dict(question_ids=['foreign'])):
+        for change in ({}, dict(accepted_dispatch=0), dict(question_ids=['foreign'])):
             self.task['reasoning_state']['extraction'] = dict(copy.deepcopy(original), **change)
             self.agent._resolve_current_gaps(self.task)
             self.assertEqual(self.task['gaps'], ['新提取未完成'])
-        self.task['gap_records'][-1]['failure_dispatch'] = 8
+        self.task['gap_records'][-1]['failure_dispatch'] = 1
         self.task['reasoning_state']['extraction'] = copy.deepcopy(original)
         self.task['reasoning_state']['extraction']['receipt']['task_id'] = 'foreign'
         self.agent._resolve_current_gaps(self.task)
