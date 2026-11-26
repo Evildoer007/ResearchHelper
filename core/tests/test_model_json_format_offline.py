@@ -27,7 +27,7 @@ class ModelJSONFormatTests(unittest.TestCase):
     def test_every_phase_has_parseable_example_with_exact_fields(self):
         for phase, fields in PHASE_FIELDS.items():
             with self.subTest(phase=phase):
-                output = {field: '' if field in {'reason', 'expected_change', 'stop_reason'} else [] for field in fields}
+                output = {field: {} if field == 'answers' else '' if field in {'reason', 'expected_change', 'stop_reason'} else [] for field in fields}
                 model = CapturingModel(json.dumps(output))
                 value, receipt = model_object(model, self.task, phase, {}, fields)
                 system = model.calls[0][1][0]['content']
