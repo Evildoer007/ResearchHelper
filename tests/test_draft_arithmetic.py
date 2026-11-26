@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from tests import ROOT
 from researchhelper.contracts import ContractError, METHOD_REGISTRY, canonical
-from researchhelper.draft_analysis import METHODS, execute, analyze, current_analysis,formula_mathml
+from researchhelper.draft_analysis import DAILY_NAV_PREMIUM_METHOD, METHODS, execute, analyze, current_analysis,formula_mathml
 from researchhelper.draft_sources import observations
 from researchhelper.draft_workflow import _write
 from researchhelper.drafts import normalize_report,compose,render,source_binding,logic_basis
@@ -32,8 +32,11 @@ class DraftArithmeticTests(unittest.TestCase):
         guard=patch.object(socket.socket,'connect',side_effect=AssertionError('No real I/O'))
         guard.start();self.addCleanup(guard.stop)
 
-    def test_registry_cannot_be_used_as_a_reviewed_calculation_method(self):
-        self.assertFalse(set(METHODS)&set(METHOD_REGISTRY))
+    def test_draft_arithmetic_only_shares_the_registered_daily_nav_calculator(self):
+        self.assertEqual(set(METHODS) & set(METHOD_REGISTRY), {DAILY_NAV_PREMIUM_METHOD})
+        result = execute(DAILY_NAV_PREMIUM_METHOD, dict(price=10.20, nav=10.00, valuation_date='2026-10-16'))
+        self.assertAlmostEqual(result['value'], 2)
+        self.assertNotIn('financial_approval', result)
         with self.assertRaises(ContractError):execute('__import__',dict(a=1,b=2))
 
     def test_actual_hk_change_is_minus_5_84_percent_not_7_31_amplitude(self):
@@ -291,15 +294,14 @@ class DraftFundArithmeticTests(unittest.TestCase):
         for profile in ('standard','detailed'):
             with self.subTest(profile=profile):
                 result=design(content,ROOT,profile=profile);tree=html.document_fromstring(result['html'])
-                rows=tree.xpath('//main//div[contains(@class,"argument-observations")]//tr[@data-observation-id="D1"]')
-                self.assertEqual(len(rows),1)
-                cells=rows[0].xpath('./th/text()|./td/text()|./td/a/text()')
-                self.assertEqual(cells,['510300.SH','单位净值','2026-10-20','4.1856','元','公开来源'])
-                self.assertEqual(rows[0].xpath('./td/a/@href'),['#draft-basis-1'])
+                shown=tree.xpath('//main//p[@class="measured-reading"]/span[@data-observation-id="D1"]')
+                self.assertEqual(len(shown),1)
+                self.assertIn('510300.SH 2026-10-20 单位净值为4.1856元', shown[0].text_content())
+                self.assertEqual(shown[0].xpath('./a/@href'),['#draft-basis-1'])
                 self.assertFalse(tree.xpath('//main//*[contains(concat(" ",normalize-space(@class)," ")," chart ")]'))
                 coverage=result['document']['figure_coverage']['logic-1']
-                self.assertEqual((coverage['status'],coverage['figures'],coverage['tables'],coverage['data_refs']),('numeric_table',0,1,['D1']))
-                self.assertEqual(len(result['document']['dataset']['rows']),1)
+                self.assertEqual((coverage['status'],coverage['figures'],coverage['data_refs']),('numeric_text',0,['D1']))
+                self.assertEqual(result['document']['dataset']['rows'], [['510300.SH','单位净值','2026-10-20','4.1856','元','公开来源']])
         self.assertEqual(canonical(content),before)
 
     def test_unassigned_single_value_appears_in_key_data_without_guessing_a_logic_binding(self):
@@ -320,12 +322,17 @@ class DraftFundArithmeticTests(unittest.TestCase):
                 data_refs=['D1','D3'],calculation_refs=['A1'])]),task,facts)
         task['draft_report']=dict(draft,facts=facts,calculations=task['draft_analysis']['results'],source_binding=source_binding(task))
         content=compose(task);figures=logic_figure_plan(content)
-        nav=next(row for row in figures if row.get('field')=='ths_unit_nvnf_fund')
-        self.assertEqual(nav['values'],[4,None,4.4]);self.assertEqual(nav['point_refs'],[['D1'],['D2'],['D3']])
-        self.assertEqual(nav['plot_context']['context_data_refs'],['D2'])
-        documents=[design(content,ROOT,profile=profile)['document'] for profile in ('standard','detailed')]
-        self.assertEqual(documents[0]['dataset'],documents[1]['dataset']);self.assertEqual(len(documents[0]['dataset']['rows']),3)
-        self.assertTrue(all(doc['figure_coverage']['logic-1']['figures'] for doc in documents))
+        self.assertFalse(figures)
+        standard,detailed=(design(content,ROOT,profile=profile) for profile in ('standard','detailed'))
+        short,complete=(paper['document']['dataset'] for paper in (standard,detailed))
+        self.assertEqual(short,complete)
+        self.assertEqual([(row[2],row[3]) for row in short['rows']],
+                         [('2026-10-20','4'),('2026-10-21',None),('2026-10-22','4.4')])
+        from lxml import html
+
+        main=html.document_fromstring(standard['html']).get_element_by_id('logic-1').text_content()
+        self.assertIn('单位净值原始读数为4', main)
+        self.assertNotIn('未确认', main)
 
 
 if __name__=='__main__':unittest.main()
