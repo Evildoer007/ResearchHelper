@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from tests import ROOT
+from tests.legacy_replay_fixtures import financial_task
 from researchhelper.contracts import budget, context, evidence_applies_to_answer
 from researchhelper.model import ModelService, ModelSettings
 from researchhelper.output_schema import (StructuredOutputError, analysis_output_schema,
@@ -158,37 +159,37 @@ class QuestionBoundAnalysisTests(unittest.TestCase):
             self.assertEqual(transport.call_count, 1)
             self.assertEqual(self.task['ledger']['used']['model_calls'], 1)
 
-    def test_retained_macro_wrong_question_references_are_no_longer_advertised(self):
-        path = ROOT / 'result/acceptance/one-sentence-research-v4zeo1mq/task.json'
-        original = path.read_bytes()
-        task = json.loads(original)
-        task['analysis_question_scope_version'] = 1
-        proposal = task['reasoning_state']['rejected_analysis_submissions'][0]['proposal']['answers']['q4']
-        evidence = {item['id']: item for item in task['evidence']}
-        invalid = [ref for ref in proposal['refs'] if not evidence_applies_to_answer(task, evidence[ref], 'q4')]
-        self.assertTrue(invalid)
-        wire = dict(version=2, binding=context(task), answers=[dict(question_id='q4',
-            segments=[dict(text='仅回放引用，不批准原判断。', refs=[invalid[0]], counter_refs=[])],
-            knowledge_refs=[], provenance_refs=[])], theses=[])
-        with self.assertRaises(StructuredOutputError):
-            self.decode(wire, task)
-        self.assertEqual(path.read_bytes(), original)
+    def test_evidence_from_other_research_questions_is_absent_from_scoped_choices(self):
+        task = financial_task()
+        task.update(analysis_citation_encoding=2, analysis_question_scope_version=1)
+        original = copy.deepcopy(task)
+        schema = analysis_output_schema(task, ['financial'])
+        choices = json.dumps(schema['properties']['answers'])
+        self.assertIn('"revenue"', choices)
+        for evidence in task['evidence']:
+            if evidence_applies_to_answer(task, evidence, 'financial'):
+                continue
+            reference = evidence['id']
+            self.assertNotIn(json.dumps(reference), choices)
+            wire = dict(version=2, binding=context(task), answers=[dict(question_id='financial',
+                segments=[dict(text='财务口径。', refs=[reference], counter_refs=[])],
+                knowledge_refs=[], provenance_refs=[])], theses=[])
+            with self.assertRaises(StructuredOutputError):
+                self.decode(wire, task, schema)
+        self.assertEqual(task, original)
 
     def test_rejection_feedback_names_registered_question_and_wrong_scope_only(self):
-        path = ROOT / 'result/acceptance/one-sentence-research-v4zeo1mq/task.json'
-        original = path.read_bytes()
-        task = json.loads(original)
+        task = financial_task()
         task['analysis_question_scope_version'] = 1
-        proposal = task['reasoning_state']['rejected_analysis_submissions'][0]['proposal']
+        original = copy.deepcopy(task)
+        proposal = dict(answers=dict(financial=dict(answer='经营风险。', refs=['management', 'management', 'revenue'])),
+                        theses=[])
         review = analysis_numeric_review(task, proposal)
         self.assertFalse(review['accepted'])
-        q4 = next(item for item in review['question_failures'] if item['question_id'] == 'q4')
-        self.assertEqual(q4['code'], 'reference_outside_question')
-        self.assertTrue(q4['reference_ids'])
-        self.assertTrue(set(q4['reference_ids']).issubset({item['id'] for item in task['evidence']}))
-        self.assertEqual(set(q4), {'question_id', 'code', 'reference_ids'})
+        self.assertEqual(review['question_failures'], [
+            dict(question_id='financial', code='reference_outside_question', reference_ids=['management'])])
         self.assertFalse(review['approval'])
         legacy = dict(task)
         legacy.pop('analysis_question_scope_version')
         self.assertNotIn('question_failures', analysis_numeric_review(legacy, proposal))
-        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(task, original)
