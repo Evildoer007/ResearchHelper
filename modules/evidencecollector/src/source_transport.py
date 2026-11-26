@@ -16,7 +16,7 @@ import time
 import urllib.error
 import urllib.request
 
-from .contracts import ContractError, charge, fingerprint, now
+from .contracts import ContractError, DuplicateJSONField, charge, fingerprint, now, unique_json_object
 from .https_transport import open_verified_https
 from .evidence import EvidenceCollector, TINYSHARE_DOCS, _download_filing_pdf, filing_record
 from .transport import TransportFailure, run_isolated
@@ -44,6 +44,8 @@ def _sdk_wire_scope(connection, deadline, record):
         raise TransportFailure(code, message)
 
     def send(session, request, **options):
+        if code := record.get("sdk_blocked_request_code"):
+            raise TransportFailure(code, "SDK请求已经终止")
         index = len(rows) + 1
         role = "query" if request.method == "POST" else "download" if request.method == "GET" else None
         if role is None or index == 1 and role != "query":
@@ -74,6 +76,18 @@ def _sdk_wire_scope(connection, deadline, record):
             response = original(session, request, **options)
             item["state"] = "响应已返回"
             item["http_status"] = response.status_code
+            # Guard decoding on this response, including CDN JSON. The SDK
+            # decides whether to read JSON, so other downloads stay untouched.
+            decode_json = getattr(response, "json", None)
+            if callable(decode_json):
+                def strict_json(**kwargs):
+                    try:
+                        kwargs["object_pairs_hook"] = unique_json_object
+                        return decode_json(**kwargs)
+                    except DuplicateJSONField:
+                        item["state"] = "返回结构异常"
+                        blocked("duplicate_response_field", "SDK响应JSON包含重复字段")
+                response.json = strict_json
             return response
         except Exception:
             item["state"] = "连接或读取失败"
@@ -134,15 +148,48 @@ def _source_worker(connection, deadline):
                         raise TransportFailure('source_response_too_large', 'EDB搜索响应超过限额，不截断目录')
                     payload = {'text': raw.decode('utf-8') if isinstance(raw, bytes) else raw}
                 else:
-                    payload = json.loads(raw)
+                    payload = json.loads(raw, object_pairs_hook=unique_json_object)
         elif operation_kind == 'official_html':
             from .official_sources import download_html
             send({'kind':'stage','stage':'获取官方资料','network_request_started':True})
             payload=download_html(spec['url'],remaining)
+        elif operation_kind == 'official_announcement':
+            from .announcement_sources import download
+            send({'kind': 'stage', 'stage': '获取官方公告', 'network_request_started': True})
+            payload = download(spec['parameters'], spec['phase'], remaining,
+                issuer_raw=spec.get('issuer_raw'), selected=spec.get('selected'))
         elif operation_kind == 'official_etf':
             from .etf_sources import download
             send({'kind': 'stage', 'stage': '获取ETF清单', 'network_request_started': True})
             payload = download(spec['code'], remaining)
+        elif operation_kind == 'official_etf_listing':
+            from .etf_listing import download_listing
+            send({'kind': 'stage', 'stage': '获取ETF证券名录', 'network_request_started': True})
+            payload = download_listing(spec['market'], remaining)
+        elif operation_kind == 'official_etf_trading':
+            from .etf_trading import download
+            send({'kind': 'stage', 'stage': '获取ETF交易资料', 'network_request_started': True})
+            payload = download(spec['operation'], spec['code'], remaining)
+        elif operation_kind == 'official_hsi_history':
+            from .event_market import download_snapshot
+            send({'kind': 'stage', 'stage': '获取港股指数历史', 'network_request_started': True})
+            payload = download_snapshot(spec['codes'], remaining)
+        elif operation_kind == 'official_mainland_index_history':
+            from .event_market import download_mainland_snapshot
+            send({'kind': 'stage', 'stage': '获取境内指数历史', 'network_request_started': True})
+            payload = download_mainland_snapshot(spec['parameters'], remaining)
+        elif operation_kind == 'official_h15_treasury_yields':
+            from .treasury_rates import download_snapshot
+            send({'kind': 'stage', 'stage': '获取美债固定期限收益率', 'network_request_started': True})
+            payload = download_snapshot(spec['parameters'], remaining)
+        elif operation_kind == 'official_lpr_history':
+            from .lpr_rates import download_snapshot
+            send({'kind': 'stage', 'stage': '获取LPR报价历史', 'network_request_started': True})
+            payload = download_snapshot(spec['parameters'], remaining)
+        elif operation_kind == 'official_nfra_bank_statistics':
+            from .nfra_bank_statistics import download_snapshot
+            send({'kind': 'stage', 'stage': '获取商业银行监管统计', 'network_request_started': True})
+            payload = download_snapshot(spec['url'], remaining)
         elif operation_kind=='official_index':
             from .index_sources import download_csi_blob,csi_catalogue_contents,parse_csi_workbook
             import base64
@@ -155,7 +202,8 @@ def _source_worker(connection, deadline):
                 if contents['issues']:payload['catalogue_issues']=contents['issues']
             else:payload['parsed']=parse_csi_workbook(raw,spec['index_code'],spec['role'],version=spec.get('parse_version',1))
         elif operation_kind == "tinyshare":
-            if spec["operation"] not in TINYSHARE_DOCS:
+            from .financial_sources import FINANCIAL_REQUEST_REGISTRY
+            if spec["operation"] not in TINYSHARE_DOCS and 'tinyshare.'+str(spec["operation"]) not in FINANCIAL_REQUEST_REGISTRY:
                 raise TransportFailure("unsupported_operation", "接口未登记")
             # Suppress SDK diagnostics in this child only. A vendor exception or
             # import message can contain its key; never forward that text.
@@ -170,12 +218,13 @@ def _source_worker(connection, deadline):
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TransportFailure("response_deadline_exceeded", "请求时限已耗尽")
-                with _sdk_wire_scope(connection, deadline, record):
-                    client = ts.pro_api(spec["token"], timeout=remaining)
-                    result = getattr(client, spec["operation"])(**spec["parameters"])
-                blocked_code = record.get("sdk_blocked_request_code")
-                if blocked_code:
-                    raise TransportFailure(blocked_code, "SDK请求未完成，拒绝降级返回")
+                try:
+                    with _sdk_wire_scope(connection, deadline, record):
+                        client = ts.pro_api(spec["token"], timeout=remaining)
+                        result = getattr(client, spec["operation"])(**spec["parameters"])
+                finally:
+                    if blocked_code := record.get("sdk_blocked_request_code"):
+                        raise TransportFailure(blocked_code, "SDK请求未完成，拒绝降级返回") from None
                 sends = record["sdk_wire_results"]
                 if sends and sends[-1]["state"] == "连接或读取失败":
                     raise TransportFailure("connection_interrupted", "SDK未取得完整响应")
@@ -207,6 +256,8 @@ def _source_worker(connection, deadline):
             "http_status": status, "record": record})
     except TransportFailure as error:
         send({"kind": "failure", "code": error.code, "record": record})
+    except DuplicateJSONField:
+        send({"kind": "failure", "code": "duplicate_response_field", "record": record})
     except ContractError:
         send({"kind": "failure", "code": record.get("failure_code", "original_download_failed"), "record": record})
     except (TimeoutError, socket.timeout):
@@ -243,9 +294,55 @@ def official_html(task,url,started,timeout,event,*,active=None,on_stage=None):
         active=active,label='官方资料',allowed_stages={'获取官方资料'},on_stage=on_stage)
 
 
+def official_announcement(task, parameters, phase, started, timeout, event, *,
+                          issuer_raw=None, selected=None, active=None, on_stage=None):
+    return run_isolated(task, dict(kind='official_announcement', parameters=parameters, phase=phase,
+        issuer_raw=issuer_raw, selected=selected), started, timeout, event, _source_worker,
+        active=active, label='官方公告', allowed_stages={'获取官方公告'}, on_stage=on_stage)
+
+
 def official_etf(task, code, started, timeout, event, *, active=None, on_stage=None):
     return run_isolated(task, dict(kind='official_etf', code=code), started, timeout, event, _source_worker,
         active=active, label='ETF清单', allowed_stages={'获取ETF清单'}, on_stage=on_stage)
+
+
+def official_etf_listing(task, market, started, timeout, event, *, active=None, on_stage=None):
+    return run_isolated(task, dict(kind='official_etf_listing', market=market), started, timeout, event,
+        _source_worker, active=active, label='ETF证券名录', allowed_stages={'获取ETF证券名录'}, on_stage=on_stage)
+
+
+def official_etf_trading(task, operation, code, started, timeout, event, *, active=None, on_stage=None):
+    return run_isolated(task, dict(kind='official_etf_trading', operation=operation, code=code),
+        started, timeout, event, _source_worker, active=active, label='ETF交易资料',
+        allowed_stages={'获取ETF交易资料'}, on_stage=on_stage)
+
+
+def official_hsi_history(task, codes, started, timeout, event, *, active=None, on_stage=None):
+    return run_isolated(task, dict(kind='official_hsi_history', codes=codes), started, timeout, event,
+        _source_worker, active=active, label='港股指数历史', allowed_stages={'获取港股指数历史'}, on_stage=on_stage)
+
+
+def official_mainland_index_history(task, parameters, started, timeout, event, *, active=None, on_stage=None):
+    return run_isolated(task, dict(kind='official_mainland_index_history', parameters=parameters), started, timeout,
+        event, _source_worker, active=active, label='境内指数历史', allowed_stages={'获取境内指数历史'}, on_stage=on_stage)
+
+
+def official_h15_treasury_yields(task, parameters, started, timeout, event, *, active=None, on_stage=None):
+    return run_isolated(task, dict(kind='official_h15_treasury_yields', parameters=parameters), started, timeout,
+        event, _source_worker, active=active, label='美债固定期限收益率', allowed_stages={'获取美债固定期限收益率'},
+        on_stage=on_stage)
+
+
+def official_lpr_history(task, parameters, started, timeout, event, *, active=None, on_stage=None):
+    return run_isolated(task, dict(kind='official_lpr_history', parameters=parameters), started, timeout,
+        event, _source_worker, active=active, label='LPR报价历史', allowed_stages={'获取LPR报价历史'},
+        on_stage=on_stage)
+
+
+def official_nfra_bank_statistics(task, url, started, timeout, event, *, active=None, on_stage=None):
+    return run_isolated(task, dict(kind='official_nfra_bank_statistics', url=url), started, timeout,
+        event, _source_worker, active=active, label='商业银行监管统计', allowed_stages={'获取商业银行监管统计'},
+        on_stage=on_stage)
 
 
 def official_index(task,selection,started,timeout,event,*,active=None,on_stage=None):
@@ -303,6 +400,7 @@ class IsolatedEvidenceCollector(EvidenceCollector):
                 "response_deadline_exceeded": "数据调用超过时限", "transport_timeout": "数据调用超时",
                 "credential_expired": "授权已过期", "permission_denied": "权限未通过",
                 "authentication_failed": "认证未通过", "invalid_response_json": "返回结构异常",
+                "duplicate_response_field": "返回结构异常",
                 "invalid_response_shape": "返回结构异常", "response_too_large": "响应超出大小限制",
                 "response_incomplete": "响应不完整", "tls_failure": "安全连接未通过",
                 "worker_start_failed": "本地传输未启动", "invalid_transport_message": "本地传输响应异常",
@@ -342,6 +440,14 @@ class IsolatedEvidenceCollector(EvidenceCollector):
         parsed = MaterialParser().parse("original.pdf", payload, task=task, active=self.active, timeout=timeout)
         event["material_parse"] = parsed["parse_runtime"]
         return filing_record(task, directory, "original.pdf", payload, task.get("source_records", []), _parsed=parsed)
+
+    def _parse_official_material(self, task, name, payload, timeout, event, *, extract_version=None):
+        if not name.endswith('.pdf'):
+            return super()._parse_official_material(task, name, payload, timeout, event, extract_version=extract_version)
+        from .material_parser import MaterialParser
+        parsed = MaterialParser().parse(name, payload, task=task, active=self.active, timeout=timeout)
+        event['material_parse'] = parsed['parse_runtime']
+        return parsed
 
     def _checkpoint_original(self, task, record):
         # Store the unapproved original, including limited/cancelled extraction,
