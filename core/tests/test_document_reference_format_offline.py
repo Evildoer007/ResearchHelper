@@ -56,7 +56,7 @@ class DocumentReferenceFormatTests(unittest.TestCase):
         import json
         import sqlite3
         from pathlib import Path
-        root = Path(__file__).resolve().parents[1]
+        root = Path(__file__).resolve().parents[2]
         receipt = root / "result/acceptance/document-coverage-replay.json"
         if not receipt.exists():
             self.skipTest("Retained v1 replay is not shipped with the package")
@@ -78,7 +78,7 @@ class DocumentReferenceFormatTests(unittest.TestCase):
         import sqlite3
         from pathlib import Path
         from researchhelper.planning import question_specs
-        root = Path(__file__).resolve().parents[1]
+        root = Path(__file__).resolve().parents[2]
         archive = root / "result/acceptance/live-document-content/isolated-model-ki9_hjxg/data/researchhelper/researchhelper.sqlite3"
         if not archive.exists():
             self.skipTest("Retained v12 model output is not shipped with the package")
