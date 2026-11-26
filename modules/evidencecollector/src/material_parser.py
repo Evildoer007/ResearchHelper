@@ -98,11 +98,13 @@ def verified_material(material, payload):
         if expected is not None:
             _verified_extractions.move_to_end(key)
     if expected is None:
-        timeout = min(MaterialParser.MAX_WAIT_SECONDS, scope["deadline"] - time.monotonic()) if scope else MaterialParser.MAX_WAIT_SECONDS
+        timeout = scope["deadline"] - time.monotonic() if scope else None
         parsed = MaterialParser().parse(material["name"], payload,
             task=scope["task"] if scope else None, active=scope["active"] if scope else None, timeout=timeout,
             extract_version=key[2])
         if parsed.get("status") != "已解析":
+            if parsed.get("parse_runtime", {}).get("failure_code") == "response_deadline_exceeded":
+                raise ContractError("原件复核未取得完整正文，本地解析已超过本次时限")
             raise ContractError("原件复核未取得完整正文，原件保留，未采用摘录")
         expected = fingerprint(parsed["parts"])
     parts = material.get("parts")
@@ -148,6 +150,7 @@ def _parser_worker(connection, deadline):
 
 class MaterialParser:
     MAX_WAIT_SECONDS = 30
+    MAX_PDF_WAIT_SECONDS = 90
     worker_target = staticmethod(_parser_worker)
 
     def parse(self, name, payload, *, task=None, active=None, timeout=None, extract_version=None):
@@ -163,7 +166,8 @@ class MaterialParser:
             return parsed
         if sys.flags.ignore_environment and not sys.flags.dont_write_bytecode:
             raise ContractError("隔离Python宿主须启用不写字节码后才能解析PDF、DOCX或HTML；本次未启动解析")
-        diagnostics = {"operation": "material_parse", "timeout_seconds": min(timeout if timeout is not None else self.MAX_WAIT_SECONDS, self.MAX_WAIT_SECONDS)}
+        limit = self.MAX_PDF_WAIT_SECONDS if suffix == ".pdf" else self.MAX_WAIT_SECONDS
+        diagnostics = {"operation": "material_parse", "timeout_seconds": min(timeout, limit) if timeout is not None else limit}
         started = time.monotonic()
         try:
             if diagnostics["timeout_seconds"] <= 0:
