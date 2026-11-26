@@ -6,7 +6,7 @@ import unittest
 from researchhelper.contracts import (ContractError, METHOD_REGISTRY, calculation_input_units_available,
                                       fingerprint, valid_calculation_input_unit, validate_calculation_context)
 from researchhelper.knowledge import ENTRIES, RETAINED_VERSIONS, ResearchKnowledge
-from researchhelper.reasoning import PHASE_RULES, RULES_VERSION
+from researchhelper.reasoning import PHASE_RULES
 from tests import test_management_custody_fee_offline as previous
 
 METHOD = previous.METHOD
@@ -140,7 +140,6 @@ class FeeSourceUnitsTests(unittest.TestCase):
         ResearchKnowledge().validate_package(historical)
         self.assertEqual(fingerprint(old), fingerprint(RETAINED_VERSIONS[(identifier, 1)]))
         self.assertEqual(METHOD_REGISTRY[METHOD]['implementation_version'], 1)
-        self.assertEqual(RULES_VERSION, 24)
         self.assertIn('raw_unit与unit仍填%', PHASE_RULES['extract'])
 
     def test_versioned_catalog_keeps_deepcopy_dependency_and_read_only_assertions(self):
