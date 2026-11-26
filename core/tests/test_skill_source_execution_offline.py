@@ -13,7 +13,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError
+from researchhelper.evidence import EvidenceCollector
 from researchhelper.settings import DataSettings
 
 
@@ -22,7 +24,7 @@ ACCESS = "skill-fabricated-access-only"
 REFRESH = "skill-fabricated-refresh-only"
 OTHER = "different-store-fabricated-secret"
 PARAMETERS = {"codes": "600000.SH", "indicators": "close", "startdate": "2026-09-01",
-              "enddate": "2026-09-02", "functionpara": {"Fill": "Blank"}}
+              "enddate": "2026-09-02", "functionpara": {"Currency": "RMB", "CPS": "1", "Fill": "Omit"}}
 
 
 def response(value):
@@ -37,15 +39,15 @@ class SkillSourceExecutionTests(unittest.TestCase):
         self.root = Path(temporary.name)
         self.project = self.root / "project"
         self.installation = self.root / "installation"
-        for relative, original in (
-            ("scripts/session.py", "skill/researchhelper/scripts/session.py"),
-            ("app/web/report.css", "app/web/report.css"),
-            ("assets/vendor/echarts.min.js", "assets/vendor/echarts.min.js"),
-        ):
-            target = self.installation / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(ROOT / original, target)
-        specification = importlib.util.spec_from_file_location("isolated_skill_source_audit", self.installation / "scripts/session.py")
+        # This parent transport test reuses the imported runtime. The
+        # standalone package acceptance covers the bundled runtime itself.
+        target = self.installation / "core/session.py"
+        target.parent.mkdir(parents=True)
+        shutil.copyfile(ROOT / "core/session.py", target)
+        shutil.copytree(ROOT / "products/app/frontend", self.installation / "app/web")
+        shutil.copytree(ROOT / "modules/visualrenderer/assets", self.installation / "app/web/report-design")
+        shutil.copytree(ROOT / "assets/vendor", self.installation / "assets/vendor")
+        specification = importlib.util.spec_from_file_location("isolated_skill_source_audit", target)
         self.module = importlib.util.module_from_spec(specification)
         original_path, original_bytecode = list(sys.path), sys.dont_write_bytecode
         try:
@@ -71,14 +73,18 @@ class SkillSourceExecutionTests(unittest.TestCase):
         self.assertEqual(self.files(self.installation), self.before)
 
     def run_source(self, session, limits=None):
-        task = session.create("核验指定证券的历史收盘数据", cutoff="2026-09-03T18:00:00+08:00",
+        self.addCleanup(session.agent.close_runtime)
+        task = session.create("核验指定证券的历史收盘数据", objects=["600000.SH"], cutoff="2026-09-03T18:00:00+08:00",
                               questions=[{"id": "q1", "question": "指定交易日收盘价是多少", "kind": "fact"}],
                               limits=limits)
-        final = session.run(task["id"], data_requests=[{
-            "id": "daily_close", "source": "ifind", "operation": "cmd_history_quotation",
-            "parameters": copy.deepcopy(PARAMETERS), "question_ids": ["q1"],
-        }])
-        return final
+        collector = session.agent.collector
+        # Use the real request validator and budget. Only this fixture's
+        # HTTP seam stays in the socket-guarded process.
+        with patch.object(collector, "_http_json", side_effect=lambda *args: EvidenceCollector._http_json(collector, *args)):
+            return session.run(task["id"], data_requests=[{
+                "id": "daily_close", "source": "ifind", "operation": "cmd_history_quotation",
+                "parameters": copy.deepcopy(PARAMETERS), "question_ids": ["q1"],
+            }])
 
     @staticmethod
     def replies():
@@ -104,6 +110,58 @@ class SkillSourceExecutionTests(unittest.TestCase):
         for flag in ("true", "false", 0, 1, None, [], {}):
             with self.subTest(flag=flag), self.assertRaises(ContractError):
                 self.module.Session(self.project, allow_network=flag)
+
+    @unittest.skipUnless(os.name == 'posix', 'Requires local symlink support')
+    def test_store_paths_stay_in_the_selected_project(self):
+        self.project.mkdir()
+        outside = self.root / 'another-project'
+        outside.mkdir()
+        for destination in (self.installation, outside):
+            data = self.project / 'data'
+            data.symlink_to(destination, target_is_directory=True)
+            try:
+                with self.subTest(destination=destination.name), self.assertRaises(ContractError):
+                    self.module.Session(self.project)
+                self.assertFalse((destination / 'researchhelper').exists())
+            finally:
+                data.unlink()
+
+    @unittest.skipUnless(os.name == 'posix', 'Requires local symlink support')
+    def test_archive_rejects_linked_database_files(self):
+        database = self.project / 'data/researchhelper/researchhelper.sqlite3'
+        database.parent.mkdir(parents=True)
+        outside = ResearchArchive(self.root / 'another-project')
+        original = outside.path.read_bytes()
+        for suffix in ('', '-journal', '-wal', '-shm'):
+            alias = database.with_name(database.name + suffix)
+            alias.symlink_to(outside.path)
+            try:
+                with self.subTest(suffix=suffix), self.assertRaises(ContractError):
+                    self.module.Session(self.project)
+                self.assertEqual(outside.path.read_bytes(), original)
+                if suffix:
+                    self.assertFalse(database.exists())
+            finally:
+                alias.unlink()
+
+    @unittest.skipUnless(os.name == 'posix', 'Requires local symlink support')
+    def test_export_path_is_checked_again_after_research_has_saved(self):
+        session = self.module.Session(self.project)
+        self.addCleanup(session.agent.close_runtime)
+        done = session.agent.start(session.agent.create_case('mechanism')['id'])
+        ident = done['id']
+        self.assertTrue(done['delivery'])
+        report_directory = self.project / 'result/researchhelper' / ident
+        report_directory.parent.mkdir(parents=True, exist_ok=True)
+        report_directory.symlink_to(self.installation, target_is_directory=True)
+        for options in ({}, {'profile': 'detailed'}):
+            with self.subTest(options=options), self.assertRaises(ContractError):
+                session.export(ident, **options)
+        self.assertEqual(session.report_history(ident)[0]['version'], 1)
+        report_directory.unlink()
+        for options in ({}, {'profile': 'detailed'}):
+            path = session.export(ident, **options)
+            self.assertTrue(path.resolve().is_relative_to(report_directory) and path.is_file())
 
     def test_explicit_refresh_token_two_dispatches_and_no_secret_in_task_or_report(self):
         credentials = {"ifind": {"refresh_token": REFRESH}}
