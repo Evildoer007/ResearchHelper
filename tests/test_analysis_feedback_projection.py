@@ -1,18 +1,16 @@
 """A failed draft is archived, not repeated as if it were analysis evidence."""
 import copy
-import json
 import socket
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from tests import ROOT
+from tests.legacy_replay_fixtures import financial_task
 from researchhelper.contracts import ContractError, canonical, fingerprint
 from researchhelper.engine import ResearchAgent
+from researchhelper.output_schema import analysis_protocol, provider_request_schema
 from researchhelper.reasoning import model_object, analysis_fields, MAX_CONTEXT_CHARACTERS
 from researchhelper.reasoning import analysis_numeric_review
-
-RETAINED = ROOT / 'result/acceptance/one-sentence-research-jw2plz9b/task.json'
 
 
 class CapturedAnalysis(RuntimeError):
@@ -50,13 +48,22 @@ def checked_prompt(task, payload):
 class AnalysisFeedbackProjectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.original = RETAINED.read_bytes()
-        cls.saved = json.loads(cls.original)
-
-    @classmethod
-    def tearDownClass(cls):
-        if RETAINED.read_bytes() != cls.original:
-            raise AssertionError('Closed failed research changed')
+        task = financial_task(both_ratios=True)
+        task.update(analysis_question_scope_version=1, analysis_feedback_projection_version=1)
+        invalid_number = {'text': '合成提案把净利润率写为91.23%。'}
+        proposal = dict(answers={key: dict(refs=[], calculation_refs=[],
+                         numeric_segments={'answer': [invalid_number]}) for key in ('meaning', 'financial')},
+            theses=[dict(question_ids=['meaning'], title='合成论点', investment_meaning='须继续核对。',
+                         limitation='仅作语法回归样本。', support=[], counter=[], calculation_refs=[],
+                         numeric_segments={'title': [invalid_number]})])
+        review = analysis_numeric_review(task, proposal)
+        task['reasoning_state'] = dict(rejected_analysis_submissions=[dict(
+            task_id=task['id'], research_version=task['version'], batch=task['batch'], input_hash=task['input_hash'],
+            proposal=proposal, numeric_review=review, evidence_approved=False, automatic_repair=False)],
+            numeric_resubmission=dict(status='已派发', reason='numeric_submission_rejected',
+                invalid_fields=review['invalid_fields'], question_failures=review['question_failures'],
+                thesis_failures=review['thesis_failures']))
+        cls.saved = task
 
     def setUp(self):
         self.task = copy.deepcopy(self.saved)
@@ -87,14 +94,27 @@ class AnalysisFeedbackProjectionTests(unittest.TestCase):
         self.assertFalse(feedback['automatic_repair'])
         self.assertFalse(feedback['rejected_proposal_available'])
 
-    def test_actual_failed_capacity_is_reproduced_then_fits_without_truncating_sources(self):
+    def test_oversize_legacy_feedback_fits_after_projection_without_removing_sources(self):
         legacy = copy.deepcopy(self.task)
         legacy.pop('analysis_feedback_projection_version')
-        with self.assertRaisesRegex(ContractError, '必要分析与结构化契约超过上下文上限'):
+        captured = checked_prompt(legacy, payload_for(legacy))
+        protocol = analysis_protocol(legacy)[0]
+        schema_size = len(canonical(provider_request_schema(legacy, captured['schema'], protocol)))
+        body_size = len(captured['messages'][-1]['content'])
+        extra = MAX_CONTEXT_CHARACTERS - body_size - schema_size + 1
+        self.assertGreater(extra, 0)
+        # Grow the rejected draft to overflow only the body and schema together.
+        for task in (legacy, self.task):
+            rejected = task['reasoning_state']['rejected_analysis_submissions'][-1]['proposal']
+            rejected['theses'][0]['limitation'] += '字' * extra
+        with self.assertRaisesRegex(ContractError, '必要材料与实际提交契约超过上下文上限'):
             checked_prompt(legacy, payload_for(legacy))
-        captured = checked_prompt(self.task, payload_for(self.task))
-        self.assertLessEqual(sum(len(item['content']) for item in captured['messages'])
-                             + len(canonical(captured['schema'])), MAX_CONTEXT_CHARACTERS)
+        payload = payload_for(self.task)
+        current = checked_prompt(self.task, payload)
+        actual_size = (len(current['messages'][-1]['content']) +
+                       len(canonical(provider_request_schema(self.task, current['schema'], protocol))))
+        self.assertLessEqual(actual_size, MAX_CONTEXT_CHARACTERS)
+        self.assertEqual(payload['calculations'], self.saved['calculations'])
         self.assertEqual(self.task['ledger'], self.saved['ledger'])
 
     def test_old_tasks_and_unregistered_flags_keep_the_original_feedback(self):
@@ -107,7 +127,7 @@ class AnalysisFeedbackProjectionTests(unittest.TestCase):
         before = copy.deepcopy((self.task['ledger'], self.task['questions'], self.task['evidence']))
         feedback = payload_for(self.task)['submission_feedback']
         self.assertEqual(feedback['remaining_resubmissions'], 0)
-        self.assertEqual([item['question_id'] for item in feedback['question_failures']], ['q3', 'q1'])
+        self.assertEqual([item['question_id'] for item in feedback['question_failures']], ['meaning', 'financial'])
         self.assertEqual((self.task['ledger'], self.task['questions'], self.task['evidence']), before)
 
     def test_retained_numeric_failure_has_specific_registered_codes_not_rejected_values(self):
