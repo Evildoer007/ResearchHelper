@@ -22,9 +22,11 @@ from decimal import Decimal, DecimalException, InvalidOperation, localcontext
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit, urlunsplit, urlencode
 
-from .contracts import ContractError, DOCUMENT_CONTENT_INTENT, charge, fingerprint, market_date, now, timepoint, validate_evidence_usage
+from .contracts import (ContractError, DOCUMENT_CONTENT_INTENT, DuplicateJSONField, charge, fingerprint,
+                        market_date, now, timepoint, unique_json_object, validate_evidence_usage)
 from .market_calendar import (REGISTRY as CALENDAR_REQUEST_REGISTRY, request_shapes as calendar_request_shapes,
     validate_request as validate_calendar_request, sessions as calendar_sessions)
+from .intraday_quotes import REGISTRY as INTRADAY_REQUEST_REGISTRY
 from .financial_sources import (FINANCIAL_REQUEST_REGISTRY, financial_request_shapes, financial_evidence_path,
                                 validate_financial_request, validate_financial_snapshot, validate_financial_metric_number,
                                 validate_financial_statement_scope, FINANCIAL_METRIC_LABELS,
@@ -39,23 +41,34 @@ from .market_series import (SERIES_REQUEST_REGISTRY, series_request_shapes,
                             validate_series_request, series_record_contract)
 from .official_sources import REGISTRY as OFFICIAL_REQUEST_REGISTRY
 from .etf_sources import REGISTRY as ETF_REQUEST_REGISTRY
+from .etf_listing import OPERATION as ETF_LISTING, REGISTRY as ETF_LISTING_REGISTRY
+from .etf_trading import REGISTRY as ETF_TRADING_REGISTRY
 from .index_sources import (INDEX_REQUEST_REGISTRY, index_request_shapes,
                             validate_index_request, index_response, callable_member_codes)
+from .subject_scope import excluded_subjects, scope_question, subject_allowed, subject_key
 
 CAPABILITIES = {
     "ifind": {"state": "真实权限未验收", "transport": "HTTPS", "fields": ["行情", "证券身份", "公告目录与原件"],
-              "endpoints": ["cmd_history_quotation", "report_query", "get_thscode", "edb_service", "date_sequence"],
               "documented_only": [{"operation": "basic_data_service", "kind": "基础数据"}]},
     "tinyshare": {"state": "真实权限未验收", "transport": "tinyshare", "fields": []},
     # Legacy identifier retained for archive compatibility, not an active adapter.
     "wind": {"state": "本版本不接入", "transport": "SQL", "fields": [], "excluded": True},
     "material": {"state": "本地解析可用", "formats": ["PDF", "TXT", "MD", "DOCX", "HTML"]},
     "official": {"state": "固定官方渠道，逐次核验", "transport": "HTTPS",
-                 "fields": ["官方发布目录", "静态HTML原文"],
-                 "endpoints": ["release_catalog", "release_original"]},
+                 "fields": ["官方发布及公告目录", "静态HTML原文", "目录绑定的公告PDF"]},
 }
 
 IFIND_MANUAL = "https://quantapi.51ifind.com/gwstatic/static/ds_web/quantapi-web/help-center/manual.html"
+IFIND_HTTP_REJECTIONS = {401: "authentication_failed", 403: "permission_denied", 429: "rate_limited"}
+# HTTP API user manual, error table. These codes describe account-wide usage,
+# not an empty response, a missing security or a bad request parameter.
+IFIND_QUOTA_ERRORS = {
+    "-4301": "本周基础数据额度已用尽",
+    "-4302": "本周行情额度已用尽",
+    "-4303": "本周宏观数据额度已用尽",
+    "-4317": "本周数据额度已用尽",
+    "-4318": "本月数据额度已用尽",
+}
 # Shared literal reading grammar. A cue is not evidence approval: the retained
 # original, date binding, negation, temporal precision and cutoff still apply.
 # PDF text layers can use Kangxi radicals for these printed calendar markers.
@@ -170,7 +183,10 @@ FIELD_REGISTRY = {
 # OH uses per-asset conventions rather than one unit for an entire query.
 # Copy that separation, not its runtime, account state or pricing assumptions.
 # A namespace constrains quote units; it does not approve a security identity.
+IFIND_QUOTE_FUNCTION = {"Currency": "RMB", "CPS": "1", "Fill": "Omit"}
 FIELD_REGISTRY["ifind.cmd_history_quotation"].update(
+    raw_observation_fields={"volume": "成交量", "amount": "成交额"},
+    raw_observation_rule="保留接口原值；成交量单位及成交额币种、倍率未核验，不换算或作为计算输入。",
     instrument_namespaces={
         "index_level": r"(?:000\d{3}\.SH|399\d{3}\.SZ)",
         "price": r"(?:(?:600|601|603|605|688|510|511|512|513|515|516|517|518|520|530|560|561|562|563|565|566|567|588|589)\d{3}\.SH|(?:000|001|002|003|300|301|158|159)\d{3}\.SZ|\d{4,5}\.HK)",
@@ -222,24 +238,42 @@ FIELD_REGISTRY["tinyshare.daily_basic"] = {
                    "交易日不是首次公开时间，历史财务修订与当时可得性须另核验。",
 }
 CAPABILITIES["tinyshare"]["fields"] = ["A股日线", "ETF日线", "A股每日市场背景指标"]
-CAPABILITIES["tinyshare"]["endpoints"] = list(TINYSHARE_DOCS)
-CAPABILITIES["tinyshare"]["endpoints"] += [name.split(".", 1)[1] for name in FINANCIAL_REQUEST_REGISTRY]
 CAPABILITIES["tinyshare"]["fields"].append("A股财报原始记录，单位与历史版本待核验")
 CAPABILITIES["ifind"]["fields"].append("宏观与行业原始序列，指标与单位待核验")
 CAPABILITIES["ifind"]["fields"].append("OH同源估值与ETF原始日期序列，单位与历史版本待核验")
 CAPABILITIES["ifind"]["fields"].append("单证券财务原始语义查询，逐项核对实际返回字段，不直接批准数字")
-CAPABILITIES["ifind"]["endpoints"].append("smart_stock_picking")
-CAPABILITIES["ifind"]["endpoints"].append("get_trade_dates")
-CAPABILITIES["ifind"]["endpoints"].append("data_pool")
-CAPABILITIES['ifind']['endpoints'].extend(name.split('.', 1)[1] for name in IFIND_METADATA_REGISTRY)
-CAPABILITIES['official']['endpoints'].extend(['index_catalog','index_file'])
-CAPABILITIES['official']['endpoints'].append('etf_pcf')
 FIELD_REGISTRY['official.etf_pcf'] = copy.deepcopy(ETF_REQUEST_REGISTRY['official.etf_pcf'])
 CAPABILITIES['official']['fields'].append('目录绑定的完整指数样本XLS，日期及权重单位另列')
 from .index_sources import WEIGHT_FIELD
 FIELD_REGISTRY['official.index_file']=dict(version=1,fields={'weight':WEIGHT_FIELD},frequency='日',
     kind='官方指数成分权重',documentation='https://www.csindex.com.cn/#/indices/family/detail?indexCode=000300',
     limitations='仅登记当前官方XLS的百分比权重，仍须实际取数、目录、原件与逐行核验；不是价格或基金持仓。')
+from .event_market import (INDEX_CODE_PATTERN as HK_EVENT_INDEX_PATTERN, MAINLAND_OPERATION as MAINLAND_EVENT_HISTORY,
+                           OPERATION as HK_EVENT_HISTORY)
+from .treasury_rates import FIELD as H15_YIELD_FIELD, METHOD_SOURCE as H15_METHOD_SOURCE, OPERATION as H15_TREASURY_YIELDS
+from .lpr_rates import FIELD as LPR_FIELD, HISTORY_PAGE as LPR_PAGE, OPERATION as LPR_HISTORY
+from .nfra_bank_statistics import (CATALOGUE_PAGE as NFRA_BANK_PAGE, FIELD as NFRA_BANK_FIELD,
+                                   OPERATION as NFRA_BANK_STATISTICS)
+FIELD_REGISTRY['official.'+HK_EVENT_HISTORY] = dict(version=1, frequency='日', markets=['港股'],
+    fields=dict(close=dict(raw_unit='点', unit='点', factor=1, definition='价格指数日收盘点位')),
+    kind='恒生指数收盘历史', documentation='https://www.hsi.com.hk/en-hk/indexes/all-indexes/index-details/?seriesCode=hstech',
+    limitations='限已定位政策声明的港股价格指数窗口。仅用于事后对照，未核验因果或历史首次可得时点。')
+FIELD_REGISTRY['official.'+MAINLAND_EVENT_HISTORY] = dict(version=1, frequency='日', markets=['A股'],
+    fields=dict(close=dict(raw_unit='点', unit='点', factor=1, definition='价格指数日收盘点位')),
+    kind='沪深交易所事件窗口指数行情', documentation='https://www.sse.com.cn/market/price/trends/',
+    limitations='限已核对政策声明的境内价格指数窗口，按各指数原交易日保留收盘值。')
+FIELD_REGISTRY['official.'+H15_TREASURY_YIELDS] = dict(version=1, frequency='日', markets=['美国国债'],
+    fields={H15_YIELD_FIELD: dict(raw_unit='%', unit='%', factor=1, definition='名义固定期限国债收益率')},
+    kind='H.15美债固定期限收益率', documentation=H15_METHOD_SOURCE,
+    limitations='以已核对的美东政策日期与所需期限为限，比较日度名义收益率。')
+FIELD_REGISTRY['official.'+LPR_HISTORY] = dict(version=1, frequency='月', markets=['中国'],
+    fields={LPR_FIELD: dict(raw_unit='%', unit='%', factor=1, definition='1年期及5年期以上LPR报价')},
+    kind='全国银行间同业拆借中心LPR历史', documentation=LPR_PAGE,
+    limitations='发布日及两期限官方报价，个别合同和银行执行利率须另有依据。')
+FIELD_REGISTRY['official.'+NFRA_BANK_STATISTICS] = dict(version=1, frequency='季', markets=['中国'],
+    fields={NFRA_BANK_FIELD: dict(raw_unit='小数', unit='%', factor=100, definition='商业银行合计净息差')},
+    kind='商业银行主要监管指标表', documentation=NFRA_BANK_PAGE,
+    limitations='核对当期披露的商业银行合计季报表，区分公告日与统计期。')
 
 # One public, secret-free inventory for App, Skill and generated demo.
 # A documented provider tool is not callable until its request contract is
@@ -254,7 +288,10 @@ for _registry, _category in ((FIELD_REGISTRY, "字段"), (IDENTITY_REQUEST_REGIS
                               (FINANCIAL_QUERY_REGISTRY, "财报语义原始记录"),
                               (IFIND_METADATA_REGISTRY, "字段与参数目录及财务原始截面"),
                               (CALENDAR_REQUEST_REGISTRY, "独立交易日历"),
-                              (OFFICIAL_REQUEST_REGISTRY, "固定官方原文")):
+                              (INTRADAY_REQUEST_REGISTRY, "盘中行情"),
+                              (OFFICIAL_REQUEST_REGISTRY, "固定官方原文"),
+                              (ETF_LISTING_REGISTRY, "ETF证券名录"),
+                              (ETF_TRADING_REGISTRY, "ETF二级市场与单位净值")):
     for _qualified, _definition in _registry.items():
         if _qualified=='official.index_file' and _registry is INDEX_REQUEST_REGISTRY:
             continue  # Retrieval contract and numeric field share one inventory entry.
@@ -268,6 +305,18 @@ for _registry, _category in ((FIELD_REGISTRY, "字段"), (IDENTITY_REQUEST_REGIS
             "fields": sorted(_definition.get("fields", {}))})
 
 
+# Executable endpoint names and documentation-only labels derive from the same
+# registered operations. This describes adapter support, never live permission.
+for _capability in CAPABILITIES.values():
+    _operations = _capability['registered_operations']
+    if _operations:
+        _capability['endpoints'] = [item['operation'] for item in _operations if not item['internal']]
+    if 'documented_only' in _capability:
+        _implemented = {item['operation'] for item in _operations}
+        _capability['documented_only'] = [item for item in _capability['documented_only']
+                                        if item['operation'] not in _implemented]
+
+
 def active_source_capabilities():
     """Return the public inventory without providers excluded from this version."""
     return copy.deepcopy({source: capability for source, capability in CAPABILITIES.items()
@@ -277,8 +326,8 @@ def active_source_capabilities():
 def acquisition_channels(task=None):
     """Fixed implemented routes, not a promise of supplier permissions.
 
-    Official documents are reached through a retained iFinD catalogue. This
-    does not register arbitrary web searches, company IR crawlers or HKEX APIs.
+    Numerical sources remain iFinD-first. Independent official directories
+    are task-versioned; an allowlisted download host alone is not a search adapter.
     """
     policy = {"version": 2, "default_source": "ifind", "automatic_fallback": False,
         "channels": [
@@ -308,31 +357,64 @@ def acquisition_channels(task=None):
         channel=next(item for item in policy['channels'] if item['id']=='official')
         channel['registered_hosts']=['www.stats.gov.cn','www.federalreserve.gov']
         channel['registered_channels']=['nbs_release','fed_fomc']
+    if (task is None or task.get('official_source_expansion_version') == 1) and any(
+            item['id']=='official' for item in policy['channels']):
+        from .official_sources import POLICY_CHANNELS
+        from .miit_releases import CHANNELS as MIIT_CHANNELS, POLICY as MIIT_POLICY
+        from .announcement_sources import CHANNELS as ANNOUNCEMENT_CHANNELS
+        channel=next(item for item in policy['channels'] if item['id']=='official')
+        channel.setdefault('registered_channels', ['nbs_release']).extend([*POLICY_CHANNELS, *ANNOUNCEMENT_CHANNELS])
+        channel['registered_hosts']=sorted(set(channel.get('registered_hosts', ['www.stats.gov.cn'])+[
+            'www.pbc.gov.cn', '*.mof.gov.cn', 'www.cninfo.com.cn', 'static.cninfo.com.cn',
+            'query.sse.com.cn', 'www.sse.com.cn', 'www1.hkexnews.hk']))
+        if task is None or task.get(MIIT_POLICY) == 1:
+            channel['registered_channels'].extend(MIIT_CHANNELS)
+            channel['registered_hosts'].append('www.miit.gov.cn')
+        channel['announcement_query_fields']=['code','start_date','end_date','page','keyword']
+        channel['directory_is_body']=False
     return policy
 
 
-def declared_security_codes(task, *, encoding=None):
-    """Read literal complete codes, never infer a code from a product name.
+def security_code_mentions(text, *, encoding=1):
+    """Literal complete codes in user order, using the task's token grammar.
 
-    Version 2 recognizes a code attached to the explicit ETF label and a
-    following Chinese year. Arbitrary Latin identifiers still do not declare
-    securities. Old archived tasks retain their exact original token grammar.
+    Token recognition grants neither provider identity nor instrument type.
+    Reuse this lexer in conversation scope so an ETF label or following year
+    cannot make a follow-up inherit a different security.
     """
-    encoding = task.get('security_declaration_encoding', 1) if encoding is None else encoding
+    return [match[1] for match in security_code_matches(text, encoding=encoding)]
+
+
+def security_code_matches(text, *, encoding=1):
+    """Keep token spans for mixed security and indicator references."""
     if type(encoding) is not int or encoding not in (1, 2):
         raise ContractError('用户证券代码识别版本未登记')
-    texts = [task.get('question', ''), *task.get('objects', [])]
+    if not isinstance(text, str):
+        return ()
     if encoding == 1:
-        return sorted({match.group() for text in texts if isinstance(text, str)
-            for match in re.finditer(r'(?<![A-Za-z0-9])\d{4,6}\.(?:SH|SZ|HK)(?![A-Za-z0-9])', text)})
+        return re.finditer(r'(?<![A-Za-z0-9])(\d{4,6}\.(?:SH|SZ|HK))(?![A-Za-z0-9])', text)
     code = r'(?:\d{6}\.(?:SH|SZ)|\d{4,5}\.HK)'
     # Both are lexical boundaries, not normalization or identity approval.
-    # ETF is a literal label; accepting it does not classify the security.
     left = r'(?:(?<![A-Za-z0-9_])|(?<![A-Za-z_])(?i:ETF))'
     right = r'(?:(?![A-Za-z0-9_])|(?=\d{4}年))'
-    pattern = re.compile(left + '(' + code + ')' + right)
-    return sorted({match[1] for text in texts if isinstance(text, str)
-                   for match in pattern.finditer(text)})
+    return re.finditer(left + '(' + code + ')' + right, text)
+
+
+def declared_security_codes(task, *, encoding=None):
+    """Read complete codes and exact names admitted by the registered market rule.
+
+    Archived tasks retain their own token version; callers requesting a new
+    message's scope explicitly select that new task's version.
+    """
+    from .market_calendar import named_index_point_subjects
+
+    question = scope_question(task)
+    registered = named_index_point_subjects(task, question) if encoding is None else {}
+    encoding = task.get('security_declaration_encoding', 1) if encoding is None else encoding
+    # Validate even a task with no readable text, as before.
+    security_code_mentions('', encoding=encoding)
+    return sorted(set(registered) | {code for text in [question, *task.get('objects', [])]
+                  for code in security_code_mentions(text, encoding=encoding) if subject_allowed(task, code)})
 
 
 def identity_binding(task):
@@ -342,12 +424,28 @@ def identity_binding(task):
 
 def identity_scope(task):
     """Stable user scope, independent of supplement-plan revisions."""
+    scope = {key: task[key] for key in ("question", "entry", "intent", "objects", "cutoff")}
+    if 'subject_scope' in task:
+        scope['subject_scope'] = task['subject_scope']
     return {"task_id": task["id"], "research_version": task["version"],
-            "scope_hash": fingerprint({key: task[key] for key in ("question", "entry", "intent", "objects", "cutoff")})}
+            "scope_hash": fingerprint(scope)}
 
 
 def identity_candidate_lookup_enabled(task):
     return type(task.get('identity_candidate_lookup_version')) is int and task['identity_candidate_lookup_version'] in (1,2)
+
+
+def _identity_name_in_scope(task, query):
+    """Match continued names literally and allow names in the current question."""
+    context = task.get('conversation_context') or {}
+    inherited = context.get('security_name_queries', ())
+    query = query.casefold()
+    if not subject_allowed(task, query):
+        return False
+    if query in scope_question(task).casefold():
+        return True
+    return any(query == text.casefold() if text in inherited else query in text.casefold()
+               for text in task.get('objects', ()))
 
 
 def identity_candidates(task):
@@ -371,7 +469,7 @@ def identity_candidates(task):
         if (not isinstance(query, str) or not 2 <= len(query) <= 80
                 or query != query.strip() or any(char in query for char in ',;\n\r')
                 or params != identity_query_parameters('secname', query, IDENTITY_CANDIDATE_PROFILE)
-                or not any(query.casefold() in text.casefold() for text in [task['question'],*task['objects']])):
+                or not _identity_name_in_scope(task, query)):
             continue
         origin = record.get('identity_origin', {})
         expected_id = 'rh_source_' + fingerprint([task['id'],task['version'],record.get('request_hash'),record.get('hash')])[:24]
@@ -506,6 +604,17 @@ def identity_resolutions(task):
     return results
 
 
+def retained_identity_queries(task):
+    """Current query responses, including no-match results, are reusable once.
+
+    Raw responses inherited from another research version stay readable but
+    cannot suppress this version's lookup. A reusable query is not a uniquely
+    resolved security or permission to use it in a financial judgment.
+    """
+    reusable={'代码映射已核验','候选待确定','无匹配','多结果待消歧','映射冲突待核验'}
+    return [row for row in identity_resolutions(task) if row['status'] in reusable]
+
+
 IDENTITY_PERIOD_BASIS_VERSION = 1
 _IDENTITY_STATEMENT = re.compile(
     r"(?:供应商|provider)\s*[:：]\s*((?i:ifind|tinyshare))\s*[;；]\s*"
@@ -546,8 +655,8 @@ def validate_identity_period_basis(item, task):
     if len(proofs) != 1:
         raise ContractError("身份有效期依据未在本任务唯一登记")
     proof = proofs[0]
-    original = next((record for record in task.get("materials", []) + task.get("source_records", [])
-                     if record.get("id") == proof.get("artifact_id")), None)
+    original = _unique_artifact(task.get("materials", []) + task.get("source_records", []),
+                                _evidence_artifact_id(proof))
     if (proof.get("task_id") != task["id"] or proof.get("research_version") != task["version"]
             or proof.get("source_check") != "通过" or proof.get("applicability_check") != "通过"
             or proof.get("nature") != "已实现事实"
@@ -619,10 +728,32 @@ def expand_identity_basis_reference(task, spec):
 
 def available_security_codes(task):
     from .object_discovery import callable_discovery_codes
+    from .etf_comparison import comparison_scope
+
     name_codes = {code for item in identity_candidates(task) if item['business_lookup_authorized']
                   for code in item['exact_lookup_codes']}
-    return sorted(name_codes | set(declared_security_codes(task)) | set(callable_discovery_codes(task)) | set(callable_member_codes(task)) | {
-        code for item in identity_resolutions(task) if item["status"] == "代码映射已核验" for code in item["codes"]})
+    if any(record.get('operation') == ETF_LISTING for record in task.get('source_records', ())):
+        scope = comparison_scope(task)
+        if scope:
+            name_codes.update(item['code'] for item in scope.get('resolved', ()))
+    candidates = name_codes | set(declared_security_codes(task)) | set(callable_discovery_codes(task)) | set(callable_member_codes(task)) | {
+        code for item in identity_resolutions(task) if item["status"] == "代码映射已核验" for code in item["codes"]}
+    return sorted(code for code in candidates if subject_allowed(task, code))
+
+
+def _identity_query_allowed(task, mode, query):
+    excluded = excluded_subjects(task)
+    if not excluded:
+        return True
+    if mode == 'secname':
+        return subject_allowed(task, query)
+    # Exact-number lookup has no market parameter. An excluded full code
+    # cannot supply authority through its number or a Hong Kong padding alias.
+    declared = declared_security_codes(task)
+    if any(code.partition('.')[0] == query for code in declared):
+        return True
+    keys = {query, str(int(query))} if query.isascii() and query.isdecimal() else {query}
+    return not any(subject_key(value).partition('.')[0] in keys for value in excluded)
 
 
 def filing_filter_profiles(task, codes):
@@ -718,44 +849,55 @@ def filing_candidate_choices(task, record_ids=None, *, exclude_attempted=False):
         positions[identity] = len(choices)
         choices.append(params)
         details.append(dict(parameters=copy.deepcopy(params),title=entry['title'],
+            issuer_code=entry['issuer'],issuer_name=entry['security_name'],
             report_date=entry.get('report_date'),published_at=entry.get('published_at'),
             limitations=copy.deepcopy(entry.get('gaps', [])),catalog_aliases=[],
             title_is_body_evidence=False,financial_approval=False))
-    return {'selections':choices,'details':details,'coverage':{
-        'returned_catalog_rows':total,'inspected_rows':inspected,'offered_choices':len(choices),
-        'inspection_limit':FILING_INSPECTION_LIMIT,'choice_limit':FILING_CHOICE_LIMIT,
-        'truncated':inspected < total or omitted,
-        'catalog_completeness':'未证实'},'automatic_selection':False,'automatic_download':False}
+    coverage = dict(returned_catalog_rows=total, inspected_rows=inspected, offered_choices=len(choices),
+        inspection_limit=FILING_INSPECTION_LIMIT, choice_limit=FILING_CHOICE_LIMIT,
+        truncated=inspected < total or omitted, catalog_completeness='未证实')
+    invalid_count = sum(record.get('catalog_coverage', {}).get('invalid_location_count', 0) for record in records)
+    if invalid_count:
+        coverage['invalid_catalogue_locations'] = invalid_count
+    return dict(selections=choices, details=details, coverage=coverage,
+                automatic_selection=False, automatic_download=False)
 
 
-def data_request_contract(task):
+def data_request_contract(task, *, first_report=False):
     """Describe implemented request shapes, never broader supplier capabilities.
 
-    Examples demonstrate serialization only: their date is the task cutoff,
+    Examples demonstrate serialization only: their date is the eligible cutoff,
     not an inferred trading day or proposed retrieval window. No source call,
     name-to-code inference or future catalogue identifier is created here.
     """
     declared = declared_security_codes(task)
     callable_codes = available_security_codes(task)
     mainland = [code for code in callable_codes if re.fullmatch(r"\d{6}\.(?:SH|SZ)", code)]
+    from .draft_sources import pdf_download_disabled
+    from .market_series import daily_market_as_of, observation_selection, OBSERVATION_OPERATIONS
+    html_only = pdf_download_disabled(task)
     date = market_date(task["cutoff"])
+    market_day = daily_market_as_of(task)
     question_ids = [item["id"] for item in task["questions"]]
     tools = []
     for qualified, definition in FIELD_REGISTRY.items():
-        if qualified in ('official.index_file', 'official.etf_pcf'):
+        if qualified in ('official.index_file', 'official.etf_pcf', 'official.'+HK_EVENT_HISTORY,
+                         'official.'+MAINLAND_EVENT_HISTORY, 'official.'+H15_TREASURY_YIELDS,
+                         'official.'+LPR_HISTORY, 'official.'+NFRA_BANK_STATISTICS):
             continue  # These sources own their task-bound request shapes, not quotation parameters.
         source, operation = qualified.split(".", 1)
         if source == "ifind":
             keys = ["codes", "indicators", "startdate", "enddate", "functionpara"]
-            fixed = {"functionpara": {"Currency": "RMB", "CPS": "1", "Fill": "Omit"}}
+            fixed = {"functionpara": copy.deepcopy(IFIND_QUOTE_FUNCTION)}
             code, fields, date_format = next(iter(callable_codes), None), "close", "YYYY-MM-DD"
-            params = {"codes": code, "indicators": fields, "startdate": date, "enddate": date, **fixed}
+            params = {"codes": code, "indicators": fields, "startdate": market_day, "enddate": market_day, **fixed}
         else:
             keys = ["ts_code", "fields", "start_date", "end_date"]
             fixed = {}
             code, date_format = next(iter(mainland), None), "YYYYMMDD"
             fields = "ts_code,trade_date," + ("pe_ttm" if operation == "daily_basic" else "close")
-            params = {"ts_code": code, "fields": fields, "start_date": date.replace("-", ""), "end_date": date.replace("-", "")}
+            compact_day = market_day.replace("-", "")
+            params = {"ts_code": code, "fields": fields, "start_date": compact_day, "end_date": compact_day}
         item = {"qualified_id_for_lookup_only": qualified, "source": source, "operation": operation,
                 "parameter_keys": keys, "fixed_parameters": fixed,
                 "numeric_fields": sorted(definition["fields"]), "date_format": date_format,
@@ -768,13 +910,22 @@ def data_request_contract(task):
         tools.append(item)
     tools.extend(financial_request_shapes(task))
     tools.extend(financial_query_shapes(task))
-    tools.extend(metadata_request_shapes(task))
+    tools.extend(metadata_request_shapes(task, first_report=first_report))
     tools.extend(economic_request_shapes(task))
     tools.extend(series_request_shapes(task))
     tools.extend(index_request_shapes(task))
     tools.extend(calendar_request_shapes(task))
+    from .intraday_quotes import question_request as intraday_question_request
+
+    if (intraday := intraday_question_request(task)) is not None:
+        operation = intraday['operation']
+        tools.append(dict(qualified_id_for_lookup_only='ifind.'+operation, source='ifind', operation=operation,
+            parameter_keys=list(intraday['parameters']), fixed_parameters=copy.deepcopy(intraday['parameters']),
+            raw_only=True, numeric_fields=[], example=intraday))
     for qualified, definition in FILING_REQUEST_REGISTRY.items():
         source, operation = qualified.split(".", 1)
+        if html_only and operation == 'filing_original':
+            continue
         item = {"qualified_id_for_lookup_only": qualified, "source": source, "operation": operation,
                 "parameter_keys": list(definition["parameters"]), "example": None}
         if operation == "report_query":
@@ -835,12 +986,15 @@ def data_request_contract(task):
                 if task['identity_candidate_lookup_version']==2 else
                 '名称先显式选择candidate_profile查询；精确配置只选用户原号码或本任务实际候选的原号码，不补零、不选市场。')
             tools[-1]['parameter_shapes'].pop('secname',None)
-            original_numbers = {match.group() for text in [task['question'],*task['objects']]
+            original_numbers = {match.group() for text in [scope_question(task),*task['objects']]
                 for match in re.finditer(r'(?<!\d)\d{4,6}(?!\d)',
-                    re.sub(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{4}年',' ',text))}
-            actual_numbers = {code.split('.')[0] for item in identity_candidates(task) for code in item['exact_lookup_codes']}
+                    re.sub(r'\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{4}年',' ',text))
+                if _identity_query_allowed(task, 'seccode', match.group())}
+            actual_numbers = {code.split('.')[0] for item in identity_candidates(task) for code in item['exact_lookup_codes']
+                              if subject_allowed(task, code)}
             from .object_discovery import identity_query_candidates
-            actual_numbers.update(item['code'].split('.')[0] for item in identity_query_candidates(task))
+            actual_numbers.update(item['code'].split('.')[0] for item in identity_query_candidates(task)
+                                  if subject_allowed(task, item['code']))
             tools[-1]['query_value_options'] = sorted(original_numbers | (actual_numbers
                 if task['identity_candidate_lookup_version']==1 else set()))
             tools[-1]['candidate_profile'] = dict(profile_id=IDENTITY_CANDIDATE_PROFILE,query_modes=['secname'],
@@ -851,12 +1005,42 @@ def data_request_contract(task):
                      if task['identity_candidate_lookup_version']==2 else
                      '同名多市场时显式查询名称候选，再从实际返回代码的原号码选择精确seccode查询。'
                      '不直接用候选取业务数据、不裁掉海外结果冒充唯一、不猜或补证券号码；市场未明确时保留歧义。'))
+            inherited = (task.get('conversation_context') or {}).get('security_name_queries') or []
+            if any(name in task['objects'] for name in inherited):
+                tools[-1]['candidate_profile']['rule'] += '追问沿用的名称逐字使用本轮objects中的原名。'
     from .official_sources import request_shapes
-    tools.extend(request_shapes(task))
+    tools.extend(request_shapes(task, html_only=html_only))
     from .etf_sources import request_shapes as etf_request_shapes
     tools.extend(etf_request_shapes(task))
+    from .event_market import mainland_request_shape, request_shape as event_market_request_shape
+    tools.append(event_market_request_shape(task))
+    mainland_event = mainland_request_shape(task)
+    if mainland_event['available_parameter_sets']:
+        tools.append(mainland_event)
+    from .treasury_rates import request_shape as h15_request_shape, study_scope as h15_scope
+
+    if scope := h15_scope(task):
+        tools.append(h15_request_shape(scope))
+    from .lpr_rates import request_shape as lpr_request_shape, study_scope as lpr_scope
+
+    if scope := lpr_scope(task):
+        tools.append(lpr_request_shape(scope))
+        from .nfra_bank_statistics import request_options
+
+        if options := request_options(task):
+            parameters = [value['parameters'] for value in options.values()]
+            tools.append(dict(qualified_id_for_lookup_only='official.'+NFRA_BANK_STATISTICS, source='official',
+                operation=NFRA_BANK_STATISTICS, parameter_keys=list(dict.fromkeys(key for row in parameters for key in row)),
+                available_parameter_sets=parameters, numeric_fields=[NFRA_BANK_FIELD], credential_required=False,
+                selection_rule='银行息差研究使用金融监管总局当期合计表，先定位目录及附件，再读取正式表格。'))
+    from .draft_sources import historical_structured_issue, historical_structured_scope
+    if historical_structured_scope(task):
+        tools = [item for item in tools if not historical_structured_issue(task, item['source'], item['operation'])]
+    observation = observation_selection(task)
     for item in tools:
         item.setdefault("example", None)
+        if observation is not None and item['source'] == 'ifind' and item['operation'] in OBSERVATION_OPERATIONS:
+            item['observation_selection'] = copy.deepcopy(observation)
     result = {"version": 2, "binding": {"task_id": task["id"], "research_version": task["version"],
             "input_hash": task["input_hash"], "cutoff": task["cutoff"]},
             "declared_codes": declared, "callable_codes": callable_codes,
@@ -874,7 +1058,7 @@ def data_request_contract(task):
         # once the current question needs identity or an original instead.
         result['object_discovery'] = discovery
     from .source_requirements import alternatives
-    if task.get('catalogue_alternative_version') is not None:
+    if task.get('catalogue_alternative_version') is not None and not html_only:
         result['catalogue_alternatives']=alternatives(task)
     from .financial_sources import source_request_fields_enabled
     if source_request_fields_enabled(task):
@@ -886,6 +1070,27 @@ def data_request_contract(task):
     preference = structured_source_preference(task)
     if preference is not None:
         result['source_preference'] = preference
+    if historical_structured_scope(task):
+        result['historical_structured_rule'] = ('历史时点按已登记的日频日期上限和适用原件取证。'
+            '当前财务、宏观修订、指数成分和ETF清单只保存在底稿，缺少当时版本时保留缺项。')
+    if first_report:
+        from .draft_sources import ORIGINAL_DOWNLOAD_OPERATIONS, historical_originals_local_only, local_sources_only
+        if local_sources_only(task):
+            result['tools'] = []
+            result.pop('catalogue_alternatives', None)
+            result['operation_rule'] = '本次仅使用留存资料或附件，data_requests须为空。'
+            result['acquisition_channels']['download_policy']['scope'] = 'retained_only'
+        elif historical_originals_local_only(task):
+            result['tools'] = [item for item in tools
+                               if (item['source'], item['operation']) not in ORIGINAL_DOWNLOAD_OPERATIONS]
+            result.pop('catalogue_alternatives', None)
+            result['acquisition_channels']['download_policy']['historical_originals'] = 'retained_only'
+            result['historical_original_rule'] = (
+                '截止时点已过。首稿复用已留存且可作历史依据的原件，优先取仍可使用的结构化数据。'
+                '仅在问题要求定位或列举时查询公告目录，不把目录当作正文，不因目录命中再规划原件下载。')
+    if excluded := excluded_subjects(task):
+        result['excluded_subjects'] = list(excluded)
+        result['subject_rule'] = '用户排除的对象不得加入本轮取数或结论。'
     return result
 
 _PRIVATE_KEYS = re.compile(r"^(?:access_?token|refresh_?token|token|password|passwd|secret|authorization|credentials?|cookie|api_?key|client_?name|customer|contact|phone|email)$", re.I)
@@ -1003,6 +1208,22 @@ def _bound(record, task):
         raise ContractError("原始材料属于其他任务或研究版本")
 
 
+def _evidence_artifact_id(item):
+    artifact = item.get("artifact")
+    embedded = artifact.get("id") if isinstance(artifact, dict) else None
+    declared = item.get("artifact_id")
+    if embedded is not None and declared is not None and embedded != declared:
+        raise ContractError("证据的原件编号与实际原件不一致")
+    return embedded if embedded is not None else declared
+
+
+def _unique_artifact(records, ident):
+    if not isinstance(ident, str) or not ident:
+        return None
+    matches = [record for record in records if isinstance(record, dict) and record.get("id") == ident]
+    return matches[0] if len(matches) == 1 else None
+
+
 def validate_tinyshare_request(task, operation, params):
     """One explicit security/window; documentation is not a permission receipt."""
     if "tinyshare." + str(operation) in FINANCIAL_REQUEST_REGISTRY:
@@ -1060,13 +1281,24 @@ def validate_market_request(task, source, operation, params, *, require_identity
     if not isinstance(codes, str) or not codes or not isinstance(fields, str) or not fields:
         raise ContractError("iFinD行情代码及字段须为非空文字")
     selected_codes, selected_fields = codes.split(","), fields.split(",")
-    if (len(set(selected_codes)) != len(selected_codes) or any(not re.fullmatch(
+    hk_event = any(re.fullmatch(HK_EVENT_INDEX_PATTERN, code) for code in selected_codes)
+    if hk_event:
+        from .event_market import ifind_parameters, market_scope
+        scope = market_scope(task)
+        if not scope or ifind_parameters(scope) != params:
+            raise ContractError('港股指数行情请求须匹配当前政策事件时点和登记对象')
+    elif (len(set(selected_codes)) != len(selected_codes) or any(not re.fullmatch(
             r"(?:\d{6}\.(?:SH|SZ)|\d{4,5}\.HK)", code) for code in selected_codes)
             or require_identity and not set(selected_codes).issubset(declared)):
-        raise ContractError("行情请求对象未由本任务明确声明或核验映射，不能重复代码或扩大研究范围")
-    if len(set(selected_fields)) != len(selected_fields) or set(selected_fields) - set(definition["fields"]):
+        from .event_market import ifind_parameters, market_scopes
+
+        scope = market_scopes(task).get('mainland')
+        if not scope or ifind_parameters(scope) != params:
+            raise ContractError("行情请求对象未由本任务明确声明或核验映射，不能重复代码或扩大研究范围")
+    requestable = definition["fields"].keys() | definition["raw_observation_fields"].keys()
+    if len(set(selected_fields)) != len(selected_fields) or not set(selected_fields).issubset(requestable):
         raise ContractError("iFinD行情字段未登记或重复")
-    if params["functionpara"] != {"Currency": "RMB", "CPS": "1", "Fill": "Omit"}:
+    if params["functionpara"] != IFIND_QUOTE_FUNCTION:
         raise ContractError("行情请求不能更改登记币种、复权和缺失填充口径")
     dates = []
     for key in ("startdate", "enddate"):
@@ -1080,7 +1312,7 @@ def validate_market_request(task, source, operation, params, *, require_identity
     return dates
 
 
-def validate_source_request(task, source, operation, params, *, require_identity=True):
+def validate_source_request(task, source, operation, params, *, require_identity=True, defer_account_policy=False):
     """Validate outgoing authority before cache reuse, checkpoints or credentials.
 
     Raw imports remain readable through snapshot_record. Neither validation nor
@@ -1089,20 +1321,49 @@ def validate_source_request(task, source, operation, params, *, require_identity
     resolves. Every actual send and cache reuse still requires verified identity.
     """
     params = safe_parameters(params)
+    from .draft_sources import historical_structured_issue
+    if issue := historical_structured_issue(task, source, operation):
+        raise ContractError(issue)
     qualified = str(source) + "." + str(operation)
     if qualified in ETF_REQUEST_REGISTRY:
         from .etf_sources import validate_request as validate_etf_request
         validate_etf_request(task, params, require_identity=require_identity)
+    elif qualified in ETF_LISTING_REGISTRY:
+        from .etf_listing import validate_request as validate_etf_listing
+        validate_etf_listing(task, params)
+    elif qualified in ETF_TRADING_REGISTRY:
+        from .etf_trading import validate_request as validate_etf_trading
+        validate_etf_trading(task, operation, params)
     elif qualified in OFFICIAL_REQUEST_REGISTRY:
         from .official_sources import canonical_request_parameters
         params = canonical_request_parameters(task, operation, params)
     elif qualified=='official.index_file':
         from .index_sources import validate_official_index_request
         validate_official_index_request(task,operation,params)
+    elif qualified == 'official.'+HK_EVENT_HISTORY:
+        from .event_market import validate_request as validate_history
+        validate_history(task, params)
+    elif qualified == 'official.'+MAINLAND_EVENT_HISTORY:
+        from .event_market import validate_mainland_request
+        validate_mainland_request(task, params)
+    elif qualified == 'official.'+H15_TREASURY_YIELDS:
+        from .treasury_rates import validate_request as validate_h15_request
+        validate_h15_request(task, params)
+    elif qualified == 'official.'+LPR_HISTORY:
+        from .lpr_rates import validate_request as validate_lpr_request
+        validate_lpr_request(task, params)
+    elif qualified == 'official.'+NFRA_BANK_STATISTICS:
+        from .nfra_bank_statistics import validated_request as validate_nfra_request
+        validate_nfra_request(task, params)
     elif qualified in IFIND_METADATA_REGISTRY:
         from .financial_sources import financial_request_parameters
         params = financial_request_parameters(task, operation, params)
-        validate_metadata_request(task, operation, params, require_identity=require_identity)
+        validate_metadata_request(task, operation, params, require_identity=require_identity,
+                                  defer_account_policy=defer_account_policy)
+    elif qualified in INTRADAY_REQUEST_REGISTRY:
+        from .intraday_quotes import validate_request as validate_intraday_request
+
+        validate_intraday_request(task, operation, params)
     elif qualified in FIELD_REGISTRY:
         validate_market_request(task, source, operation, params, require_identity=require_identity)
     elif qualified in IDENTITY_REQUEST_REGISTRY:
@@ -1110,7 +1371,12 @@ def validate_source_request(task, source, operation, params, *, require_identity
     elif qualified in ECONOMIC_REQUEST_REGISTRY:
         validate_economic_request(task, operation, params)
     elif qualified in SERIES_REQUEST_REGISTRY:
+        from .market_series import valuation_exclusion_scope
+
         validate_series_request(task, operation, params, require_identity=require_identity)
+        _, excluded = valuation_exclusion_scope(task)
+        if any(item['indicator'] in excluded for item in params['indipara']):
+            raise ContractError('本轮已排除对应估值字段，未派发请求。')
     elif qualified in INDEX_REQUEST_REGISTRY:
         if source=='official':
             from .index_sources import validate_official_index_request
@@ -1136,7 +1402,8 @@ def validate_source_request(task, source, operation, params, *, require_identity
         raise ContractError("Wind查询与字段口径未登记，本轮不能派发")
     else:
         raise ContractError("未知数据源")
-    return params
+    from .market_series import bound_daily_market_window
+    return bound_daily_market_window(task, source, operation, params)
 
 
 def record_request_purpose(record, need, question_ids):
@@ -1145,6 +1412,8 @@ def record_request_purpose(record, need, question_ids):
     The source snapshot and hash stay unchanged. Older aggregate metadata is
     retained without guessing a per-request mapping when aliases already exist.
     """
+    from .market_series import record_observation_scope
+    record_observation_scope(record, need, question_ids)
     purpose = need.get('selection_reason')
     if not isinstance(purpose, str) or not purpose.strip():
         return
@@ -1169,6 +1438,10 @@ def snapshot_record(task, source, operation, params, payload, private_values=())
     if operation not in CAPABILITIES[source].get("endpoints", []):
         raise ContractError("来源接口未登记，不能猜测Wind表或供应商字段")
     params = safe_parameters(params)
+    if f'{source}.{operation}' in INTRADAY_REQUEST_REGISTRY:
+        from .intraday_quotes import validate_request as validate_intraday_request
+
+        validate_intraday_request(task, operation, params)
     metadata = source == 'ifind' and 'ifind.' + str(operation) in IFIND_METADATA_REGISTRY
     if metadata:
         validate_metadata_request(task, operation, params)
@@ -1205,6 +1478,8 @@ def snapshot_record(task, source, operation, params, payload, private_values=())
             metadata_contract = metadata_response(operation, params, payload,
                 allow_partial=partial_financial_enabled(task))
             metadata_valid = True
+        except DuplicateJSONField:
+            raise
         except (ContractError, TypeError, ValueError, KeyError):
             metadata_contract, metadata_valid = None, False
     request_hash = fingerprint({"source": source, "operation": operation, "parameters": params})
@@ -1226,11 +1501,35 @@ def snapshot_record(task, source, operation, params, payload, private_values=())
             "request_hash": request_hash, "snapshot": payload, "hash": digest, "content_version": 1,
             "task_id": task["id"], "research_version": task["version"], "obtained_at": now(),
             "status": status, "business_code": code, "source_check": "待核验", "applicability_check": "待核验"}
+    if source == "ifind" and operation == "cmd_history_quotation" and status == "成功待核验":
+        indicators = params.get("indicators")
+        requested = indicators.split(",") if isinstance(indicators, str) else []
+        raw_fields = FIELD_REGISTRY["ifind.cmd_history_quotation"]["raw_observation_fields"]
+        if raw_fields.keys() & requested:
+            # Presence is structural only. Identity, dates and usable cells are
+            # independently bound by the observation reader for each table.
+            missing_by_table = []
+            for index, table in enumerate(payload["tables"]):
+                columns = table.get("table") if isinstance(table, dict) else None
+                missing = [field for field in requested if not isinstance(columns, dict) or field not in columns]
+                if missing:
+                    missing_by_table.append({"table": index, "missing_fields": missing})
+            if missing_by_table:
+                record["missing_quote_columns"] = missing_by_table
     if metadata:
         if not metadata_valid:
             record['status'] = '返回结构异常'
         record['metadata_contract'] = dict(version=1, raw_only=True, numeric_evidence_approved=False,
             response_kind=operation, shape_validated=metadata_valid, parsed=metadata_contract)
+        if not metadata_valid and operation=='basic_data_service':
+            from .financial_sources import draft_financial_response
+            try:
+                projection=draft_financial_response(task,params,payload)
+            except (ContractError,TypeError,ValueError,KeyError,IndexError):
+                projection=None
+            if projection is not None:
+                record['status']='成功待核验'
+                record['draft_response_contract']=dict(projection,request_hash=request_hash,snapshot_hash=digest)
     if redacted:
         record["snapshot_privacy"] = {"policy_version": 1, "redacted": True,
             "basis": "已移除认证字段及来源地址中的临时授权参数；哈希绑定保留的业务快照，不冒充完整传输响应",
@@ -1251,6 +1550,15 @@ def snapshot_record(task, source, operation, params, payload, private_values=())
         except ContractError as error:
             record.update(status='返回结构异常', series_contract=dict(version=3, raw_only=True,
                 financial_approval=False, response_issue=str(error)))
+        from .draft_sources import draft_date_series_scope, partial_date_series_enabled
+        if partial_date_series_enabled(task):
+            scope = draft_date_series_scope(task, record)
+            contract = record['series_contract']
+            if contract.get('response_issue') or scope['rejected_tables'] or scope['rejected_cells']:
+                contract['draft_response_coverage'] = dict(
+                    numeric_cells=scope['numeric_cells'], rejected_tables=scope['rejected_tables'],
+                    rejected_cells=scope['rejected_cells'], raw_only=True, financial_approval=False)
+                record['status'] = '成功待核验' if scope['numeric_cells'] else '返回结构异常'
     if index_pool:
         try:
             record['index_contract'] = index_response(task, params, payload)
@@ -1273,6 +1581,7 @@ def snapshot_record(task, source, operation, params, payload, private_values=())
     if source == "ifind" and operation == "report_query":
         validate_ifind_report_request(task, params)
         record["catalog_origin"] = {"task_id": task["id"], "research_version": task["version"]}
+        record["catalog_read_version"] = 1
         record.update(_filing_catalog(task, record))
     if source == "ifind" and operation == "get_thscode":
         record["identity_origin"] = dict(identity_scope(task), input_hash=task["input_hash"])
@@ -1323,6 +1632,119 @@ def _original_download_profile(record):
                 material=material, snapshot_hash=snapshot_hash)
 
 
+def _validated_original_download(task, receipt):
+    """Validate the saved download independently of a later parser outcome."""
+    keys = {'version', 'task_id', 'research_version', 'batch', 'dispatch_index', 'source', 'operation',
+            'parameters', 'request_hash', 'original_id', 'original_hash', 'byte_count', 'kind', 'name',
+            'obtained_at', 'status'}
+    if (not isinstance(receipt, dict) or set(receipt) != keys
+            or type(receipt.get('version')) is not int or receipt['version'] != 1
+            or receipt.get('task_id') != task['id']
+            or type(receipt.get('research_version')) is not int or receipt['research_version'] != task['version']
+            or type(receipt.get('batch')) is not int or receipt['batch'] < 0
+            or type(receipt.get('dispatch_index')) is not int
+            or type(receipt.get('byte_count')) is not int or receipt['byte_count'] <= 0
+            or receipt.get('status') != '已留存'
+            or not isinstance(receipt.get('source'), str) or not isinstance(receipt.get('operation'), str)
+            or not isinstance(receipt.get('parameters'), dict)
+            or not isinstance(receipt.get('original_id'), str) or not receipt['original_id'].startswith('rh_original_')
+            or not isinstance(receipt.get('original_hash'), str) or re.fullmatch(r'[a-f0-9]{64}', receipt['original_hash']) is None
+            or not isinstance(receipt.get('name'), str) or Path(receipt['name']).name != receipt['name']):
+        return None
+    expected_kind = {('ifind', 'filing_original'): 'filing', ('official', 'release_original'): 'material'}
+    if expected_kind.get((receipt.get('source'), receipt.get('operation'))) != receipt['kind']:
+        return None
+    events = task.get('ledger', {}).get('dispatches', [])
+    index = receipt['dispatch_index']
+    if not 0 <= index < len(events):
+        return None
+    event = events[index]
+    try:
+        if (event.get('download_receipt') != receipt or event.get('kind') != 'data_requests'
+                or event.get('batch') != receipt['batch'] or event.get('source') != receipt['source']
+                or event.get('operation') != receipt['operation'] or event.get('fingerprint') != receipt['request_hash']
+                or receipt['request_hash'] != fingerprint(dict(source=receipt['source'], operation=receipt['operation'],
+                                                              parameters=receipt['parameters']))
+                or not all(event.get(key) is True for key in
+                           ('transport_isolated', 'network_request_started', 'network_worker_reaped'))
+                or not timepoint(task['created_at']) <= timepoint(event['time']) <= timepoint(receipt['obtained_at']) <= timepoint(now())):
+            return None
+        if receipt['source'] == 'ifind':
+            validate_filing_original_request(task, receipt['parameters'])
+        else:
+            from .official_sources import validate_request as validate_official_request
+            validate_official_request(task, 'release_original', receipt['parameters'])
+    except (ContractError, KeyError, TypeError, ValueError):
+        return None
+    return receipt
+
+
+def original_download_recovery(task, original):
+    """Locate an actual saved download for these retained bytes, never re-send.
+
+    Repeated identical downloads retain distinct ledger entries. The earliest
+    matching retained download supplies the original time; later sends are not
+    erased or substituted for the source's first obtained time.
+    """
+    for event in task.get('ledger', {}).get('dispatches', []):
+        receipt = _validated_original_download(task, event.get('download_receipt'))
+        if (receipt is None or any(receipt[key] != original.get(key) for key in ('kind', 'name'))
+                or receipt['original_id'] != original.get('id')
+                or receipt['original_hash'] != original.get('sha256')
+                or receipt['byte_count'] != original.get('byte_count')):
+            continue
+        if receipt['source'] == 'ifind':
+            directory = validate_filing_original_request(task, receipt['parameters'])
+            if directory != original.get('directory'):
+                continue
+            return dict(receipt=copy.deepcopy(receipt), directory=directory)
+        from .official_sources import validate_request as validate_official_request
+        origin = validate_official_request(task, 'release_original', receipt['parameters'])
+        return dict(receipt=copy.deepcopy(receipt), origin=origin)
+    return None
+
+
+def _download_record_reference(task, record):
+    """A completed local parse may use its own committed download receipt."""
+    profile = _original_download_profile(record)
+    receipt = _validated_original_download(task, record.get('download_receipt'))
+    if (profile is None or receipt is None or task.get('research_mode') != 'current'
+            or task.get('intent') == DOCUMENT_CONTENT_INTENT
+            or record.get('task_id') != task['id'] or record.get('research_version') != task['version']
+            or profile['version'] == 3 and task.get('official_channels_version') != 1
+            or record.get('status') != '成功待核验'
+            or any(record.get(key) != receipt[key] for key in ('kind', 'source', 'operation', 'parameters', 'request_hash', 'obtained_at'))
+            or fingerprint(record['snapshot']) != profile['snapshot_hash']
+            or profile['material'].get('name') != receipt['name']
+            or profile['material'].get('status') != '已解析' or not profile['material'].get('parts')):
+        return None
+    try:
+        material = profile['material']
+        payload = base64.b64decode(material['original_base64'], validate=True)
+        if (len(payload) != receipt['byte_count'] or hashlib.sha256(payload).hexdigest() != receipt['original_hash']
+                or material.get('hash') != receipt['original_hash']):
+            return None
+        if profile['version'] == 2:
+            directory = validate_filing_original_request(task, record['parameters'])
+            if directory != record.get('directory') or directory != record['snapshot'].get('directory'):
+                return None
+        else:
+            from .official_sources import validate_original
+            validate_original(task, record)
+        link = record.get('local_reparse')
+        if link is not None:
+            if (not isinstance(link, dict) or set(link) != {'version', 'original_id', 'reparsed_at'}
+                    or type(link.get('version')) is not int or link['version'] != 2
+                    or link.get('original_id') != receipt['original_id']
+                    or not timepoint(receipt['obtained_at']) <= timepoint(link['reparsed_at']) <= timepoint(now())):
+                return None
+    except (ContractError, KeyError, ValueError, TypeError):
+        return None
+    return dict(kind='current_original', artifact_id=record['id'], snapshot_hash=profile['snapshot_hash'],
+        original_hash=receipt['original_hash'], obtained_at=receipt['obtained_at'], research_version=task['version'],
+        historical_availability_approved=False, event_causality_approved=False)
+
+
 def _record_current_original(task, record, event):
     """Mint only after the actual isolated download and local parsing finish."""
     profile = _original_download_profile(record)
@@ -1348,8 +1770,73 @@ def _record_current_original(task, record, event):
     return record
 
 
+def _reparsed_original_reference(task, record):
+    """Reuse a verified download's time for an exact local parse of its bytes.
+
+    Parsing creates a new snapshot, never a network receipt or a financial
+    approval. Every retained link must preserve source, task, version and bytes.
+    """
+    records = task.get('source_records', []) + task.get('pending_source_records', [])
+    current = record
+    seen = set()
+    while 'local_reparse' in current:
+        if current.get('id') in seen:
+            return None
+        seen.add(current.get('id'))
+        matches = [item for item in records if item.get('id') == current.get('id')]
+        link = current.get('local_reparse')
+        if (len(matches) != 1 or matches[0] != current or not isinstance(link, dict)
+                or set(link) != {'version', 'original_id', 'previous_artifact_id', 'previous_snapshot_hash', 'reparsed_at'}
+                or type(link.get('version')) is not int or link['version'] != 1
+                or not isinstance(link.get('original_id'), str) or not link['original_id']):
+            return None
+        parents = [item for item in records if item.get('id') == link['previous_artifact_id']]
+        if len(parents) != 1:
+            return None
+        parent = parents[0]
+        new_profile, old_profile = _original_download_profile(current), _original_download_profile(parent)
+        if (new_profile is None or old_profile is None
+                or current.get('task_id') != task['id'] or parent.get('task_id') != task['id']
+                or current.get('research_version') != task['version'] or parent.get('research_version') != task['version']
+                or new_profile['version'] != old_profile['version']
+                or link['previous_snapshot_hash'] != old_profile['snapshot_hash']
+                or current.get('status') != '成功待核验'
+                or any(current.get(key) != parent.get(key) for key in
+                       ('kind', 'source', 'operation', 'parameters', 'request_hash', 'obtained_at', 'directory'))
+                or fingerprint(current['snapshot']) != new_profile['snapshot_hash']
+                or new_profile['material'].get('status') != '已解析'
+                or not new_profile['material'].get('parts')
+                or new_profile['material'].get('hash') != old_profile['material'].get('hash')):
+            return None
+        try:
+            payload = base64.b64decode(new_profile['material']['original_base64'], validate=True)
+            if (hashlib.sha256(payload).hexdigest() != new_profile['material']['hash']
+                    or payload != base64.b64decode(old_profile['material']['original_base64'], validate=True)
+                    or not timepoint(current['obtained_at']) <= timepoint(link['reparsed_at']) <= timepoint(now())):
+                return None
+            if new_profile['version'] == 2:
+                directory = validate_filing_original_request(task, current['parameters'])
+                if directory != current['directory'] or directory != current['snapshot'].get('directory'):
+                    return None
+            else:
+                from .official_sources import validate_original
+                validate_original(task, current)
+        except (ContractError, KeyError, ValueError, TypeError):
+            return None
+        current = parent
+    reference = current_original_reference(task, current)
+    if reference is None:
+        return None
+    profile = _original_download_profile(record)
+    return dict(reference, artifact_id=record['id'], snapshot_hash=profile['snapshot_hash'])
+
+
 def current_original_reference(task, record):
     """An import or old original cannot acquire a live download receipt."""
+    if isinstance(record, dict) and 'download_receipt' in record:
+        return _download_record_reference(task, record)
+    if isinstance(record, dict) and 'local_reparse' in record:
+        return _reparsed_original_reference(task, record)
     profile = _original_download_profile(record)
     if (profile is None or task.get("research_mode") != "current" or task.get("intent") == DOCUMENT_CONTENT_INTENT
             or profile['version'] == 3 and task.get('official_channels_version') != 1
@@ -1409,13 +1896,28 @@ def _query_request_operations():
     """Registered request lineage, deliberately broader than numeric fields."""
     return (set(FIELD_REGISTRY) | set(FINANCIAL_REQUEST_REGISTRY) | set(FINANCIAL_QUERY_REGISTRY) | set(IFIND_METADATA_REGISTRY)
             | set(ECONOMIC_REQUEST_REGISTRY) | set(SERIES_REQUEST_REGISTRY) | set(CALENDAR_REQUEST_REGISTRY) | set(INDEX_REQUEST_REGISTRY)
-            | {'ifind.get_thscode', 'ifind.report_query'})
+            | set(INTRADAY_REQUEST_REGISTRY) | {'ifind.get_thscode', 'ifind.report_query', 'official.release_catalog'}
+            | set(ETF_LISTING_REGISTRY) | set(ETF_TRADING_REGISTRY))
+
+
+def _query_response_received(record):
+    if (record.get('source'), record.get('operation')) == ('official', 'release_catalog'):
+        from .announcement_sources import CHANNELS
+        parameters = record.get('parameters')
+        if not isinstance(parameters, dict) or parameters.get('channel') not in CHANNELS:
+            return False
+    return (record.get('status') == '成功待核验'
+            or (record.get('status') == record.get('catalog_status') == '成功但为空'
+                and (record.get('source'), record.get('operation')) == ('ifind', 'report_query')))
 
 
 def _record_current_acquisition(task, record, event):
-    """Only the completed, budgeted isolated transport may mint this record."""
-    if task.get("research_mode") != "current" or record.get("status") != "成功待核验" or \
-            record["source"] + "." + record["operation"] not in _query_request_operations():
+    """Bind a completed isolated transport to its archived response."""
+    operation = record["source"] + "." + record["operation"]
+    mode = task.get("research_mode")
+    allowed = _query_request_operations() if mode == "current" else (
+        CALENDAR_REQUEST_REGISTRY if mode == "historical" else ())
+    if not _query_response_received(record) or operation not in allowed:
         return record
     if not all(event.get(key) is True for key in ("transport_isolated", "network_request_started", "network_worker_reaped")):
         return record
@@ -1470,8 +1972,29 @@ def current_query_reference(task, record):
 
 
 def _current_api_reference(task, record, operations, kind):
-    if task.get("research_mode") != "current" or task.get("intent") == DOCUMENT_CONTENT_INTENT or \
-            not isinstance(record, dict) or record.get("kind") != "api" or record.get("status") != "成功待核验" or \
+    if task.get("research_mode") != "current":
+        return None
+    return _api_acquisition_reference(task, record, operations, kind)
+
+
+def calendar_query_reference(task, record):
+    """Prove the technical calendar query, including a retrospective query."""
+    if task.get("research_mode") not in ("current", "historical"):
+        return None
+    reference = _api_acquisition_reference(task, record, CALENDAR_REQUEST_REGISTRY, "calendar_query")
+    if reference is not None:
+        receipt = record["acquisition"]
+        if type(receipt["version"]) is not int or type(receipt["research_version"]) is not int:
+            return None
+        event = task["ledger"]["dispatches"][receipt["dispatch_index"]]
+        if (event.get("source"), event.get("operation")) != (record["source"], record["operation"]):
+            return None
+    return reference
+
+
+def _api_acquisition_reference(task, record, operations, kind):
+    if task.get("intent") == DOCUMENT_CONTENT_INTENT or \
+            not isinstance(record, dict) or record.get("kind") != "api" or not _query_response_received(record) or \
             str(record.get("source")) + "." + str(record.get("operation")) not in operations:
         return None
     receipt = record.get("acquisition")
@@ -1569,8 +2092,7 @@ def validate_current_snapshot(item, task, records=None):
             raise ContractError('独立报告期间依据仅用于实际取得的当前原件')
         return False
     registered = task.get("source_records", []) if records is None else records
-    ident = item.get("artifact_id") or (item.get("artifact") or {}).get("id")
-    record = next((r for r in registered if r.get("id") == ident), None)
+    record = _unique_artifact(registered, _evidence_artifact_id(item))
     expected = (current_original_reference(task, record) if reference.get("kind") == "current_original"
                 else current_snapshot_reference(task, record)) if isinstance(reference, dict) else None
     if expected is None or reference != expected or \
@@ -1689,7 +2211,11 @@ def validate_current_snapshot(item, task, records=None):
 
 
 DIRECT_CODE_REFERENCE_VERSION = 1
-DIRECT_CODE_OPERATIONS = frozenset({'ifind.cmd_history_quotation', 'ifind.basic_data_service', 'tinyshare.daily', 'tinyshare.fund_daily', 'official.etf_pcf'})
+CURRENT_MARKET_OBSERVATION_VERSION = 1
+DIRECT_CODE_OPERATIONS = frozenset({
+    'ifind.cmd_history_quotation', 'ifind.basic_data_service', 'tinyshare.daily',
+    'tinyshare.fund_daily', 'tinyshare.daily_basic', 'official.etf_pcf',
+})
 DIRECT_CODE_LIMITATION = (
     '仅为本次取得的指定供应商完整代码行情快照，不证明历史证券身份、名称转换、证券归属、'
     '基金持仓、产业暴露或因果；未复权价格变化不等于持有人总回报。')
@@ -1727,7 +2253,7 @@ def candidate_code_references(task, record):
         and type(task.get('identity_candidate_lookup_version')) is int
         and task['identity_candidate_lookup_version'] == 2)
     code_pattern = r'(?:\d{6}\.(?:SH|SZ)|\d{4,5}\.HK)' if names_enabled else r'\d{6}\.(?:SH|SZ)'
-    if not isinstance(code, str) or not re.fullmatch(code_pattern, code):
+    if not isinstance(code, str) or not re.fullmatch(code_pattern, code) or not subject_allowed(task, code):
         return []
     from .object_discovery import retained_discovery_results, callable_discovery_codes
     from .index_sources import retained_official_member_sources
@@ -1901,17 +2427,19 @@ def validate_ifind_identity_request(task, params):
     query = params[mode]
     if not isinstance(query, str) or not query.strip() or query != query.strip() or len(query) > 80 or any(char in query for char in ",;\n\r"):
         raise ContractError("身份转换须为一个明确代码或名称")
-    texts = [task.get("question", ""), *task.get("objects", [])]
+    if not _identity_query_allowed(task, mode, query):
+        raise ContractError('用户已排除此对象，本轮不查询其证券身份')
+    texts = [scope_question(task), *task.get("objects", [])]
     from .object_discovery import identity_query_candidates
     candidates = identity_query_candidates(task)
     if not candidate_lookup:
         candidates += [dict(code=code,name=item['query']) for item in identity_candidates(task) for code in item['exact_lookup_codes']]
     candidate_values = {candidate['code'].split('.')[0] if mode == 'seccode' else candidate['name']
-                        for candidate in candidates}
+                        for candidate in candidates if subject_allowed(task, candidate['code'])}
     if mode == "seccode":
         if not re.fullmatch(r"\d{4,6}", query) or not (query in candidate_values or any(re.search(r"(?<!\d)" + re.escape(query) + r"(?!\d)", text) for text in texts)):
             raise ContractError("身份转换代码须来自用户输入，不能猜测或扩大对象范围")
-    elif len(query) < 2 or not (query in candidate_values or any(query.casefold() in text.casefold() for text in texts)):
+    elif len(query) < 2 or not (query in candidate_values or _identity_name_in_scope(task, query)):
         raise ContractError("身份转换名称须来自用户输入，不由模型新增候选")
     return query, mode
 
@@ -1951,7 +2479,147 @@ def validate_ifind_report_request(task, params, *, require_identity=True):
     return [params["beginrDate"], params["endrDate"]]
 
 
-def _filing_rows(payload):
+_DIRECT_FILING_OPTION = re.compile(
+    r'(?:(?:仅|只|优先)?(?:用|使用)iFinD(?:查询)?|(?:不|别|不要|无需)下载PDF|'
+    r'(?:可|允许|不用|不使用)(?:查|查询|使用|用)?(?:官方(?:渠道|公告|目录|来源)?|巨潮(?:资讯)?|披露易)|'
+    r'(?:不|不要|无需)(?:分析|核对)正文|(?:生成|整理成)(?:一份|一页)?报告)', re.I)
+_DIRECT_FILING_QUESTION = re.compile(
+    r'(?:请|帮我)?(?:(?:仅|只)?(?:使用|用)iFinD)?(?:仅|只)?'
+    r'(?:列出|列一下|查询|查找|查一下|查看|核对|获取|查齐|查全|找全|查)'
+    r'(?:@标的(?:从|自|在|于|的)?@日期(?:期间)?|(?:从|自|在|于)?@日期(?:期间)?@标的)'
+    r'(?:的)?(?:公告目录|公告清单|公告列表|披露目录|披露清单|'
+    r'(?:全部|所有)(?:公告(?:目录|清单|列表)?|披露(?:目录|清单)?)|'
+    r'(?:全部|所有)?公告标题(?:及|与|和)(?:公告)?日期)'
+    r'(?:并(?:生成|整理成)(?:一份|一页)?报告)?', re.I)
+
+
+def filing_directory_scope(task, *, clause=None):
+    """Compile one literal directory request with no disclosure analysis."""
+    from .draft_sources import local_scope_text
+    from .numeric_integrity import draft_day_intervals
+
+    if (task.get('draft_first_version') != 1 or task.get('research_mode') != 'current'
+            or task.get('intent') != '综合研究' or task.get('plan_version') != 1
+            or task.get('materials') or task.get('pending_materials') or task.get('update_from')
+            or task.get('calculation_specs') or task.get('requested_theses')):
+        return None
+    questions = task['questions']
+    if len(questions) != 1:
+        return None
+    question, = questions
+    needs = question['evidence_needs']
+    if (not question['required'] or question['question'] != task['question'] or question.get('answer_scope')
+            or question['method_needs'] or question.get('evidence_need_constraints') or question.get('evidence_period_targets')
+            or any(question.get('evidence_need_scopes', {}).get(need) != 'query_provenance' for need in needs)
+            or question['kind'] != 'fact' and task.get('question_origin') != 'default'):
+        return None
+    text = scope_question(task) if clause is None else clause
+    clauses = re.split(r'[，,。；;！？!?\n]+', local_scope_text(text))
+    clauses = [re.sub(r'\s+', '', part) for part in clauses]
+    main = [part for part in clauses if part and not _DIRECT_FILING_OPTION.fullmatch(part)]
+    if len(main) != 1:
+        return None
+    sentence, = main
+    codes = security_code_mentions(sentence, encoding=task.get('security_declaration_encoding', 1))
+    declared = declared_security_codes(task)
+    if len(codes) != 1 or codes[0] not in declared:
+        return None
+    code, = codes
+    if clause is None and (declared != codes or any(item != code for item in task['objects'])):
+        return None
+    intervals = draft_day_intervals(sentence)
+    if len(intervals) != 1 or sentence.count(code) != 1:
+        return None
+    left, right, start, end = intervals[0]
+    normalized = (sentence[:left] + '@日期' + sentence[right:]).replace(code, '@标的')
+    if end.isoformat() > market_date(task['cutoff']) or not _DIRECT_FILING_QUESTION.fullmatch(normalized):
+        return None
+    return dict(codes=code, functionpara={}, beginrDate=start.isoformat(), endrDate=end.isoformat(),
+                outputpara=FILING_REQUEST_REGISTRY['ifind.report_query']['parameters']['outputpara'])
+
+
+def filing_directory_result(task, parameters=None, *, include_official=True):
+    """Project verified directory metadata and coverage for the requested window."""
+    if parameters is None:
+        parameters = filing_directory_scope(task)
+        if parameters is None:
+            return None
+    result = _ifind_directory_result(task, parameters)
+    if not include_official:
+        return result
+    from .announcement_sources import directory_coverage, directory_query, exhaustive_directory
+
+    if exhaustive_directory(task, parameters['codes']):
+        query = directory_query(task, parameters)
+        official = directory_coverage(task, query) if query else None
+        result.update(ifind_status=result['status'], official=official)
+        if official and official['complete']:
+            result['status'] = 'returned' if result['rows'] or official['rows'] else 'empty'
+        elif result['status'] != 'unavailable' or official and official['source_refs']:
+            result['status'] = 'partial'
+    return result
+
+
+def _ifind_directory_result(task, parameters):
+    question_id = task['questions'][0]['id']
+    result = dict(status='unavailable', rows=[], rejected=0)
+    matches = [row for row in task['source_records'] if row.get('parameters') == parameters
+               and (row.get('source'), row.get('operation')) == ('ifind', 'report_query')
+               and ('question_ids' not in row or question_id in row['question_ids'])
+               and current_query_reference(task, row) is not None]
+    if len(matches) != 1:
+        return result
+    record, = matches
+    if sum(row.get('id') == record['id'] for row in task['source_records']) != 1:
+        return result
+    try:
+        catalogue = _verified_filing_catalog(task, record)
+    except ContractError:
+        return result
+    rows = []
+    rejected = catalogue['catalog_coverage'].get('invalid_location_count', 0)
+    for entry in catalogue['catalog_entries']:
+        day, title = entry['report_date'], entry['title']
+        if (entry['issuer'] != parameters['codes'] or not isinstance(day, str)
+                or not parameters['beginrDate'] <= day <= parameters['endrDate']
+                or '公告日期格式未知' in entry['gaps'] or not isinstance(title, str) or not title.strip()):
+            rejected += 1
+            continue
+        rows.append(dict(date=day, title=title, source_id=entry['source_id']))
+    return dict(status='partial' if rejected else 'returned' if rows else 'empty',
+                rows=sorted(rows, key=lambda row: row['date'], reverse=True),
+                rejected=rejected, source_ref=record['id'])
+
+
+def _filing_block_rows(value, path):
+    if not isinstance(value, dict):
+        raise ContractError("公告目录须为明确列名的记录或table列数组")
+    if set(IFIND_REPORT_FIELDS).issubset(value):
+        if any(isinstance(value[key], (dict, list)) for key in IFIND_REPORT_FIELDS):
+            raise ContractError("公告目录行字段不能混入列数组")
+        yield value, path, {key: path + [key] for key in IFIND_REPORT_FIELDS}
+        return
+    if not isinstance(value.get("table"), dict):
+        raise ContractError("公告目录字段不完整或结构未知，不认作空目录")
+    columns = value["table"]
+    required = set(IFIND_REPORT_FIELDS)
+    scalar_code = "thscode" not in columns and isinstance(value.get("thscode"), str)
+    if scalar_code:
+        required.remove("thscode")
+    if not required.issubset(columns) or any(not isinstance(columns[key], list) for key in required):
+        raise ContractError("公告目录列名或数组缺失，不按位置猜测字段")
+    lengths = {len(columns[key]) for key in required}
+    if len(lengths) != 1:
+        raise ContractError("公告目录列数组长度不一致")
+    for row in range(next(iter(lengths))):
+        record = {key: columns[key][row] for key in required}
+        mapping = {key: path + ["table", key, row] for key in required}
+        if scalar_code:
+            record["thscode"], mapping["thscode"] = value["thscode"], path + ["thscode"]
+        yield record, path + ["table", row], mapping
+
+
+def _filing_rows(payload, *, on_invalid=None):
     """Only explicit names are recognized; positional arrays are not a schema."""
     roots = [key for key in ("tables", "data") if key in payload]
     if len(roots) != 1 or not isinstance(payload[roots[0]], list):
@@ -1959,31 +2627,12 @@ def _filing_rows(payload):
     root = roots[0]
     for index, value in enumerate(payload[root]):
         path = [root, index]
-        if not isinstance(value, dict):
-            raise ContractError("公告目录须为明确列名的记录或table列数组")
-        if set(IFIND_REPORT_FIELDS).issubset(value):
-            if any(isinstance(value[key], (dict, list)) for key in IFIND_REPORT_FIELDS):
-                raise ContractError("公告目录行字段不能混入列数组")
-            yield value, path, {key: path + [key] for key in IFIND_REPORT_FIELDS}
-        elif isinstance(value.get("table"), dict):
-            columns = value["table"]
-            required = set(IFIND_REPORT_FIELDS)
-            scalar_code = "thscode" not in columns and isinstance(value.get("thscode"), str)
-            if scalar_code:
-                required.remove("thscode")
-            if not required.issubset(columns) or any(not isinstance(columns[key], list) for key in required):
-                raise ContractError("公告目录列名或数组缺失，不按位置猜测字段")
-            lengths = {len(columns[key]) for key in required}
-            if len(lengths) != 1:
-                raise ContractError("公告目录列数组长度不一致")
-            for row in range(next(iter(lengths))):
-                record = {key: columns[key][row] for key in required}
-                mapping = {key: path + ["table", key, row] for key in required}
-                if scalar_code:
-                    record["thscode"], mapping["thscode"] = value["thscode"], path + ["thscode"]
-                yield record, path + ["table", row], mapping
-        else:
-            raise ContractError("公告目录字段不完整或结构未知，不认作空目录")
+        try:
+            yield from _filing_block_rows(value, path)
+        except ContractError as error:
+            if on_invalid is None:
+                raise
+            on_invalid(value, path, str(error))
 
 
 def _filing_catalog(task, record):
@@ -1997,18 +2646,56 @@ def _filing_catalog(task, record):
     business_code = record["snapshot"].get("errorcode")
     if isinstance(business_code, bool) or business_code not in (0, "0"):
         return result
-    entries, ids = [], set()
+    version = record.get("catalog_read_version")
+    if version is not None and (type(version) is not int or version != 1):
+        raise ContractError("公告目录读取版本未登记")
+    partial = version == 1
+    entries, ids, duplicate_ids = [], set(), set()
+    issues = []
+    issue_count = 0
+
+    def note_issue(path, reason):
+        nonlocal issue_count
+        issue_count += 1
+        if len(issues) < 20:
+            issues.append(dict(row_locator=path, reason=reason))
+
+    def register_id(value):
+        if type(value) not in (str, int) or not str(value).strip():
+            return None
+        source_id = str(value)
+        if source_id in ids:
+            duplicate_ids.add(source_id)
+        ids.add(source_id)
+        return source_id
+
+    def invalid_block(value, path, reason):
+        # Even an unreadable row/block can contain a conflicting selector.
+        # Count its explicit seq values without aligning any malformed columns.
+        if isinstance(value, dict):
+            register_id(value.get("seq"))
+            columns = value.get("table")
+            if isinstance(columns, dict) and isinstance(columns.get("seq"), list):
+                for source_id in columns["seq"]:
+                    register_id(source_id)
+        note_issue(path, reason)
+
     try:
         privacy = record["snapshot"].get("_researchhelper_privacy", {})
         if not isinstance(privacy, dict) or not isinstance(privacy.get("redacted_url_paths", []), list):
             raise ContractError("业务快照的地址脱敏标记异常")
-        for raw, path, mapping in _filing_rows(record["snapshot"]):
+        for raw, path, mapping in _filing_rows(record["snapshot"], on_invalid=invalid_block if partial else None):
+            source_id = register_id(raw["seq"])
+            issue = None
             if any(isinstance(raw[key], (dict, list, bool)) for key in IFIND_REPORT_FIELDS):
-                raise ContractError("公告目录原始字段类型异常")
-            source_id = raw["seq"]
-            if not isinstance(source_id, (str, int)) or not str(source_id).strip() or str(source_id) in ids:
-                raise ContractError("公告目录seq缺失或重复，不能唯一选择原件")
-            ids.add(str(source_id))
+                issue = "公告目录原始字段类型异常"
+            elif source_id is None or (source_id in duplicate_ids and not partial):
+                issue = "公告目录seq缺失或重复，不能唯一选择原件"
+            if issue:
+                if not partial:
+                    raise ContractError(issue)
+                note_issue(path, issue)
+                continue
             gaps = []
             for key in IFIND_REPORT_FIELDS:
                 if raw[key] is None or raw[key] == "":
@@ -2057,9 +2744,21 @@ def _filing_catalog(task, record):
     except ContractError as error:
         result.update(status="返回结构异常", catalog_error=str(error))
         return result
-    result.update(catalog_entries=entries, catalog_status="成功待核验" if entries else "成功但为空",
-                  status="成功待核验" if entries else "成功但为空")
-    result["catalog_coverage"].update(returned_rows=len(entries),
+    if duplicate_ids:
+        for entry in entries:
+            if entry["source_id"] in duplicate_ids:
+                note_issue(entry["catalog_ref"]["row_locator"], "公告目录seq重复，不能唯一选择原件")
+        entries = [entry for entry in entries if entry["source_id"] not in duplicate_ids]
+    coverage = result["catalog_coverage"]
+    if issue_count:
+        coverage.update(invalid_location_count=issue_count, invalid_locations=issues)
+        if not entries:
+            result.update(status="返回结构异常", catalog_error="公告目录无可解析且唯一的条目")
+            return result
+    status = "成功待核验" if entries else "成功但为空"
+    result.update(catalog_entries=entries, catalog_status="部分成功待核验" if issue_count else status,
+                  status=status)
+    coverage.update(returned_rows=len(entries),
         report_dates=sorted({entry["report_date"] for entry in entries if isinstance(entry["report_date"], str)}))
     return result
 
@@ -2077,15 +2776,7 @@ def _filing_url(value):
     return url
 
 
-def validate_filing_catalog_binding(task, directory):
-    """Re-derive all directory fields, not merely trust a caller supplied hash."""
-    if not isinstance(directory, dict) or not isinstance(directory.get("catalog_ref"), dict):
-        raise ContractError("公告原件缺少留存目录绑定")
-    ref = directory["catalog_ref"]
-    matches = [r for r in task.get("source_records", []) if r.get("id") == ref.get("artifact_id")]
-    if len(matches) != 1:
-        raise ContractError("公告目录不在本任务唯一归档")
-    record = matches[0]
+def _verified_filing_catalog(task, record):
     _bound(record, task)
     if record.get("kind") != "api" or record.get("source") != "ifind" or record.get("operation") != "report_query":
         raise ContractError("公告原件未绑定report_query快照")
@@ -2101,6 +2792,18 @@ def validate_filing_catalog_binding(task, directory):
     rebuilt = _filing_catalog(task, record)
     if any(record.get(key) != rebuilt.get(key) for key in ("catalog_entries", "catalog_status", "catalog_coverage", "catalog_limitations", "status")):
         raise ContractError("公告目录候选被修改或已失效")
+    return rebuilt
+
+
+def validate_filing_catalog_binding(task, directory):
+    """Re-derive all directory fields, not merely trust a caller supplied hash."""
+    if not isinstance(directory, dict) or not isinstance(directory.get("catalog_ref"), dict):
+        raise ContractError("公告原件缺少留存目录绑定")
+    ref = directory["catalog_ref"]
+    matches = [r for r in task.get("source_records", []) if r.get("id") == ref.get("artifact_id")]
+    if len(matches) != 1:
+        raise ContractError("公告目录不在本任务唯一归档")
+    rebuilt = _verified_filing_catalog(task, matches[0])
     expected = next((row for row in rebuilt["catalog_entries"] if row["source_id"] == directory.get("source_id")), None)
     if expected is None or directory != expected:
         raise ContractError("公告目录字段、原始定位或版本绑定不一致")
@@ -2148,6 +2851,18 @@ def material_record(task, parsed, payload):
                 task_id=task["id"], research_version=task["version"], obtained_at=parsed["obtained_at"])
     if "parse_runtime" in parsed:
         record["parse_runtime"] = copy.deepcopy(parsed["parse_runtime"])
+    return record
+
+
+def official_material_record(task, parsed, payload, parameters, origin, obtained_at):
+    record = material_record(task, parsed, payload)
+    record['snapshot']['official_origin'] = copy.deepcopy(origin)
+    snapshot_hash = fingerprint(record['snapshot'])
+    request_hash = fingerprint(dict(source='official', operation='release_original', parameters=parameters))
+    record.update(source='official', operation='release_original', parameters=copy.deepcopy(parameters),
+                  request_hash=request_hash, snapshot_hash=snapshot_hash, obtained_at=obtained_at,
+                  id='rh_official_'+fingerprint([task['id'],task['version'],request_hash,snapshot_hash])[:24],
+                  status='成功待核验')
     return record
 
 
@@ -2362,6 +3077,12 @@ def _source_extract(item, task):
             raise ContractError("接口请求参数指纹不一致")
         definition = _api_field_definition(artifact)
         raw_value, code, date, field = _api_cell(artifact, locator)
+        if artifact['source'] == 'ifind' and artifact['operation'] == 'cmd_history_quotation':
+            from .draft_sources import bound_ifind_market_scope, market_cell_binding_enabled, _observation_cell_selected
+            if market_cell_binding_enabled(task):
+                scope = bound_ifind_market_scope(task, artifact, latest_only=False)
+                if not _observation_cell_selected(scope, locator['table'], field, locator['row']):
+                    raise ContractError('行情单元的证券代码、日期或字段未能唯一核对')
         if not definition or field not in definition["fields"]:
             raise ContractError("字段定义与单位未登记")
         expected = _registered_api_fields(artifact, code).get(field)
@@ -2472,11 +3193,28 @@ def _source_extract(item, task):
         token = _require_text(item.get("raw_token"), "数字原文")
         # Locate a complete numeric token. A substring must not discard the
         # original sign or borrow digits from scientific notation.
-        if not re.search(r"(?<![\d.,eE+\-−＋－])" + re.escape(token) + r"(?![\d.,eE])", excerpt):
+        number_pattern = r"(?<![\d.,eE+\-−＋－])" + re.escape(token) + r"(?![\d.,eE])"
+        matches = list(re.finditer(number_pattern, excerpt))
+        if not matches:
             raise ContractError("数字原文无法定位，不能由模型补齐")
         unit_text = parts.get(locator.get("unit_part", locator.get("part")), "")
         if isinstance(item.get("conversion_factor"), bool) or item["raw_unit"] not in unit_text or item["raw_unit"] != item["unit"] or item.get("conversion_factor") != 1:
             raise ContractError("材料数字单位无法核验；仅支持已核对的原始单位")
+        from .numeric_integrity import (literal_quantity_qualifiers, literal_quantity_ranges,
+                                        quantity_qualifiers_enabled, quantity_ranges_enabled)
+        if quantity_qualifiers_enabled(task):
+            # A selected excerpt can start at the number or end before 左右.
+            # Recheck the actual page/paragraph, not the shortened excerpt.
+            adjacent_unit = re.compile(r"\s*" + re.escape(item["raw_unit"]))
+            intervals = tuple(literal_quantity_ranges(text)) if quantity_ranges_enabled(task) else ()
+            for selected in re.finditer(re.escape(excerpt), text):
+                for match in matches:
+                    start, end = selected.start() + match.start(), selected.start() + match.end()
+                    if any(span.start <= start and end <= span.end for span in intervals):
+                        raise ContractError("原文是数量区间，须保留完整区间摘录，不能采纳端点为单值")
+                    unit = adjacent_unit.match(text, end)
+                    if literal_quantity_qualifiers(text, start, unit.end() if unit else end):
+                        raise ContractError("原文含数量限定词，须保留完整文字摘录，不能采纳为精确数值")
         selector = locator.get('financial_amount_column', {})
         if isinstance(selector, dict) and type(selector.get('version')) is int and selector['version'] == 2:
             from .financial_data import monetary_cell
@@ -2577,7 +3315,13 @@ def _registered_api_fields(record, code):
     family = _api_field_family(record, code)
     if not definition or family is None:
         return {}
-    return definition.get("field_families", {}).get(family, definition["fields"])
+    fields = definition.get("field_families", {}).get(family, definition["fields"])
+    if "raw_observation_fields" in definition:
+        indicators = record.get("parameters", {}).get("indicators")
+        requested = indicators.split(",") if isinstance(indicators, str) else []
+        if definition["raw_observation_fields"].keys() & requested:
+            return {field: fields[field] for field in requested if field in fields}
+    return fields
 
 
 def api_calculation_context_contract(record):
@@ -2691,7 +3435,7 @@ def api_calculation_context_contract(record):
     return result
 
 
-def api_cell_candidates(record, maximum=16):
+def api_cell_candidates(record, maximum=16, *, task=None):
     """Readonly locations from the actual validator, never evidence approval.
 
     No inferred identity, publication time, currency, or financial method.
@@ -2714,6 +3458,11 @@ def api_cell_candidates(record, maximum=16):
     if isinstance(status, bool) or status not in (0, "0"):
         result["reason"] = "业务错误响应不生成数字位置候选"
         return result
+    quote_scope = None
+    if task is not None and record['source'] == 'ifind' and record['operation'] == 'cmd_history_quotation':
+        from .draft_sources import bound_ifind_market_scope, market_cell_binding_enabled, _observation_cell_selected
+        if market_cell_binding_enabled(task):
+            quote_scope = bound_ifind_market_scope(task, record, latest_only=False)
     fields = contract["registered_numeric_fields"]
     def scan_slot():
         # Charge both containers and cells so malformed/empty rows cannot
@@ -2748,6 +3497,10 @@ def api_cell_candidates(record, maximum=16):
                                 return
                             yield {"row": row_index, "field": field}
     for locator in positions():
+        if quote_scope is not None and not _observation_cell_selected(
+                quote_scope, locator['table'], locator['field'], locator['row']):
+            result["invalid_positions"] += 1
+            continue
         if len(result["cells"]) >= maximum:
             result["reason"] = "位置候选达到上限，完整响应仍保留；未展示不代表不存在"
             return result
@@ -2820,7 +3573,7 @@ def api_cell_choices(task, record, maximum=64):
     if financial:
         required = {'entity_id', 'currency', 'period', 'accounting_scope', 'accounting_standard', 'metric'}
     choices = []
-    cells = api_cell_candidates(record,maximum)['cells']
+    cells = api_cell_candidates(record,maximum,task=task)['cells']
     for identity_field,identity_reference in proofs:
         for cell in cells:
             locator = cell['proposal_fields']['record_locator']
@@ -2881,7 +3634,7 @@ def api_cell_choice_coverage(record, choices, maximum=64, *, task=None):
             scan_complete=len(cells) <= maximum, eligible_positions=len(cells), invalid_positions=0,
             maximum=maximum, maximum_scan_units=100000, snapshot_hash=record.get('hash'),
             choices_hash=fingerprint(choices), candidate_is_approval=False, absence_is_proof=False)
-    catalogue = api_cell_candidates(record, maximum)
+    catalogue = api_cell_candidates(record, maximum, task=task)
     expected = {fingerprint(cell['proposal_fields']['record_locator']) for cell in catalogue['cells']}
     offered = {fingerprint(item.get('record_locator')) for item in choices}
     complete = (bool(choices) and catalogue['scan_complete']
@@ -3414,10 +4167,10 @@ def validate_publication_basis(item, records):
     reference = item.get("publication", {}).get("basis_ref")
     if not isinstance(reference, dict):
         raise ContractError("首次公开时间缺少原始来源定位")
-    artifact_id = item.get("artifact_id") or item.get("artifact", {}).get("id")
+    artifact_id = _evidence_artifact_id(item)
     if not artifact_id or reference.get("artifact_id") != artifact_id:
         raise ContractError("公开时间依据不对应本条证据原件；未核验的外部发布关系不能替代")
-    record = next((r for r in records if r.get("id") == reference.get("artifact_id")), None)
+    record = _unique_artifact(records, artifact_id)
     if record is None or reference.get("snapshot_hash") != record.get("snapshot_hash", record.get("hash")):
         raise ContractError("公开时间依据不在本任务或内容版本已变化")
     if fingerprint(record.get("snapshot")) != reference["snapshot_hash"]:
@@ -3503,10 +4256,13 @@ def validate_provenance(item, task):
     if _registered_fixture_evidence(item, task):
         return
     registered = task.get("source_records", []) + task.get("materials", [])
-    artifact = item.get("artifact", {})
-    retained = next((x for x in registered if x.get("id") == artifact.get("id")), None)
-    if retained is None or retained.get("snapshot") != artifact.get("snapshot"):
-        raise ContractError("原件未在本任务归档，不能只提交核验标签或自造原件")
+    artifact = item.get("artifact")
+    retained = _unique_artifact(registered, _evidence_artifact_id(item))
+    if (retained is None or not isinstance(artifact, dict) or artifact.get("id") != retained["id"]
+            or retained.get("snapshot") != artifact.get("snapshot")
+            or retained.get("snapshot_hash", retained.get("hash")) != item.get("snapshot_hash")):
+        raise ContractError("原件未在本任务唯一归档，不能只提交核验标签或自造原件")
+    _bound(retained, task)
     if item.get("event_group") != retained.get("event_group") or artifact.get("event_group") != retained.get("event_group"):
         raise ContractError("事件分组不属于留存原件，不能把摘录编号作为独立事件")
     _source_extract(item, task)
@@ -3670,6 +4426,7 @@ def candidate_evidence(task, artifact, spec):
                 snapshot_hash=artifact.get("snapshot_hash", artifact["hash"]), source=artifact["source"],
                 obtained_at=artifact["obtained_at"], task_id=task["id"], research_version=task["version"], content_version=1,
                 source_check="待核验", applicability_check="待核验")
+    _evidence_artifact_id(item)
     item["locator"] = str(spec.get("record_locator", {}))
     document_only = validate_evidence_usage(item, task, artifact)
     current_only = validate_current_snapshot(item, task)
@@ -3743,8 +4500,12 @@ def extract_material(name, payload, *, extract_version=None):
         raise ContractError("仅支持PDF、TXT、Markdown、DOCX和HTML")
     readable = any(part["text"].strip() and 'metadata_field' not in part for part in parts)
     limitation = "" if readable else "未提取到正文，可能为扫描件；不生成伪造摘录"
-    if readable and suffix == ".pdf" and any(part.get('pdf_layout_limited') for part in parts):
-        limitation = "部分页面版面提取受限，仅保留文字层；未提取表格，不据此补算金融数值。"
+    if suffix == ".pdf":
+        unreadable = sum(bool(part.get('pdf_text_limited')) for part in parts)
+        if unreadable:
+            limitation = f'原件已保留，{unreadable}页文字编码无法可靠读取，未生成这些页面的摘录。'
+        if readable and any(part.get('pdf_layout_limited') for part in parts):
+            limitation += "部分页面版面提取受限，仅保留文字层；未提取表格，不据此补算金融数值。"
     if suffix in (".html", ".htm"):
         from .html_material import LIMITATION
         limitation = LIMITATION if readable else "未提取到静态正文，动态页面需提供原始材料；不生成伪造摘录"
@@ -3858,6 +4619,7 @@ class EvidenceCollector:
     def __init__(self, offline=True, journal=None):
         self.offline = offline
         self.journal = journal
+        self.query_journal = None
         self.original_keeper = None
         # Short-lived process memory only. Never add this token to task state.
         self._ifind_access_cache = None
@@ -3888,7 +4650,11 @@ class EvidenceCollector:
                 if len(raw) > 1000000:
                     raise ContractError('EDB搜索响应超过限额，保留失败不截断目录')
                 return {'text': raw.decode('utf-8')}
-            return json.load(response)
+            try:
+                return json.load(response, object_pairs_hook=unique_json_object)
+            except DuplicateJSONField:
+                event.update(status='返回结构异常', failure_code='duplicate_response_field')
+                raise
 
     def _download_original(self, task, url, timeout, event, source_id=None):
         return _download_filing_pdf(url, timeout, vendor_source_id=source_id) if source_id else _download_filing_pdf(url, timeout)
@@ -3907,10 +4673,18 @@ class EvidenceCollector:
             raise ContractError("Tinyshare返回结构异常，不当作无数据")
         return result.to_dict(orient="records")
 
-    def _tinyshare_checkpoint(self, task, event):
+    def _finish_query(self, task, record):
+        if self.journal is None:
+            return
+        if record is not None and self.query_journal is not None:
+            self.query_journal(task, record)
+        else:
+            self.journal(task)
+
+    def _tinyshare_checkpoint(self, task, event, record=None):
         if self.journal:
             try:
-                self.journal(task)
+                self._finish_query(task, record)
             except ContractError:
                 raise
             except Exception:
@@ -3932,7 +4706,7 @@ class EvidenceCollector:
             refresh = self._credential(credentials.get("refresh_token", ""))
             if not access and not refresh:
                 raise ContractError("请配置ResearchHelper独立Access Token或Refresh Token")
-            token = access or self._resolve_ifind_access(task, refresh)
+            token = self._resolve_ifind_access(task, refresh) if refresh else access
             if operation in IFIND_METADATA_OPERATIONS:
                 return self._ifind_metadata(task, operation, params, token, (access, refresh))
             return self._ifind(task, operation, params, token, (access, refresh))
@@ -3946,13 +4720,27 @@ class EvidenceCollector:
         raise ContractError("未知数据源")
 
     def _official(self, task, operation, params):
-        if operation == 'etf_pcf':
-            return self._official_etf(task, params)
+        if operation in ('etf_pcf', ETF_LISTING) or 'official.'+operation in ETF_TRADING_REGISTRY:
+            return self._official_etf(task, params, operation=operation)
+        if operation in (HK_EVENT_HISTORY, MAINLAND_EVENT_HISTORY, H15_TREASURY_YIELDS, LPR_HISTORY, NFRA_BANK_STATISTICS):
+            return self._official_event_history(task, operation, params)
         if 'official.'+operation in INDEX_REQUEST_REGISTRY:
             return self._official_index(task,operation,params)
-        from .official_sources import validate_request, parse_catalogue
-        from .source_transport import official_html
+        from .official_sources import validate_request
+        from .source_transport import official_html, official_announcement
+        from .announcement_sources import CHANNELS as ANNOUNCEMENT_CHANNELS
         selected = validate_request(task, operation, params)
+        channel = (params.get('channel') if operation == 'release_catalog' else
+            next(record['parameters']['channel'] for record in task['source_records']
+                 if record['id'] == params['catalog_id']))
+        from .miit_releases import CHANNELS as MIIT_CHANNELS
+        announcement = channel in ANNOUNCEMENT_CHANNELS
+        miit = channel in MIIT_CHANNELS
+        if announcement and operation=='release_catalog':
+            recovered=self._recover_official_catalogue(task,params)
+            if recovered is not None:return recovered
+        issuer_payload = (self._official_issuer(task, params)
+                          if announcement and operation == 'release_catalog' else None)
         active=getattr(self,'active',None)
         if active is not None:active(task)
         url = selected if operation == 'release_catalog' else selected['url']
@@ -3967,67 +4755,182 @@ class EvidenceCollector:
         if self.journal:self.journal(task)
         started=time.monotonic()
         try:
-            payload=official_html(task,url,started,min(30,remaining),event,
-                active=getattr(self,'active',None),
-                on_stage=(lambda:self.journal(task)) if self.journal else None)
+            options = dict(active=active, on_stage=(lambda:self.journal(task)) if self.journal else None)
+            if announcement:
+                payload = official_announcement(task, params, 'catalogue' if operation=='release_catalog' else 'original',
+                    started, min(30, remaining), event, issuer_raw=issuer_payload, selected=selected, **options)
+            else:
+                payload = official_html(task, url, started, min(30, remaining), event, **options)
             obtained=now()
-            if self.original_keeper is not None:
-                name=(('nbs-catalogue-page-'+params['page']+'.html' if params['channel']=='nbs_release'
-                       else 'fed-fomc-calendar.html')
-                      if operation=='release_catalog' else selected['id']+'.html')
-                self.original_keeper(task,'material',name,payload)
+            suffix = '.pdf' if announcement and operation=='release_original' else '.html'
+            name = (channel+'-catalogue-'+digest[:12]+('.json' if announcement else '.html')
+                    if operation=='release_catalog' else selected['id']+suffix)
+            if operation == 'release_catalog' and not announcement:
+                from .official_sources import catalogue_original_name
+                name = catalogue_original_name(params, digest)
+            download = None
+            if operation == 'release_original':
+                download = self._retain_original_download(task, 'material', name, payload, params, event, obtained)
+            elif self.original_keeper is not None and not (announcement or miit):
+                self.original_keeper(task, 'material', name, payload)
+            if announcement and operation == 'release_catalog':
+                self._retain_official_response(task, params, 'catalogue', payload, event)
             if active is not None:active(task)
             if operation=='release_catalog':
-                snapshot=parse_catalogue(payload,task['cutoff'],channel=params['channel'])
-                record=dict(kind='api',snapshot=snapshot,hash=fingerprint(snapshot),
-                    id='rh_official_'+fingerprint([task['id'],task['version'],digest,fingerprint(snapshot)])[:24],
-                    source='official',content_version=1,task_id=task['id'],research_version=task['version'])
+                record=self._official_catalogue_record(task,params,payload,issuer_payload,obtained,digest)
             else:
-                parsed=extract_material(selected['id']+'.html',payload)
-                record=material_record(task,parsed,payload)
-                record['snapshot']['official_origin']=copy.deepcopy(selected)
-                record['snapshot_hash']=fingerprint(record['snapshot'])
-                record.update(source='official',id='rh_official_'+fingerprint(
-                    [task['id'],task['version'],digest,record['snapshot_hash']])[:24])
-            record.update(operation=operation,parameters=copy.deepcopy(params),request_hash=digest,
-                obtained_at=obtained,status='成功待核验')
+                extract_version = 'html-miit-1' if miit else 'html-pbc-1' if channel == 'pbc_news' else None
+                parsed=self._parse_official_material(task,name,payload,
+                    remaining-(time.monotonic()-started), event, extract_version=extract_version)
+                record=official_material_record(task,parsed,payload,params,selected,obtained)
+                if download is not None:
+                    record['download_receipt'] = copy.deepcopy(download)
             event.update(status='成功',response_snapshot_hash=record.get('snapshot_hash',record['hash']))
+            if announcement and operation == 'release_catalog':
+                _record_current_acquisition(task, record, event)
             _record_current_original(task, record, event)
             return record
+        except DuplicateJSONField:
+            event.update(status='返回结构异常', failure_code='duplicate_response_field')
+            raise
         except Exception:
-            event['status']='失败'
+            event['status'] = '原件已获取，研究未完成' if event.get('download_receipt') else '失败'
             raise
         finally:
             charge(task['ledger'],'seconds',max(0,time.monotonic()-started),delivery=True)
             if self.journal:self.journal(task)
 
-    def _official_etf(self, task, params):
+    def _recover_official_catalogue(self, task, params):
+        from .announcement_sources import retained_response, retained_issuer_payload
+        retained=retained_response(task,params,'catalogue')
+        if retained is None:return None
+        from .official_sources import validate_request
+        validate_request(task,'release_catalog',params)
+        issuer_payload=retained_issuer_payload(task,params)
+        if issuer_payload is None:return None
+        active=getattr(self,'active',None)
+        if active is not None:active(task)
+        checkpoint=retained['checkpoint']
+        digest=fingerprint(dict(source='official',operation='release_catalog',parameters=params))
+        record=self._official_catalogue_record(task,params,retained['payload'],issuer_payload,
+            checkpoint['obtained_at'],digest)
+        record['response_recovery']=dict(checkpoint_id=checkpoint['id'],
+            original_dispatch_fingerprint=checkpoint['dispatch_fingerprint'],
+            recovered_batch=task['batch'],new_network_requests=0,financial_approval=False)
+        return record
+
+    def _official_catalogue_record(self, task, params, payload, issuer_payload, obtained, digest):
+        from .official_sources import parse_catalogue
+        snapshot=parse_catalogue(payload,task['cutoff'],channel=params['channel'],
+            parameters=params,issuer_payload=issuer_payload)
+        return dict(kind='api',snapshot=snapshot,hash=fingerprint(snapshot),
+            id='rh_official_'+fingerprint([task['id'],task['version'],digest,fingerprint(snapshot)])[:24],
+            source='official',content_version=1,task_id=task['id'],research_version=task['version'],
+            operation='release_catalog',parameters=copy.deepcopy(params),request_hash=digest,
+            obtained_at=obtained,status='成功待核验')
+
+    def _parse_official_material(self, task, name, payload, timeout, event, *, extract_version=None):
+        return extract_material(name, payload, extract_version=extract_version)
+
+    def _retain_official_response(self, task, params, role, payload, event):
+        # API JSON is an API response checkpoint, never a user material with
+        # a renamed suffix. Save bytes before parsing or cancellation checks.
+        digest = hashlib.sha256(payload).hexdigest()
+        item = dict(task_id=task['id'], research_version=task['version'], channel=params['channel'],
+            code=params.get('code'), role=role, sha256=digest, original_base64=base64.b64encode(payload).decode(),
+            dispatch_fingerprint=event['fingerprint'])
+        identity = fingerprint(item)
+        event['response_sha256'] = digest
+        rows = task.setdefault('official_response_checkpoints', [])
+        from .announcement_sources import response_checkpoint_payload
+        for row in rows:
+            if not isinstance(row, dict) or row.get('id') != identity:
+                continue
+            try:
+                response_checkpoint_payload(task, row)
+                break
+            except ContractError:
+                continue
+        else:
+            rows.append(dict(item, id=identity, obtained_at=now()))
+        if self.journal: self.journal(task)
+
+    def _official_issuer(self, task, params):
+        from .announcement_sources import request_issuer, retained_issuer_payload
+        from .source_transport import official_announcement
+        retained=retained_issuer_payload(task,params)
+        if retained is not None:return retained
+        active = getattr(self, 'active', None)
+        if active is not None: active(task)
+        remaining = task['ledger']['limits']['seconds']-task['ledger']['used']['seconds']-task['ledger']['reserve']['seconds']
+        if remaining <= 0: raise ContractError('证券目录获取预算不足，保留交付预留')
+        parent = fingerprint(dict(source='official', operation='release_catalog', parameters=params))
+        digest = fingerprint(dict(parent_request_hash=parent, role='issuer_lookup'))
+        charge(task['ledger'], 'data_requests')
+        event = dict(kind='data_requests', source='official', operation='release_catalog', role='issuer_lookup',
+            fingerprint=digest, parent_request_hash=parent, batch=task['batch'], status='已派发', time=now(), attempt=1)
+        task['ledger']['dispatches'].append(event)
+        if self.journal: self.journal(task)
+        started = time.monotonic()
+        try:
+            payload = official_announcement(task, params, 'lookup', started, min(30, remaining), event,
+                active=active, on_stage=(lambda:self.journal(task)) if self.journal else None)
+            self._retain_official_response(task, params, 'issuer_lookup', payload, event)
+            request_issuer(payload, params)
+            event.update(status='成功', response_sha256=hashlib.sha256(payload).hexdigest())
+            return payload
+        except DuplicateJSONField:
+            event.update(status='返回结构异常', failure_code='duplicate_response_field')
+            raise
+        except Exception:
+            event['status'] = '失败'; raise
+        finally:
+            charge(task['ledger'], 'seconds', max(0, time.monotonic()-started), delivery=True)
+            if self.journal: self.journal(task)
+
+    def _official_etf(self, task, params, *, operation='etf_pcf'):
         from .etf_sources import validate_request, parse_snapshot
-        from .source_transport import official_etf
-        validate_request(task, params)
+        from .etf_listing import validate_request as validate_etf_listing
+        from .etf_trading import validate_request as validate_etf_trading
+        from .source_transport import official_etf, official_etf_listing, official_etf_trading
+
+        listing = operation == ETF_LISTING
+        if listing:
+            validate_etf_listing(task, params)
+        elif operation != 'etf_pcf':
+            validate_etf_trading(task, operation, params)
+        else:
+            validate_request(task, params)
         active = getattr(self, 'active', None)
         if active is not None:
             active(task)
         remaining = task['ledger']['limits']['seconds']-task['ledger']['used']['seconds']-task['ledger']['reserve']['seconds']
         if remaining <= 0:
             raise ContractError('ETF清单获取预算不足，保留交付预留')
-        digest = fingerprint(dict(source='official', operation='etf_pcf', parameters=params))
+        digest = fingerprint(dict(source='official', operation=operation, parameters=params))
         charge(task['ledger'], 'data_requests')
-        event = dict(kind='data_requests', source='official', operation='etf_pcf', fingerprint=digest,
+        event = dict(kind='data_requests', source='official', operation=operation, fingerprint=digest,
             batch=task['batch'], status='已派发', time=now(), attempt=1)
         task['ledger']['dispatches'].append(event)
         if self.journal:
             self.journal(task)
         started = time.monotonic()
+        record = None
         try:
-            payload = official_etf(task, params['ts_code'], started, min(30, remaining), event,
-                active=active, on_stage=(lambda: self.journal(task)) if self.journal else None)
-            snapshot = parse_snapshot(payload, params['ts_code'], task['cutoff'])
+            options = dict(active=active, on_stage=(lambda: self.journal(task)) if self.journal else None)
+            if listing:
+                snapshot = official_etf_listing(task, params['market'], started, min(30, remaining), event, **options)
+            elif operation != 'etf_pcf':
+                snapshot = official_etf_trading(task, operation, params['ts_code'], started,
+                    min(30, remaining), event, **options)
+            else:
+                payload = official_etf(task, params['ts_code'], started, min(30, remaining), event, **options)
+                snapshot = parse_snapshot(payload, params['ts_code'], task['cutoff'])
             # API bytes and their hash belong to this archived API snapshot,
             # not the separate PDF/TXT/MD/DOCX/HTML user-material contract.
             if active is not None:
                 active(task)
-            record = dict(kind='api', source='official', operation='etf_pcf',
+            record = dict(kind='api', source='official', operation=operation,
                 parameters=copy.deepcopy(params), request_hash=digest, snapshot=snapshot,
                 hash=fingerprint(snapshot), obtained_at=now(), status='成功待核验',
                 content_version=1, task_id=task['id'], research_version=task['version'])
@@ -4035,13 +4938,74 @@ class EvidenceCollector:
             event.update(status='成功', response_snapshot_hash=record['hash'])
             _record_current_acquisition(task, record, event)
             return record
+        except DuplicateJSONField:
+            event.update(status='返回结构异常', failure_code='duplicate_response_field')
+            raise
         except Exception:
             event['status'] = '失败'
             raise
         finally:
             charge(task['ledger'], 'seconds', max(0, time.monotonic()-started), delivery=True)
-            if self.journal:
-                self.journal(task)
+            self._finish_query(task, record)
+
+    def _official_event_history(self, task, operation, params):
+        from .event_market import parse_close_history, validated_mainland_history
+        from .lpr_rates import validated_snapshot as validated_lpr_history
+        from .nfra_bank_statistics import validate_snapshot as validate_nfra_snapshot, validated_request as nfra_request
+        from .source_transport import (official_h15_treasury_yields, official_hsi_history, official_lpr_history,
+                                       official_mainland_index_history, official_nfra_bank_statistics)
+        from .treasury_rates import validated_snapshot as validated_h15_history
+
+        active = getattr(self, 'active', None)
+        if active:
+            active(task)
+        ledger = task['ledger']
+        remaining = ledger['limits']['seconds'] - ledger['used']['seconds'] - ledger['reserve']['seconds']
+        if remaining <= 0:
+            raise ContractError('事件窗口取数时间不足，保留交付预留')
+        digest = fingerprint(dict(source='official', operation=operation, parameters=params))
+        charge(ledger, 'data_requests')
+        event = dict(kind='data_requests', source='official', operation=operation, fingerprint=digest,
+                     batch=task['batch'], status='已派发', time=now(), attempt=1)
+        ledger['dispatches'].append(event)
+        if self.journal:
+            self.journal(task)
+        started = time.monotonic()
+        record = None
+        try:
+            options = dict(active=active, on_stage=(lambda: self.journal(task)) if self.journal else None)
+            if operation == HK_EVENT_HISTORY:
+                snapshot = official_hsi_history(task, params['codes'], started, min(20, remaining), event, **options)
+                rows = parse_close_history(snapshot['original_text'], **params)
+                snapshot['rows'] = rows
+            elif operation == MAINLAND_EVENT_HISTORY:
+                snapshot = official_mainland_index_history(task, params, started, min(20, remaining), event, **options)
+                validated_mainland_history(snapshot, params)
+            elif operation == LPR_HISTORY:
+                snapshot = official_lpr_history(task, params, started, min(20, remaining), event, **options)
+                validated_lpr_history(snapshot, params)
+            elif operation == NFRA_BANK_STATISTICS:
+                selected = nfra_request(task, params)
+                snapshot = official_nfra_bank_statistics(task, selected['url'], started, min(20, remaining), event, **options)
+                validate_nfra_snapshot(task, selected, snapshot)
+            else:
+                snapshot = official_h15_treasury_yields(task, params, started, min(20, remaining), event, **options)
+                validated_h15_history(snapshot, params)
+            if active:
+                active(task)
+            record = dict(kind='api', source='official', operation=operation, parameters=copy.deepcopy(params),
+                          task_id=task['id'], research_version=task['version'], content_version=1,
+                          status='成功待核验', snapshot=snapshot, hash=fingerprint(snapshot),
+                          request_hash=digest, obtained_at=now())
+            record['id'] = 'rh_official_'+fingerprint([task['id'], task['version'], digest, record['hash']])[:24]
+            event['status'] = '成功'
+            return _record_current_acquisition(task, record, event)
+        except Exception:
+            event['status'] = '失败'
+            raise
+        finally:
+            charge(ledger, 'seconds', max(0, time.monotonic()-started), delivery=True)
+            self._finish_query(task, record)
 
     def _official_index(self,task,operation,params):
         from .index_sources import validate_official_index_request
@@ -4065,6 +5029,7 @@ class EvidenceCollector:
         task['ledger']['dispatches'].append(event)
         if self.journal:self.journal(task)
         started=time.monotonic()
+        record = None
         try:
             snapshot=official_index(task,selected,started,min(30,remaining),event,active=active,
                 on_stage=(lambda:self.journal(task)) if self.journal else None)
@@ -4088,10 +5053,31 @@ class EvidenceCollector:
             return record
         except Exception:
             if attempt is not None:attempt['status']='失败或中断'
-            event['status']='失败';raise
+            event['status']='返回结构异常' if event.get('failure_code')=='duplicate_response_field' else '失败'
+            raise
         finally:
             charge(task['ledger'],'seconds',max(0,time.monotonic()-started),delivery=True)
-            if self.journal:self.journal(task)
+            self._finish_query(task, record)
+
+    def _retain_original_download(self, task, kind, name, payload, parameters, event, obtained_at, directory=None):
+        """Commit bytes and their send identity before invoking any parser."""
+        if self.original_keeper is None:
+            return None
+        original_id = (self.original_keeper(task, kind, name, payload, directory) if directory is not None
+                       else self.original_keeper(task, kind, name, payload))
+        if (not isinstance(original_id, str) or not original_id.startswith('rh_original_')
+                or not all(event.get(key) is True for key in
+                           ('transport_isolated', 'network_request_started', 'network_worker_reaped'))):
+            return None
+        receipt = dict(version=1, task_id=task['id'], research_version=task['version'], batch=event['batch'],
+            dispatch_index=task['ledger']['dispatches'].index(event), source=event['source'], operation=event['operation'],
+            parameters=copy.deepcopy(parameters), request_hash=event['fingerprint'], original_id=original_id,
+            original_hash=hashlib.sha256(payload).hexdigest(), byte_count=len(payload), kind=kind, name=name,
+            obtained_at=obtained_at, status='已留存')
+        event['download_receipt'] = receipt
+        if self.journal:
+            self.journal(task)
+        return receipt
 
     def _filing_original(self, task, params, credentials=None):
         directory = validate_filing_original_request(task, params)
@@ -4114,9 +5100,11 @@ class EvidenceCollector:
             payload = self._download_original(task, private_url or directory["original_url"], min(30, available), event,
                 directory["source_id"] if private_url else None)
             original_obtained = True
-            if self.original_keeper is not None:
-                self.original_keeper(task, "filing", "original.pdf", payload, directory)
-            record = self._original_record(task, directory, payload, min(30, available) - (time.monotonic() - started), event)
+            obtained_at = now()
+            download = self._retain_original_download(task, "filing", "original.pdf", payload, params, event, obtained_at, directory)
+            record = self._original_record(task, directory, payload, available - (time.monotonic() - started), event)
+            if download is not None:
+                record.update(download_receipt=copy.deepcopy(download), obtained_at=download['obtained_at'])
             status = "成功待核验" if record["stages"]["parse"] == "已解析" else "解析受限"
             record.update(operation="filing_original", parameters=copy.deepcopy(params), request_hash=request_hash, status=status)
             event["status"] = "成功"
@@ -4145,19 +5133,18 @@ class EvidenceCollector:
     def _remember_ifind_originals(self, task, record, payload):
         current = time.monotonic()
         self._ifind_original_cache = {key: item for key, item in self._ifind_original_cache.items() if item[1] > current}
-        try:
-            rows = list(_filing_rows(payload))
-        except ContractError:
-            return
-        retained = {row["source_id"] for row in record.get("catalog_entries", [])
-                    if row.get("original_fetch") == "ifind_temporary_resource" and row["downloadable"]}
-        for raw, _, _ in rows:
-            source_id = str(raw.get("seq", ""))
-            if source_id not in retained:
+        for row in record.get("catalog_entries", []):
+            if row.get("original_fetch") != "ifind_temporary_resource" or not row["downloadable"]:
                 continue
+            source_id = row["source_id"]
             try:
-                url = _ifind_authorized_resource(raw.get("pdfURL"), source_id)
-            except ContractError:
+                # The unredacted response is ephemeral. Read only the exact
+                # URL cell retained by the validated catalogue projection.
+                value = payload
+                for key in row["catalog_ref"]["field_mapping"]["pdfURL"]:
+                    value = value[key]
+                url = _ifind_authorized_resource(value, source_id)
+            except (ContractError, IndexError, KeyError, TypeError):
                 continue
             self._ifind_original_cache[(task["id"], record["id"], source_id)] = (url, current + 180)
         while len(self._ifind_original_cache) > 256:
@@ -4168,12 +5155,7 @@ class EvidenceCollector:
         cached = self._ifind_original_cache.pop(key, None)
         if cached and cached[1] > time.monotonic():
             return cached[0]
-        current = credentials if isinstance(credentials, dict) else {}
-        refresh = current.get("refresh_token", "")
-        access_cache = self._ifind_access_cache
-        has_cached_access = (isinstance(refresh, str) and access_cache and
-            access_cache[0] == hashlib.sha256(refresh.encode()).hexdigest() and access_cache[2] > time.monotonic())
-        needed = 2 + (0 if current.get("access_token") or has_cached_access else 1)
+        needed = 2 + self.ifind_authentication_cost(credentials)
         if task["ledger"]["limits"]["data_requests"] - task["ledger"]["used"]["data_requests"] < needed:
             raise ContractError("重新取得原件授权须保留鉴权、目录与下载的原预算，不派发无法完成的查询")
         catalog = next(record for record in task["source_records"] if record["id"] == directory["catalog_id"])
@@ -4217,6 +5199,22 @@ class EvidenceCollector:
             raise ContractError("iFinD凭据格式无效，请检查ResearchHelper独立配置")
         return value
 
+    def _cached_ifind_access(self, identity):
+        cache = self._ifind_access_cache
+        if cache and cache[0] == identity and cache[2] > time.monotonic():
+            return cache[1]
+        return None
+
+    def ifind_authentication_cost(self, credentials):
+        """Count the additional authentication request for an iFinD sequence."""
+        if not isinstance(credentials, dict):
+            raise ContractError('数据源凭据必须来自ResearchHelper独立配置')
+        self._credential(credentials.get('access_token', ''))
+        refresh = self._credential(credentials.get('refresh_token', ''))
+        if not refresh:
+            return 0
+        return int(self._cached_ifind_access(hashlib.sha256(refresh.encode()).hexdigest()) is None)
+
     def _resolve_ifind_access(self, task, refresh):
         """Official get_access_token obtains the current token; never force-update it.
 
@@ -4224,9 +5222,9 @@ class EvidenceCollector:
         ds_web/quantapi-web/example.html (HTTP interface Python example).
         """
         identity = hashlib.sha256(refresh.encode()).hexdigest()
-        cache = self._ifind_access_cache
-        if cache and cache[0] == identity and cache[2] > time.monotonic():
-            return cache[1]
+        cached = self._cached_ifind_access(identity)
+        if cached is not None:
+            return cached
         self._ifind_access_cache = None
         available = task["ledger"]["limits"]["seconds"] - task["ledger"]["used"]["seconds"] - task["ledger"]["reserve"]["seconds"]
         if available <= 0:
@@ -4260,6 +5258,12 @@ class EvidenceCollector:
             event["status"] = "成功"
             self._ifind_access_cache = (identity, token, time.monotonic() + 300)
             return token
+        except urllib.error.HTTPError as error:
+            error.close()
+            event.update(status="鉴权HTTP未通过", http_status=error.code,
+                supplier_rejection_category=IFIND_HTTP_REJECTIONS.get(error.code, "http_failure"))
+            raise ContractError("iFinD鉴权未通过：get_access_token，HTTP状态" + str(error.code)
+                + "。检查ResearchHelper的Refresh Token与账号权限") from None
         except ContractError:
             raise
         except Exception:
@@ -4296,6 +5300,7 @@ class EvidenceCollector:
             batch=task['batch'], status='已派发', time=now())
         task['ledger']['dispatches'].append(event)
         started = time.monotonic()
+        record = None
         try:
             if self.journal:
                 self.journal(task)
@@ -4311,23 +5316,25 @@ class EvidenceCollector:
                 event['status'] = record['status']
             _record_current_acquisition(task, record, event)
             return record
+        except DuplicateJSONField:
+            event.update(status='返回结构异常', failure_code='duplicate_response_field')
+            raise
         except ContractError:
-            event['status'] = '元数据未通过'
+            if event.get('failure_code') != 'duplicate_response_field':
+                event['status'] = '元数据未通过'
             raise
         except urllib.error.HTTPError as error:
             status = error.code
             error.close()
             event.update(status='元数据HTTP未通过', http_status=status,
-                supplier_rejection_category={401: 'authentication_failed', 403: 'permission_denied',
-                    429: 'rate_limited'}.get(status, 'http_failure'))
+                supplier_rejection_category=IFIND_HTTP_REJECTIONS.get(status, 'http_failure'))
             raise ContractError('iFinD元数据HTTP状态'+str(status)+'，保留一次用量，不重试或换源') from None
         except Exception:
             event['status'] = '元数据调用失败'
             raise ContractError('iFinD元数据未取得；保留用量，不重试、不换源、不把失败当成空目录') from None
         finally:
             task['ledger']['used']['seconds'] += max(0, time.monotonic()-started)
-            if self.journal:
-                self.journal(task)
+            self._finish_query(task, record)
 
     def _ifind(self, task, operation, params, token, private_values=()):
         request_hash = fingerprint({"source": "ifind", "operation": operation, "parameters": params})
@@ -4368,6 +5375,7 @@ class EvidenceCollector:
             request = urllib.request.Request("https://quantapi.51ifind.com/api/v1/" + operation,
                 data=json.dumps(params).encode(), headers={"Content-Type": "application/json"}, method="POST")
             request.add_unredirected_header("access_token", token)
+            record = None
             try:
                 payload = self._http_json(task, request, min(30, available), event)
                 if not isinstance(payload, dict):
@@ -4376,6 +5384,10 @@ class EvidenceCollector:
                 if isinstance(payload.get("errorcode"), bool) or payload.get("errorcode") not in (0, "0"):
                     event["status"] = "业务失败"
                     detail = self._ifind_error_suffix(payload, event)
+                    quota = IFIND_QUOTA_ERRORS.get(str(event.get('business_code')))
+                    if quota:
+                        event.update(status='额度已用尽', supplier_rejection_category='quota_exhausted')
+                        raise ContractError('iFinD'+quota+detail+'。')
                     if operation == 'get_thscode' and event.get('business_code') in (-6102,'-6102'):
                         event['supplier_rejection_category'] = 'ambiguous_identity'
                         raise ContractError('iFinD名称或代码对应多个证券：' + operation + detail +
@@ -4416,6 +5428,10 @@ class EvidenceCollector:
                 event["http_status"] = error.code
                 error.close()
                 event["status"] = "HTTP请求未通过" if error.code in (401, 403) else "HTTP调用失败"
+                if error.code in IFIND_HTTP_REJECTIONS:
+                    event["supplier_rejection_category"] = IFIND_HTTP_REJECTIONS[error.code]
+                if error.code == 401:
+                    raise ContractError("iFinD认证未通过：" + operation + "，HTTP状态401。检查ResearchHelper的iFinD令牌") from None
                 # Only a known gateway/service failure of a read-only business
                 # query, after the isolated worker is reaped. No auth refresh,
                 # 429/504, unknown response, URL change or unmetered retry.
@@ -4446,8 +5462,7 @@ class EvidenceCollector:
                 time.sleep(.2 * (attempt + 1))
             finally:
                 task["ledger"]["used"]["seconds"] += max(0, time.monotonic() - started)
-                if self.journal:
-                    self.journal(task)
+                self._finish_query(task, record)
 
     def _tinyshare(self, task, operation, params, token):
         # Import only after the offline guard and exact operation/field checks.
@@ -4462,6 +5477,7 @@ class EvidenceCollector:
         task["ledger"]["dispatches"].append(event)
         self._tinyshare_checkpoint(task, event)
         started = time.monotonic()
+        record = None
         try:
             rows = self._tinyshare_rows(task, operation, params, token, min(30, available), event, provider)
             if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
@@ -4495,4 +5511,4 @@ class EvidenceCollector:
             raise ContractError("Tinyshare调用失败；保留账本，不猜测权限、不自动重试或换源") from None
         finally:
             task["ledger"]["used"]["seconds"] += max(0, time.monotonic() - started)
-            self._tinyshare_checkpoint(task, event)
+            self._tinyshare_checkpoint(task, event, record)
