@@ -158,7 +158,18 @@ class PublicationLocatorTests(unittest.TestCase):
         task['status'] = '运行中'
         self.agent.archive.save(task)
         result = self.agent._extract_model_sources(task)
-        self.assertEqual(host.payload['evidence_contract'], evidence_contract(task))
+        complete=evidence_contract(task)
+        projected=host.payload['evidence_contract']
+        # Material prompts omit API-only manuals, retaining the same original
+        # bindings and publication authority as the complete host-Skill tools.
+        for field in ('binding','sources','research_scope','question_ids','question_requirements',
+                      'publication_fields','publication_reference_contract','publication_candidate_contract',
+                      'current_availability_rule','current_original_rule','compact_material_publication'):
+            self.assertEqual(projected[field],complete[field],field)
+        self.assertNotIn('api_candidate_contract',projected)
+        self.assertEqual(host.payload['untrusted_sources'],source_views(task))
+        self.assertEqual(host.payload['calculation_input_targets'],
+                         complete['calculation_input_requirements']['proposal_requirements'])
         self.assertEqual(result['evidence_specs'], [])
         self.assertEqual(task['evidence'], [])
 
