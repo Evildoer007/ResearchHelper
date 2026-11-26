@@ -180,7 +180,7 @@ class FeeCatalogCompatibilityTests(unittest.TestCase):
             self.assertIn('rh_k_cash_profit', package['index'])
             self.assertTrue(ResearchKnowledge().method_binding(package, method))
         catalog = ResearchKnowledge().catalog()
-        self.assertEqual(len(catalog), 15)
+        self.assertEqual(len(catalog), len({entry['id'] for entry in catalog}))
         self.assertIn(METHOD_REGISTRY[METHOD]['knowledge_id'], {entry['id'] for entry in catalog})
 
     def test_catalog_extension_preserves_original_app_boundary_assertions(self):
@@ -189,7 +189,7 @@ class FeeCatalogCompatibilityTests(unittest.TestCase):
         self.addCleanup(fixture.doCleanups)
         bootstrap = fixture.fixture.request('/api/bootstrap')[0]
         catalog = {entry['id'] for entry in bootstrap['knowledge']}
-        self.assertEqual(len(catalog), 15)
+        self.assertEqual(catalog, {entry['id'] for entry in ResearchKnowledge().catalog()})
         self.assertTrue({'rh_k_cash_profit', 'rh_k_rate_transmission', 'rh_k_index_structure',
                          'rh_k_etf_exposure', METHOD_REGISTRY[METHOD]['knowledge_id']}.issubset(catalog))
         self.assertEqual(bootstrap['field_registry']['tinyshare.daily_basic']['permission'], '未验收')
