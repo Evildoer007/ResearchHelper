@@ -9,7 +9,7 @@ import json
 import unittest
 from unittest.mock import patch
 
-from tests import ROOT
+from tests import ROOT, read_retained_export
 from tests.test_partial_report_collection import MainPaper
 from researchhelper.contracts import fingerprint
 from researchhelper.reports import render
@@ -21,10 +21,10 @@ FIXTURE=ROOT/'result/acceptance/one-sentence-research-1cr8hfby/report.json'
 class AdoptedDataPaperTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        raw=FIXTURE.read_bytes();cls.before=hashlib.sha256(raw).hexdigest();cls.content=json.loads(raw)
+        raw=read_retained_export(FIXTURE);cls.before=hashlib.sha256(raw).hexdigest();cls.content=json.loads(raw)
 
     def tearDown(self):
-        self.assertEqual(hashlib.sha256(FIXTURE.read_bytes()).hexdigest(),self.before)
+        self.assertEqual(hashlib.sha256(read_retained_export(FIXTURE)).hexdigest(),self.before)
 
     def test_actual_adopted_values_survive_without_an_approved_answer(self):
         self.assertFalse(any(q.get('answer') for q in self.content['questions']))
