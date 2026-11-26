@@ -1,6 +1,7 @@
 """Independent raw-original durability checks; no models or vendor requests."""
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 import json
 from pathlib import Path
@@ -50,6 +51,8 @@ class OriginalCheckpointTests(unittest.TestCase):
         script = '''
 import os,sys
 from pathlib import Path
+from core.bootstrap import configure_imports
+configure_imports()
 from researchhelper.archive import ResearchArchive
 from researchhelper.engine import ResearchAgent
 class ExitParser:
@@ -144,6 +147,70 @@ agent.add_material(sys.argv[2], 'policy.txt', '条款金额100万元。'.encode(
         self.assertEqual(len(self.agent.archive.retained_originals(final)), 1)
         self.assertEqual(self.agent.archive.retained_originals(final, pending_only=True), [])
 
+    def test_renamed_copy_reuses_material_and_retains_both_original_names(self):
+        first = self.agent.add_material(self.task['id'], 'policy.txt', PAYLOAD)
+        final = self.agent.add_material(self.task['id'], 'policy-copy.txt', PAYLOAD)
+        self.assertEqual(final, first)
+        restarted = ResearchArchive(self.root)
+        retained = restarted.retained_originals(restarted.get(first['id']))
+        self.assertEqual([row['name'] for row in retained], ['policy.txt', 'policy-copy.txt'])
+        self.assertEqual({row['artifact_id'] for row in retained}, {first['materials'][0]['id']})
+        self.assertEqual([restarted.original(final, row['id'])[1] for row in retained], [PAYLOAD, PAYLOAD])
+        self.assertEqual(restarted.retained_originals(final, pending_only=True), [])
+        self.assertEqual(self.agent.retry_original(final['id'], retained[1]['id']), final)
+        self.assertEqual(len(self.agent.source_catalog(final['id'])['items']), 1)
+
+    def test_concurrent_renamed_uploads_link_to_the_first_material_committed(self):
+        entered, release = threading.Event(), threading.Event()
+
+        def parse(name, payload):
+            if name == 'policy-copy.txt':
+                entered.set()
+                if not release.wait(4):
+                    raise RuntimeError('fixture parse barrier timed out')
+            return extract_material(name, payload)
+
+        with patch('researchhelper.engine.extract_material', side_effect=parse), ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(self.agent.add_material, self.task['id'], 'policy-copy.txt', PAYLOAD)
+            try:
+                self.assertTrue(entered.wait(3))
+                first = self.agent.add_material(self.task['id'], 'policy.txt', PAYLOAD)
+            finally:
+                release.set()
+            self.assertEqual(future.result(timeout=4), first)
+        retained = self.agent.archive.retained_originals(first)
+        self.assertEqual({row['name'] for row in retained}, {'policy.txt', 'policy-copy.txt'})
+        self.assertEqual({row['artifact_id'] for row in retained}, {first['materials'][0]['id']})
+
+    def test_same_bytes_with_different_extractions_remain_distinct(self):
+        payload = '<html><body><p>条款金额100万元。</p></body></html>'.encode()
+        first = self.agent.add_material(self.task['id'], 'policy.txt', payload)
+        final = self.agent.add_material(first['id'], 'policy.html', payload)
+        self.assertEqual(len(final['materials']), 2)
+        self.assertEqual(len({row['hash'] for row in final['materials']}), 1)
+        self.assertNotEqual(final['materials'][0]['parts'], final['materials'][1]['parts'])
+
+    def test_failed_copy_link_leaves_original_available_for_retry(self):
+        first = self.agent.add_material(self.task['id'], 'policy.txt', PAYLOAD)
+        with patch.object(self.agent.archive, 'link_material_copy', side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):
+                self.agent.add_material(first['id'], 'policy-copy.txt', PAYLOAD)
+        self.assertEqual(self.agent.archive.get(first['id']), first)
+        pending = self.agent.archive.retained_originals(first, pending_only=True)
+        self.assertEqual([row['name'] for row in pending], ['policy-copy.txt'])
+        self.assertEqual(self.agent.retry_original(first['id'], pending[0]['id']), first)
+        self.assertEqual(self.agent.archive.retained_originals(first, pending_only=True), [])
+
+    def test_frozen_material_copy_keeps_report_and_has_no_new_pending_dependency(self):
+        task = self.agent.create_case('value')
+        first = self.agent.add_material(task['id'], 'policy.txt', PAYLOAD)
+        delivered = self.agent.start(first['id'])
+        report = self.agent.export(delivered['id'])
+        final = self.agent.add_material(delivered['id'], 'policy-copy.txt', PAYLOAD)
+        self.assertEqual(final, delivered)
+        self.assertEqual(self.agent.export(final['id']), report)
+        self.assertEqual(self.agent.archive.retained_originals(final, pending_only=True), [])
+
     def test_raw_metadata_has_no_bytes_or_approval(self):
         self.retain()
         directory = self.agent.source_catalog(self.task['id'])
@@ -213,17 +280,34 @@ agent.add_material(sys.argv[2], 'policy.txt', '条款金额100万元。'.encode(
         self.assertEqual(self.agent.export(task['id']), before)
         self.assertEqual(final['ledger'], task['ledger'])
 
+    def test_skill_material_returns_the_canonical_record_for_a_renamed_copy(self):
+        from core.session import Session
+        with tempfile.TemporaryDirectory(prefix='rh-material-copy-skill-') as project:
+            session = Session(project)
+            try:
+                task = session.create('核对文件内容', intent='原件内容核对')
+                primary = session.material(task['id'], 'policy.txt', PAYLOAD)
+                other = session.material(task['id'], 'other.txt', b'Other independent material.')
+                duplicate = session.material(task['id'], 'policy-copy.txt', PAYLOAD)
+                self.assertEqual(duplicate, primary)
+                self.assertEqual({row['id'] for row in session.status(task['id'])['materials']},
+                                 {primary['id'], other['id']})
+            finally:
+                session.agent.close_runtime()
+
     def test_skill_reuses_same_local_recovery_without_model(self):
         spec = importlib.util.spec_from_file_location('checkpoint_session', ROOT / 'core/session.py')
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        session = module.Session(self.root / 'skill-project')
-        task = session.create('核对文件', intent='原件内容核对')
-        original = session.archive.retain_original(task, 'material', 'policy.txt', PAYLOAD)
-        final = session.retry_original(task['id'], original)
-        self.assertEqual(final['materials'][0]['parts'][0]['text'], PAYLOAD.decode())
-        self.assertIsNone(session.agent.model)
-        self.assertEqual(final['ledger'], task['ledger'])
+        with tempfile.TemporaryDirectory(prefix='rh-original-skill-') as project:
+            session = module.Session(project)
+            self.addCleanup(session.agent.close_runtime)
+            task = session.create('核对文件', intent='原件内容核对')
+            original = session.archive.retain_original(task, 'material', 'policy.txt', PAYLOAD)
+            final = session.retry_original(task['id'], original)
+            self.assertEqual(final['materials'][0]['parts'][0]['text'], PAYLOAD.decode())
+            self.assertIsNone(session.agent.model)
+            self.assertEqual(final['ledger'], task['ledger'])
 
 
 class OriginalRecoveryInterfaceTests(unittest.TestCase):
