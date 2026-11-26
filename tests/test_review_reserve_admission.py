@@ -4,6 +4,7 @@ The retained closed study supplies contract/evidence shapes only. All changes
 are private copies; this test never resumes it or calls a model/provider.
 """
 import copy
+import gzip
 import hashlib
 import json
 import os
@@ -18,8 +19,9 @@ from researchhelper.contracts import ContractError
 from researchhelper.model import ModelService, ModelSettings
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = Path(os.environ.get('RESEARCHHELPER_REVIEW_RESERVE_INPUT', str(
-    ROOT/'result/acceptance/one-sentence-research-9eq092nf/task.json')))
+DEFAULT_SOURCE = ROOT/'result/acceptance/one-sentence-research-9eq092nf/task.json'
+SOURCE = Path(os.environ.get('RESEARCHHELPER_REVIEW_RESERVE_INPUT',
+    DEFAULT_SOURCE if DEFAULT_SOURCE.is_file() else DEFAULT_SOURCE.with_suffix('.json.gz')))
 RESOURCES = Path(os.environ.get('RESEARCHHELPER_FIXTURE_RESOURCES', str(ROOT)))
 
 
@@ -27,7 +29,9 @@ class ReviewReserveAdmissionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.source_hash = hashlib.sha256(SOURCE.read_bytes()).hexdigest()
-        cls.original = json.loads(SOURCE.read_text())
+        opener = gzip.open if SOURCE.suffix == '.gz' else open
+        with opener(SOURCE, 'rt', encoding='utf-8') as incoming:
+            cls.original = json.load(incoming)
 
     def setUp(self):
         folder = tempfile.TemporaryDirectory(prefix='review-reserve-', dir=Path(os.environ.get(
