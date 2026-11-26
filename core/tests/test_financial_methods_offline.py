@@ -190,12 +190,12 @@ class FinancialMethodTests(unittest.TestCase):
         self.assertEqual(set(result), {"value", "unit", "premium", "undiscounted", "tolerance"})
 
     def test_registered_knowledge_identity_is_explicit(self):
-        expected = {"fee_difference_v1": "rh_k_fee_difference", "residual_present_value_v1": "rh_k_residual",
-                    "observed_price_return_v1": "rh_k_price_change", "etf_nav_premium_v1": "rh_k_nav_premium",
-                    "gross_margin_v1": "rh_k_gross_margin"}
-        for method, ident in expected.items():
+        expected = {"fee_difference_v1": ("rh_k_fee_difference", 1), "residual_present_value_v1": ("rh_k_residual", 1),
+                    "observed_price_return_v1": ("rh_k_price_change", 1), "etf_nav_premium_v1": ("rh_k_nav_premium", 1),
+                    "gross_margin_v1": ("rh_k_gross_margin", 2)}
+        for method, (ident, version) in expected.items():
             self.assertEqual(METHOD_REGISTRY[method]["knowledge_id"], ident)
-            self.assertEqual(METHOD_REGISTRY[method]["implementation_version"], 1)
+            self.assertEqual(METHOD_REGISTRY[method]["implementation_version"], version)
 
 
 if __name__ == "__main__":
