@@ -16,8 +16,9 @@ class ETFDefinitionMetadataTests(unittest.TestCase):
 
     def test_published_metadata_has_complete_public_provenance_and_unknown_time(self):
         entry = next(item for item in ENTRIES if item['id'] == 'rh_k_etf_measures')
-        self.assertEqual(entry['version'], 2)
-        self.assertEqual(entry['previous_version'], 1)
+        self.assertEqual(entry['version'], 3)
+        self.assertEqual(entry['previous_version'], 2)
+        self.assertEqual(entry['catalogue_introduced'], 4)
         self.assertEqual(entry['access'], 'public')
         self.assertIsNone(entry['publication_date'])
         self.assertIn('未知', entry['publication_date_status'])
@@ -26,6 +27,12 @@ class ETFDefinitionMetadataTests(unittest.TestCase):
             self.assertTrue(ref['url'].startswith('https://'))
             self.assertTrue(ref['sections'] and ref['publisher'])
         self.assertTrue(entry['dependencies'] and entry['verification_indicators'])
+        self.assertIn('二级市场买卖需求', entry['content'])
+
+    def test_catalogue_three_retains_the_previous_definition(self):
+        catalogue = ResearchKnowledge().catalog(3)
+        entry = next(item for item in catalogue if item['id'] == 'rh_k_etf_measures')
+        self.assertEqual(entry, RETAINED_VERSIONS[('rh_k_etf_measures', 2)])
 
     def test_original_version_and_financial_text_remain_unchanged(self):
         old = RETAINED_VERSIONS[('rh_k_etf_measures', 1)]
@@ -37,10 +44,12 @@ class ETFDefinitionMetadataTests(unittest.TestCase):
             self.assertEqual(old[field], current[field])
 
     def test_new_definition_does_not_reorder_the_retained_base_catalog(self):
-        self.assertEqual([entry['id'] for entry in ENTRIES[:8]], [
-            'rh_k_management_custody_fee', 'rh_k_cost_pass', 'rh_k_fee', 'rh_k_residual',
-            'rh_k_fact', 'rh_k_fee_difference', 'rh_k_price_change', 'rh_k_nav_premium'])
-        self.assertEqual(ENTRIES[-1]['id'], 'rh_k_etf_measures')
+        identifiers = [entry['id'] for entry in ENTRIES]
+        retained = ['rh_k_management_custody_fee', 'rh_k_cost_pass', 'rh_k_fee', 'rh_k_residual',
+                    'rh_k_fact', 'rh_k_fee_difference', 'rh_k_price_change', 'rh_k_nav_premium']
+        self.assertEqual([ident for ident in identifiers if ident in retained], retained)
+        self.assertEqual(len(identifiers), len(set(identifiers)))
+        self.assertIn('rh_k_etf_measures', identifiers)
 
     def test_adopted_v1_pack_is_readable_and_not_upgraded_on_export(self):
         task = self.fixture.create()
