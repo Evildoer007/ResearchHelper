@@ -13,7 +13,7 @@ from researchhelper.archive import ResearchArchive
 from researchhelper.analyzer import ResearchAnalyzer
 from researchhelper.contracts import ContractError, fingerprint, now, validate_evidence
 from researchhelper.engine import ResearchAgent
-from researchhelper.evidence import candidate_evidence, current_snapshot_reference, snapshot_record
+from researchhelper.evidence import candidate_evidence, current_snapshot_reference, direct_code_reference, snapshot_record
 from researchhelper.reasoning import evidence_contract, validate_model_specs
 from tests import test_sdk_wire_budget_offline as wire
 
@@ -28,7 +28,7 @@ class CurrentSnapshotAvailabilityTests(unittest.TestCase):
         self.agent = ResearchAgent(ResearchArchive(self.fixture.root / "store"), ROOT, offline=True)
 
     def acquired(self, mode="current"):
-        task = self.agent.create("核对本次取得的基金收盘价", entry="ETF", objects=["510300.SH"],
+        task = self.agent.create("核对本次取得的510300.SH收盘价", entry="ETF", objects=["510300.SH"],
             research_mode=mode, questions=[{"id": "q1", "question": "核对收盘原值", "kind": "fact"}])
         record = self.fixture.run_sdk(task)
         task["source_records"].append(record)
@@ -42,8 +42,7 @@ class CurrentSnapshotAvailabilityTests(unittest.TestCase):
                 "precision": "未知", "timezone": "未知", "basis": "首次公开未知，当前响应另有取数记录"},
             "availability": current_snapshot_reference(task, record), "raw_value": 4.5, "value": 4.5,
             "raw_unit": "元", "unit": "元", "conversion_factor": 1, "question_ids": ["q1"],
-            "identity": {"provider_code": "510300.SH", "object": "510300.SH", "basis": "用户明确代码",
-                "valid_from": "2026-09-01", "valid_to": "2026-10-31"},
+            "direct_code_reference": direct_code_reference(task, record),
             "review": {"question_ids": ["q1"], "allowed_natures": ["已实现事实"],
                 "conditions": ["仅核对本次响应记录的收盘原值"], "reason": "登记字段、对象、观测日及原值一致"}}
 
