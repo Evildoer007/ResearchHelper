@@ -9,6 +9,7 @@ from researchhelper.evidence import (
     api_value_reference, expand_api_value_reference, snapshot_record, validate_calculation_context_basis,
 )
 from tests import test_api_calculation_context_contract_offline as fixture
+from tests.identity_fixture_support import synthetic_identity_basis
 
 
 class IFinDInstrumentUnitTests(unittest.TestCase):
@@ -19,6 +20,8 @@ class IFinDInstrumentUnitTests(unittest.TestCase):
         self.agent = self.fixture.agent
         self.task = self.agent.create('核对指数与基金的真实单位', entry='混合',
                                       objects=['000300.SH', '399300.SZ', '000300.SZ', '510300.SH'])
+        self.identity_bases = {code: synthetic_identity_basis(self.task, 'ifind', code,
+            '2026-09-29', '2026-09-30') for code in self.task['objects']}
 
     def record(self, codes=('000300.SH',)):
         parameters = {'codes': ','.join(codes), 'indicators': 'close',
@@ -46,9 +49,8 @@ class IFinDInstrumentUnitTests(unittest.TestCase):
         if currency_unit:
             expected = definition['fields']['close']
             spec.update(raw_unit='元', unit='元', conversion_factor=1)
-        return dict(spec, artifact=record, snapshot=record['snapshot'], snapshot_hash=record['hash'],
-                    identity={'provider_code': code, 'object': code, 'basis': '明确代码，不证明历史身份',
-                              'valid_from': '2026-09-29', 'valid_to': '2026-09-30'},
+        return dict(spec, source=record['source'], artifact=record, snapshot=record['snapshot'], snapshot_hash=record['hash'],
+                    identity=copy.deepcopy(self.identity_bases[code]),
                     field_definition={'registry': 'ifind.cmd_history_quotation', 'version': definition['version'],
                                       'field': 'close', 'definition': copy.deepcopy(expected),
                                       'documentation': definition['documentation']})
@@ -72,7 +74,8 @@ class IFinDInstrumentUnitTests(unittest.TestCase):
         self.assertEqual(item['unit'], '点')
         _source_extract(item, self.task)
         self.assertEqual(self.task, before)
-        self.assertFalse(self.task['evidence'])
+        self.assertEqual(self.task['evidence'], before['evidence'])
+        self.assertNotIn(item['id'], {row['id'] for row in self.task['evidence']})
 
     def test_legacy_currency_labeled_index_is_rejected_without_repair(self):
         record = self.record()
