@@ -111,6 +111,20 @@ class IndependentFinancialBatchTests(unittest.TestCase):
         self.assertEqual(wire, before)
         self.assertTrue(all('source_check' not in item for item in result['evidence_specs']))
 
+    def test_batch_builds_each_source_contract_once_per_operation(self):
+        expected_ids = [view['id'] for view in self.views]
+        with patch('researchhelper.reasoning.evidence_contract', wraps=evidence_contract) as project:
+            self.assertEqual(original_batch_output_schema(self.task, self.views), self.schema)
+            self.assertEqual([call.args[1][0]['id'] for call in project.call_args_list], expected_ids)
+            project.reset_mock()
+
+            self.assertEqual(original_batch_prompt(self.payload, self.task), self.prompt)
+            self.assertEqual([call.args[1][0]['id'] for call in project.call_args_list], expected_ids)
+            project.reset_mock()
+
+            self.assertTrue(self.decode()['evidence_specs'])
+            self.assertEqual([call.args[1][0]['id'] for call in project.call_args_list], expected_ids)
+
     def test_valid_batch_retains_identical_decoded_values_and_no_diagnostic(self):
         wire = self.selection()
         old = copy.deepcopy(self.task); old.pop('independent_financial_selections_version')
