@@ -39,23 +39,50 @@ def verify_case(key, task, content, paper):
     assert all(question['status'] == '已回答' for question in content['questions'] if question['required'])
     assert [thesis['judgment'] for thesis in content['theses']] == judgments, key + ' judgment routing'
     assert len(content['evidence']) == evidence_count
-    assert '合成验收' in paper and "data-reader-version='rh-reader-7'" in paper
+    from html.parser import HTMLParser
+    from researchhelper.reports import READER_VERSION
+
+    class ReaderIdentity(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.versions = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == 'html':
+                self.versions.extend(value for name, value in attrs if name == 'data-reader-version')
+
+    identity = ReaderIdentity()
+    identity.feed(paper)
+    assert '合成验收' in paper and identity.versions == [READER_VERSION]
+    result = projection(content)
     if key in ('etf', 'mixed'):
         fees = [item for item in content['calculations'] if item['method'] == 'fee_difference_v1']
         assert len(fees) == 1 and math.isclose(fees[0]['output']['value'], .20 - .60, abs_tol=1e-10)
         assert fees[0]['output']['unit'] == '百分点/年'
         assert '实际收益差' in paper and ('不是实际收益差' in paper or '不解释为实际收益差' in paper)
     if key == 'value':
-        values = [item['output']['value'] for item in content['calculations']
-                  if item['method'] == 'residual_present_value_v1']
+        from lxml import html
+
+        calculations = [item for item in content['calculations'] if item['method'] == 'residual_present_value_v1']
+        values = [item['output']['value'] for item in calculations]
         expected = [(120 - 20 - 5) / (10 * 1.1), (100 - 20 - 5) / (10 * 1.1)]
         assert len(values) == 2 and all(math.isclose(value, correct, abs_tol=1e-10)
                                        for value, correct in zip(values, expected))
+        tree = html.document_fromstring(paper)
+        document = json.loads(tree.get_element_by_id('rh-publication-document').text)
+        figure, = (block['spec'] for block in document['blocks'] if block['kind'] == 'chart')
+        data = figure['auto_visual']['data']
+        price_id = calculations[0]['input_bindings']['price']
+        price = next(row['value'] for row in content['evidence'] if row['id'] == price_id)
+        assert data['labels'] == ['基准现值', '压力现值', '参考价格']
+        assert data['unit'] == '元/股' and data['values'] == [*values, price]
+        assert figure['calculation_refs'] == [item['id'] for item in calculations]
+        result['valuation_figure'] = data
     if key == 'macro':
         assert '不可识别' in paper and '竞争解释' in paper
     if key == 'event':
         assert '做空' in paper and '不满足资格' in paper
-    return projection(content)
+    return result
 
 
 def run():
@@ -65,19 +92,32 @@ def run():
     spec.loader.exec_module(host)
     session = host.Session(project)
     from researchhelper import engine, reports
+    from researchhelper.contracts import fingerprint
+    from researchhelper.report_designer import read_presentation_document
     assert Path(engine.__file__).is_relative_to(installation)
     assert Path(reports.__file__).is_relative_to(installation)
     assert session.agent.model is None
     results = {}
-    for key in CASE_EXPECTATIONS:
-        task = session.agent.create_case(key)
-        done = session.agent.start(task['id'])
-        report = session.agent.export(task['id'])
-        result = verify_case(key, done, report['content'], report['html'])
-        target = session.export(task['id'])
-        assert target.is_file() and target.with_suffix('.json').is_file()
-        assert host.Session(project).agent.export(task['id']) == report
-        results[key] = {'projection': result, 'report': str(target), 'status': done['status']}
+    reopened = host.Session(project)
+    try:
+        for key in CASE_EXPECTATIONS:
+            task = session.agent.create_case(key)
+            done = session.agent.start(task['id'])
+            report = session.agent.export(task['id'])
+            result = verify_case(key, done, report['content'], report['html'])
+            assert reopened.agent.export(task['id']) == report
+            profiles = {}
+            for profile in ('standard', 'detailed'):
+                target = session.export(task['id'], profile=profile)
+                tree, document = read_presentation_document(target.read_text(encoding='utf-8'))
+                assert tree.find('body').get('data-report-variant') == document['profile'] == profile
+                assert document['content_hash'] == report['digest']
+                assert reopened.export(task['id'], profile=profile) == target
+                profiles[profile] = fingerprint(document['dataset'])
+            results[key] = {'projection': result, 'profiles': profiles, 'status': done['status']}
+    finally:
+        session.agent.close_runtime()
+        reopened.agent.close_runtime()
     print(json.dumps({'status': 'passed', 'cases': results, 'installed_engine': True,
                       'model_calls': 0, 'data_requests': 0}, ensure_ascii=False))
 
