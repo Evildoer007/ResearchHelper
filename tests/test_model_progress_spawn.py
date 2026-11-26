@@ -1,5 +1,6 @@
 """Actual spawned model transport against local fixture TLS, not a provider."""
 import json
+from researchhelper.contracts import ContractError
 
 from tests import test_portable_transport_fixtures_offline as portable
 
@@ -22,7 +23,7 @@ class ModelProgressSpawnTests(portable.PortableModelTransport):
         self.server('body')
         self.service.MAX_WAIT_SECONDS = .65
         task = self.task()
-        with self.assertRaises(portable.ContractError):
+        with self.assertRaises(ContractError):
             self.service.reason_research_plan(task, [])
         pending = [item['ledger']['dispatches'][-1] for item in self.journal
                    if item['ledger']['dispatches'][-1]['status'] == '已派发']
