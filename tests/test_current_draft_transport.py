@@ -72,6 +72,7 @@ class CurrentDraftTransportTests(unittest.TestCase):
 
     def setUp(self):
         self.control=transport.AuthenticatedSpawnWorkflowTests()
+        self.control.draft_first=True
         self.control.reply=self.reply
         self.addCleanup(self.control.doCleanups)
         self.control.setUp()
@@ -176,21 +177,41 @@ class CurrentDraftTransportTests(unittest.TestCase):
         self.assertEqual(len(final['draft_report']['logics']),3)
         self.assertTrue(all(call['path'] in ('/model','/api/v1/get_access_token',
             '/ds_service_basic/api/v1/get_limit_policy','/api/v1/basic_data_service') for call in client.calls))
+        paths=[call['path'] for call in client.calls]
+        policy='/ds_service_basic/api/v1/get_limit_policy'
+        self.assertEqual(paths[0],'/model')
+        self.assertEqual(paths.count(policy),1)
+        self.assertLess(paths.index(policy),paths.index('/api/v1/basic_data_service'))
         self.assertEqual(sum(call['path']=='/api/v1/get_access_token' for call in client.calls),1)
         for event in final['ledger']['dispatches']:
             if event.get('network_request_started'):
                 self.assertTrue(event['network_worker_reaped'])
         before=copy.deepcopy(final)
         saved_files=[]
+        from researchhelper.artifact_exporter import export_report
         for profile in ('standard','detailed'):
-            exported=client.request('/api/export',dict(task_id=final['id'],profile=profile,format='html'))[0]
+            generated = []
+
+            def read_conversion(content, resources, directory, **options):
+                receipt = export_report(content, resources, directory, **options)
+                path = Path(receipt['path'])
+                self.assertEqual(json.loads(path.with_name('receipt.json').read_text()), receipt)
+                self.assertTrue(receipt['converted_from_saved_html'])
+                source = Path(receipt['source_html'])
+                self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), receipt['source_html_sha256'])
+                generated.append((Path(directory), receipt, path.read_bytes()))
+                return receipt
+
+            with patch('researchhelper.artifact_exporter.export_report', side_effect=read_conversion):
+                exported=client.request('/api/export',dict(task_id=final['id'],profile=profile,format='html'))[0]
+            self.assertEqual(len(generated), 1)
+            directory, receipt, converted = generated[0]
+            self.assertFalse(directory.exists())
             saved_bytes=base64.b64decode(exported['content_base64'],validate=True)
-            directory=client.server.agent.archive.root/'exports'/final['id']
-            receipts=[json.loads(file.read_text()) for file in directory.glob('export-*/receipt.json')]
-            saved=[row for row in receipts if row['profile']==profile and row['sha256']==exported['sha256']]
-            self.assertEqual(len(saved),1)
-            self.assertEqual(Path(saved[0]['path']).read_bytes(),saved_bytes)
-            self.assertEqual(hashlib.sha256(saved_bytes).hexdigest(),exported['sha256'])
+            self.assertEqual(saved_bytes, converted)
+            self.assertEqual(receipt['profile'], profile)
+            self.assertEqual(hashlib.sha256(saved_bytes).hexdigest(), receipt['sha256'])
+            self.assertEqual(receipt['sha256'], exported['sha256'])
             saved_files.append(dict(profile=profile,bytes=len(saved_bytes),sha256=exported['sha256']))
             raw=saved_bytes.decode()
             self.assertIn('比亚迪经营观察',raw)
@@ -241,9 +262,8 @@ class CurrentSnapshotContextTests(unittest.TestCase):
     def proposal(self):
         from researchhelper.evidence import direct_code_reference
         proposal=self.control.spec()
-        proposal.pop('identity')
-        proposal['direct_code_reference']=direct_code_reference(self.task,self.record)
         self.assertIsNotNone(proposal['direct_code_reference'])
+        self.assertEqual(proposal['direct_code_reference'],direct_code_reference(self.task,self.record))
         return proposal
 
     def approved(self,proposal):
