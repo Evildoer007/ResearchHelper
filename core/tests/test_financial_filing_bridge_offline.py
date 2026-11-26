@@ -4,8 +4,8 @@ No real supplier or model is contacted. PDFs are generated in memory, parsed
 without overrides, and bound to a retained iFinD-style directory snapshot.
 """
 import copy
-import importlib.util
 import io
+import tempfile
 import unittest
 from decimal import Decimal
 from unittest.mock import patch
@@ -49,12 +49,14 @@ class FinancialFilingBridgeTests(unittest.TestCase):
                 "kind": "fact", "method_needs": [method], "evidence_needs": []}])
 
     @staticmethod
-    def pdf():
-        rows = (
-            "合成财务原件，非真实公司数据。600000.SH，2026年上半年，人民币，企业会计准则。",
-            "合并利润表：营业收入100百万元。营业成本60百万元。净利润12百万元。",
-            "合并现金流量表：经营活动产生的现金流量净额-8百万元。",
-        )
+    def pdf(statement_rows=None):
+        if statement_rows is None:
+            statement_rows = (
+                "合并利润表（2026年上半年）：营业收入100百万元。营业成本60百万元。净利润12百万元。",
+                "合并现金流量表（2026年上半年）：经营活动产生的现金流量净额-8百万元。",
+            )
+        rows = ("合成财务原件，非真实公司数据。600000.SH。",
+                "本财务报表以人民币列报。本财务报表按照企业会计准则编制。", *statement_rows)
         # Explicit Unicode mappings keep the test independent of host fonts,
         # report generators and optional dependencies in the frozen App.
         writer = PdfWriter()
@@ -199,25 +201,24 @@ class FinancialFilingBridgeTests(unittest.TestCase):
         self.assertNotIn("basic_data_service", [tool["operation"] for tool in data_request_contract(task)["tools"]])
 
     def test_host_skill_and_app_expose_identical_financial_route(self):
-        path = self.agent.resources / "skill/researchhelper/scripts/session.py"
-        spec = importlib.util.spec_from_file_location("financial_bridge_skill", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        session = module.Session(self.agent.archive.root / "independent-skill-project")
-        task = session.create("核算600000.SH毛利率", objects=["600000.SH"],
-            cutoff="2026-10-02T18:00:00+08:00")
-        before = session.status(task["id"])
-        self.assertEqual(session.tools(task["id"])["data_requests"], data_request_contract(task))
-        self.assertEqual(session.status(task["id"]), before)
+        from core.session import Session
 
-    def retained_original(self):
+        with tempfile.TemporaryDirectory(prefix="rh-independent-skill-") as project:
+            session = Session(project)
+            task = session.create("核算600000.SH毛利率", objects=["600000.SH"],
+                cutoff="2026-10-02T18:00:00+08:00")
+            before = session.status(task["id"])
+            self.assertEqual(session.tools(task["id"])["data_requests"], data_request_contract(task))
+            self.assertEqual(session.status(task["id"]), before)
+
+    def retained_original(self, statement_rows=None):
         task = self.create()
         request = self.directory_request()
         task = self.agent.add_snapshot(task["id"], "ifind", "report_query", request["parameters"],
             copy.deepcopy(filing_fixture.RESPONSE))
         directory = validate_filing_original_request(task, {"catalog_id": task["source_records"][0]["id"],
             "source_id": "10001"})
-        task = self.agent.add_filing(task["id"], directory, "financial.pdf", self.pdf())
+        task = self.agent.add_filing(task["id"], directory, "financial.pdf", self.pdf(statement_rows))
         original = next(record for record in task["source_records"] if record["kind"] == "filing")
         return task, original, self.specs(original, "gross_margin_v1")[0]
 
@@ -266,10 +267,12 @@ class FinancialFilingBridgeTests(unittest.TestCase):
         task = self.agent.add_snapshot(task["id"], "ifind", "report_query", request["parameters"], payload)
         with self.assertRaises(ContractError):
             validate_filing_original_request(task, {"catalog_id": task["source_records"][0]["id"], "source_id": "10001"})
-        self.assertEqual(data_request_contract(task)["tools"][-2]["available_selections"], [])
+        tool = next(item for item in data_request_contract(task)["tools"]
+                    if item["qualified_id_for_lookup_only"] == "ifind.filing_original")
+        self.assertEqual(tool["available_selections"], [])
         self.assertEqual(task["evidence"], [])
 
-    def test_three_methods_from_late_directory_and_pdf_to_frozen_report(self):
+    def test_three_methods_from_directory_and_pdf_to_frozen_report(self):
         expected = {"gross_margin_v1": Decimal(40), "net_profit_margin_v1": Decimal(12),
             "operating_cash_profit_ratio_v1": Decimal(-8) / Decimal(12) * 100}
         for method in FINANCIAL_PERIOD_METHODS:
@@ -280,19 +283,16 @@ class FinancialFilingBridgeTests(unittest.TestCase):
                     current = self.agent.archive.get(task["id"])
                     self.assertEqual(current["evidence"], [])
                     self.assertEqual(current["calculations"], [])
-                    return {"question_ids": ["q1"], "reason": "首次核查缺财务原件",
-                        "expected_change": "取得适用披露目录", "data_requests": [self.directory_request()],
-                        "calculations": [], "artifact_ids": [], "stop_reason": ""}
+                    return {"data_requests": [self.directory_request()], "stop_reason": ""}
                 def download(_):
                     current = self.agent.archive.get(task["id"])
                     self.assertFalse(current["evidence"] or current["calculations"])
                     catalog = next(row for row in current["source_records"] if row["operation"] == "report_query")
-                    return {"question_ids": ["q1"], "reason": "目录不能证明财务原值与口径",
-                        "expected_change": "核查实际PDF的财务所属期及原值", "data_requests": [{
+                    return {"data_requests": [{
                             "id": "financial_original", "source": "ifind", "operation": "filing_original",
                             "parameters": {"catalog_id": catalog["id"], "source_id": "10001"},
                             "question_ids": ["q1"], "selection_reason": "沿用本任务核验目录，不猜下载地址"}],
-                        "calculations": [], "artifact_ids": [], "stop_reason": ""}
+                        "stop_reason": ""}
                 def extract(_):
                     current = self.agent.archive.get(task["id"])
                     original = next(row for row in current["source_records"] if row["kind"] == "filing")
@@ -312,7 +312,7 @@ class FinancialFilingBridgeTests(unittest.TestCase):
                 self.assertEqual(self.dispatches, ["report_query", "filing_original"])
                 self.assertEqual(result["ledger"]["used"]["data_requests"], 2)
                 self.assertEqual(result["ledger"]["used"]["model_calls"], 5)
-                self.assertEqual(result["ledger"]["supplements"], 2)
+                self.assertEqual(result["ledger"]["supplements"], 0)
                 self.assertEqual(result["ledger"]["limits"]["model_calls"], 8)
                 self.assertEqual(result["ledger"]["reserve"]["model_calls"], 1)
                 self.assertEqual(len(result["evidence"]), 2)
