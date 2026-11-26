@@ -78,7 +78,7 @@ def build_candidate(root=ROOT, runner=None, *, workspace=None):
         record.write_text(json.dumps(receipt, ensure_ascii=False, indent=2))
         receipt['phase'] = 'assembly'
         with (stage / 'build.log').open('a', encoding='utf-8') as log:
-            command = [str(PYTHON), '-B', '-u', str(snapshot / 'packaging/assemble_release.py')]
+            command = [str(PYTHON), '-B', '-X', 'utf8', '-u', str(snapshot / 'packaging/assemble_release.py')]
             if target == 'macos':
                 command = ['/usr/bin/sandbox-exec', '-p', BUILD_SANDBOX, *command]
             if runner is None:
@@ -158,8 +158,18 @@ def verify_release_binding(release, payload, target, *, source_root=None):
     app = json.loads(Path(release['component_manifests']['app']['path']).read_text())
     if app.get('platform') != target or app.get('architecture') != expected_arch:
         raise RuntimeError('App验收清单的平台或架构不一致')
-    if target == 'windows' and app.get('installer_sha256') != release['artifacts']['setup']['sha256']:
-        raise RuntimeError('Windows安装器与App验收清单不一致')
+    if target == 'windows':
+        if app.get('installer_sha256') != release['artifacts']['setup']['sha256']:
+            raise RuntimeError('Windows安装器与App验收清单不一致')
+        reports = app.get('report_acceptance')
+        if (app.get('installer_verified') is not True or app.get('webview2_prerequisite_verified') is not True
+                or not isinstance(reports, dict) or type(reports.get('version')) is not int or reports['version'] != 1
+                or reports.get('status') != 'passed' or reports.get('dataset_parity') is not True
+                or reports.get('fixtures_only') is not True
+                or reports.get('skill_sha256') != release['artifacts']['skill']['sha256']):
+            raise RuntimeError('Windows安装物缺少本次安装、报告或同源Skill验收')
+        from accept_current import verify_report_parity
+        verify_report_parity(reports.get('app_reports'), reports.get('skill_reports'))
 
 
 if __name__ == '__main__':
