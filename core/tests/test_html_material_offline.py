@@ -5,7 +5,6 @@ import copy
 import hashlib
 import json
 from pathlib import Path
-import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -15,12 +14,12 @@ from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError
 from researchhelper.engine import ResearchAgent
 from researchhelper.evidence import candidate_evidence, extract_material, validate_publication_basis
-from researchhelper.html_material import LIMITATION, extract_html
+from researchhelper.html_material import EXTRACT_VERSION, LIMITATION, extract_html
 from researchhelper.material_parser import MaterialParser, verified_material
 from researchhelper.reasoning import evidence_contract, source_views
 
 ROOT = Path(__file__).resolve().parents[2]
-PRIOR = ROOT / "result/acceptance/live-policy-reasoning/isolated-policy-sfxccmcm"
+FIXED_ORIGINAL = ROOT / "tests/fixtures/synthetic-policy-original.html"
 TITLE = "2025年5月20日全国银行间同业拆借中心受权公布贷款市场报价利率（LPR）公告"
 BODY = "中国人民银行授权全国银行间同业拆借中心公布，2025年5月20日贷款市场报价利率（LPR）为：1年期LPR为3.0%，5年期以上LPR为3.5%。以上LPR在下一次发布LPR之前有效。"
 SAMPLE = ('<html><head><title>示例公告</title><script>fetch("https://example.invalid/")</script></head>'
@@ -29,14 +28,9 @@ SAMPLE = ('<html><head><title>示例公告</title><script>fetch("https://example
           '<p>&lt;img src=x onerror=alert(1)&gt;</p></body></html>').encode()
 
 
-def retained_original():
-    receipt = json.loads((PRIOR / "receipt-resumed.json").read_text())
-    database = PRIOR / "data/researchhelper/researchhelper.sqlite3"
-    with sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True) as db:
-        task = json.loads(db.execute("SELECT body FROM tasks WHERE id=?", (receipt["task_id"],)).fetchone()[0])
-    payload = base64.b64decode(task["materials"][0]["snapshot"]["original_base64"], validate=True)
-    assert hashlib.sha256(payload).hexdigest() == receipt["original_sha256"]
-    return payload
+def fixed_original():
+    """Synthetic static HTML; the deleted historical capture is not recreated."""
+    return FIXED_ORIGINAL.read_bytes()
 
 
 class HTMLMaterialTests(unittest.TestCase):
@@ -44,6 +38,7 @@ class HTMLMaterialTests(unittest.TestCase):
         folder = tempfile.TemporaryDirectory(prefix="html-original-", dir=ROOT / "result/acceptance")
         self.addCleanup(folder.cleanup)
         self.agent = ResearchAgent(ResearchArchive(folder.name), ROOT, offline=True, isolate_materials=True)
+        self.addCleanup(self.agent.close_runtime)
 
     def task(self, intent="综合研究", payload=SAMPLE, cutoff="2025-05-21T00:00:00+08:00"):
         task = self.agent.create("核对公告原文", intent=intent, objects=["LPR"], cutoff=cutoff)
@@ -63,12 +58,12 @@ class HTMLMaterialTests(unittest.TestCase):
             "review": {"question_ids": ["q1"], "allowed_natures": ["合同政策条款"],
                 "conditions": ["静态原文核对，不推断显示状态"], "reason": "原件逐字条款"}}
 
-    def test_retained_official_original_has_contiguous_body_and_title(self):
-        payload = retained_original()
+    def test_fixed_original_has_contiguous_body_and_title(self):
+        payload = fixed_original()
         parsed = MaterialParser().parse("original.html", payload)
         self.assertIn(TITLE, [p["text"] for p in parsed["parts"]])
         self.assertIn(BODY, [p["text"] for p in parsed["parts"]])
-        self.assertEqual(parsed["extract_version"], "html-1")
+        self.assertEqual(parsed["extract_version"], EXTRACT_VERSION)
         self.assertEqual(parsed["limitation"], LIMITATION)
         self.assertTrue(parsed["parse_runtime"]["parser_worker_reaped"])
         self.assertFalse(parsed["parse_runtime"]["network_request_started"])
@@ -129,9 +124,12 @@ class HTMLMaterialTests(unittest.TestCase):
         spec = self.proposal(task)
         spec.update(published_at="2025-05-20T09:00:00+08:00")
         spec["publication"].update(at=spec["published_at"], precision="秒")
-        item = candidate_evidence(task, task["materials"][0], spec)
-        with self.assertRaises(ContractError):
-            validate_publication_basis(item, task["materials"])
+        with self.assertRaisesRegex(ContractError, "不能补造盘中时间|原文日期"):
+            candidate_evidence(task, task["materials"][0], spec)
+        daily = self.proposal(task)
+        item = candidate_evidence(task, task["materials"][0], daily)
+        validate_publication_basis(item, task["materials"])
+        self.assertEqual(item["publication"]["precision"], "日")
 
     def test_tampered_parts_and_stale_version_are_rejected(self):
         parsed = MaterialParser().parse("original.html", SAMPLE)
@@ -176,7 +174,7 @@ class HTMLMaterialTests(unittest.TestCase):
         self.assertEqual(evidence_contract(normal)["publication_types"]["certainty"], ["已确认"])
         self.assertEqual(evidence_contract(document)["publication_types"]["certainty"], ["未知"])
         self.assertEqual(source_views(normal)[0]["extraction_limitation"], LIMITATION)
-        self.assertEqual(source_views(normal)[0]["extract_version"], "html-1")
+        self.assertEqual(source_views(normal)[0]["extract_version"], EXTRACT_VERSION)
         self.assertEqual(extract_material("empty.txt", b'')["limitation"],
                          "未提取到正文，可能为扫描件；不生成伪造摘录")
 
