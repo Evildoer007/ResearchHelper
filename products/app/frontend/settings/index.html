@@ -11,17 +11,19 @@
   <main class="setup" aria-label="设置"><section class="setup-card" aria-label="设置中心">
     <div class="setup-layout">
       <aside class="configured-models"><h1 class="settings-nav__title">设置</h1><nav class="connection-list settings-nav" aria-label="设置项目">
-        <a class="connection-item" href="#preferences"><svg class="settings-nav__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></svg><strong>通用设置</strong></a>
-        <a class="connection-item" href="#runtime"><svg class="settings-nav__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v11H4zM8 21h8M12 17v4M7 10h2M11 10h6"/></svg><strong>运行状态</strong></a>
-        <a class="connection-item" href="#model" data-admin-only><svg class="settings-nav__icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="7" ry="2.7"/><path d="M5 5.5v7c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7v-7M5 12.5v6c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7v-6"/></svg><strong>模型配置</strong></a>
-        <a class="connection-item" href="#data" data-admin-only><svg class="settings-nav__icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="7" ry="2.7"/><path d="M5 5.5v13c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7v-13M5 12c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7"/></svg><strong>数据接口</strong></a>
-        <a class="connection-item" href="#account"><svg class="settings-nav__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4"/><path d="M4 21v-2a8 8 0 0 1 16 0v2"/></svg><strong>账户管理</strong></a>
+        <a class="connection-item" href="#preferences"><svg class="settings-nav__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/><circle cx="8" cy="7" r="2"/><circle cx="16" cy="17" r="2"/></svg><strong>通用设置</strong></a>
+        <a class="connection-item" href="#runtime"><svg class="settings-nav__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v11H4zM8 21h8M12 17v4M7 10h2M11 10h6M7 13h4"/></svg><strong>运行状态</strong></a>
+        <a class="connection-item" href="#model" data-admin-only><svg class="settings-nav__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5C5 4.1 8.1 3 12 3s7 1.1 7 2.5v5c0 1.4-3.1 2.5-7 2.5s-7-1.1-7-2.5zM5 5.5C5 6.9 8.1 8 12 8s7-1.1 7-2.5M5 10.5v5c0 1.4 3.1 2.5 7 2.5M16 16.5v4M14 18.5h4"/></svg><strong>模型配置</strong></a>
+        <a class="connection-item" href="#data" data-admin-only><svg class="settings-nav__icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="7" ry="2.7"/><path d="M5 5.5v6.5c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7V5.5M5 12v6.5c0 1.5 3.1 2.7 7 2.7s7-1.2 7-2.7V12"/></svg><strong>数据接口</strong></a>
         <a class="connection-item" href="#storage"><svg class="settings-nav__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5h16v11H4zM7 4.5h10v3H7zM8 12h8M12 9v6"/></svg><strong>存储与导出</strong></a>
       </nav></aside>
-      <section class="connection-editor"><header class="settings-content-header"><button class="settings-close" type="button" aria-label="关闭设置"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3l10 10M13 3L3 13"/></svg></button></header>
-        <div class="settings-options"><p id="settings-status" role="status" aria-live="polite">正在读取设置</p><div id="settings-content"></div></div>
+      <section class="connection-editor"><header class="settings-content-header"><button class="settings-close" type="button" aria-label="关闭设置"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
+        <p id="settings-status" class="settings-load-status" role="status">正在读取设置…</p>
+        <button id="settings-retry" class="button-quiet" type="button" hidden>重新连接</button>
+        <div class="settings-options" inert><div id="settings-content"></div></div>
       </section>
     </div>
   </section></main>
-  <script src="../demo-data.js"></script><script src="../ui/choice-controls.js"></script><script src="settings.js"></script>
+  <script src="../demo-data.js"></script><script src="../ui/choice-controls.js"></script>
+  <script src="../ui/scrollbar-activity.js"></script><script src="settings.js"></script>
 </body></html>
