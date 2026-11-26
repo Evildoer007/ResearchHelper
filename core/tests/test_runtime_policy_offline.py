@@ -22,7 +22,7 @@ SOURCES = {"ifind": {"access_token": "private-access-fixture", "refresh_token": 
 
 class RuntimePolicyTests(unittest.TestCase):
     def setUp(self):
-        root = Path(__file__).resolve().parents[1] / "result" / "acceptance" / "runtime-policy"
+        root = Path(__file__).resolve().parents[2] / "result" / "acceptance" / "runtime-policy"
         root.mkdir(parents=True, exist_ok=True)
         self.folder = tempfile.TemporaryDirectory(prefix="loopback-", dir=root)
         self.addCleanup(self.folder.cleanup)
@@ -71,12 +71,14 @@ class RuntimePolicyTests(unittest.TestCase):
         self.stop_server()
         self.start_server(configurable)
 
-    def call(self, path, payload=None, cookie=None, use_token=True):
+    def call(self, path, payload=None, cookie=None, use_token=True, workspace=False):
         headers = {}
         if cookie:
             headers["Cookie"] = cookie
         if use_token and hasattr(self, "token"):
             headers["X-ResearchHelper-Token"] = self.token
+        if workspace:
+            headers["X-ResearchHelper-View"] = "workspace-v1"
         request = Request(self.base + path, data=json.dumps(payload).encode() if payload is not None else None, headers=headers)
         try:
             response = urlopen(request, timeout=5)
@@ -140,14 +142,54 @@ class RuntimePolicyTests(unittest.TestCase):
         self.assertEqual(self.call("/api/settings/execution", valid, self.admin)[0], 200)
         self.assert_mode("live")
 
-    def test_missing_model_configuration_cannot_enable_live_execution(self):
+    def test_live_direct_lookup_does_not_require_model_configuration(self):
+        from tests.market_observation_fixtures import ETF_CLOSES, read_captures
+
         self.restart(configurable=True)
         for model in ({}, {"endpoint": MODEL["endpoint"]}, {"endpoint": MODEL["endpoint"], "model": MODEL["model"]}):
             self.assertEqual(self.call("/api/settings/model", model, self.admin)[0], 200)
-            status, response, _ = self.call("/api/settings/execution", {"enabled": True, "confirm": True}, self.admin)
-            self.assertEqual(status, 400)
-            self.assertIn("模型配置", response["error"])
-            self.assert_mode("offline")
+            self.assertFalse(self.bootstrap()["research_readiness"]["model_configured"])
+        self.assertEqual(self.call("/api/settings/execution", {"enabled": True, "confirm": True}, self.admin)[0], 200)
+        self.assert_mode("live")
+        self.assertEqual(self.call("/api/settings/data", {"ifind": {"access_token": SOURCES["ifind"]["access_token"]}}, self.admin)[0], 200)
+        day, code = "2026-10-21", "510300.SH"
+        snapshot = read_captures(ETF_CLOSES.read_bytes(), grouped=False)["snapshot"]
+        original = snapshot["tables"][0]
+        close = original["table"]["close"][original["time"].index(day)]
+
+        def reply(task, request, timeout, event):
+            params = json.loads(request.data)
+            self.assertEqual((params["startdate"], params["enddate"]), (day, day))
+            event.update(transport_isolated=True, network_request_started=True, network_worker_reaped=True)
+            if request.full_url.endswith("/get_trade_dates"):
+                return dict(errorcode=0, tables=dict(time=[day]))
+            self.assertTrue(request.full_url.endswith("/cmd_history_quotation"))
+            self.assertEqual(params["codes"], code)
+            return dict(snapshot, tables=[dict(thscode=code, time=[day], table=dict(close=[close]))])
+
+        def submit(question, entry, expected_status):
+            status, row, _ = self.call("/api/tasks", dict(question=question, entry=entry, research_mode="current"), self.admin)
+            self.assertEqual(status, 200, row)
+            status, result, _ = self.call(f'/api/tasks/{row["id"]}/start',
+                dict(expected_execution=self.expected_execution()), self.admin)
+            self.assertEqual(status, expected_status, result)
+            if status == 200:
+                worker = self.server.agent.workers.get(row["id"])
+                if worker is not None:
+                    worker.join(5)
+                    self.assertFalse(worker.is_alive())
+            return self.server.agent.archive.get(row["id"]), result
+
+        with patch.object(self.server.agent.collector, "_http_json", side_effect=reply) as provider:
+            direct, _ = submit("核对510300.SH在2026年10月21日的收盘价。", "ETF", 200)
+            complex_task, blocked = submit("解释白酒行业竞争格局变化，给出投资论点。", "行业", 400)
+        self.assertEqual(direct["run_mode"], "direct")
+        self.assertTrue(direct.get("delivery"), direct.get("error"))
+        self.assertEqual(direct["ledger"]["used"]["model_calls"], 0)
+        self.assertEqual(direct["ledger"]["used"]["data_requests"], provider.call_count)
+        self.assertEqual([(item["period"], item["raw_value"]) for item in direct["draft_report"]["facts"]], [(day, close)])
+        self.assertEqual(blocked["failure_code"], "research_model_required")
+        self.assertEqual(complex_task["ledger"]["dispatches"], [])
 
     def test_save_never_activates_and_bootstrap_never_exposes_secrets(self):
         self.restart(configurable=True)
@@ -351,6 +393,30 @@ class RuntimePolicyTests(unittest.TestCase):
             make_server(self.folder.name, authentication=True, runtime_configurable=True)
         self.assertEqual(policy.read_bytes(), original)
 
+    def test_running_app_rejects_a_policy_replaced_outside_its_session(self):
+        self.restart(configurable=True)
+        self.save_model()
+        status, task, _ = self.call("/api/tasks", {"question": "fixture task"}, self.admin)
+        self.assertEqual(status, 200)
+        original = self.expected_execution()
+        policy = Path(self.folder.name, "execution-policy.json")
+        external = b'{"enabled":true,"policy_version":2}'
+        policy.write_bytes(external)
+        with patch.object(self.server.agent, "start", side_effect=AssertionError("Research dispatched")) as start:
+            for expected in (original, {"mode": "live", "policy_version": 2},
+                             {"mode": "offline", "policy_version": 2}):
+                status, result, _ = self.call("/api/tasks/" + task["id"] + "/start",
+                    {"expected_execution": expected}, self.admin)
+                self.assertEqual(status, 400)
+                self.assertIn("未派发研究", result["error"])
+            status, result, _ = self.call("/api/settings/execution", {"enabled": True, "confirm": True}, self.admin)
+            self.assertEqual(status, 400)
+            self.assertIn("未保存", result["error"])
+            start.assert_not_called()
+        self.assertEqual(policy.read_bytes(), external)
+        self.assertEqual(self.server.agent.archive.get(task["id"]), task)
+        self.assertTrue(self.server.agent.offline)
+
     def test_cancelled_worker_blocks_configuration_until_it_finishes(self):
         self.restart(configurable=True)
         self.save_model()
@@ -376,10 +442,18 @@ class RuntimePolicyTests(unittest.TestCase):
                 self.assertEqual(self.call("/api/tasks/" + task["id"] + "/start",
                                            {"expected_execution": self.expected_execution()}, self.admin)[0], 200)
                 self.assertTrue(started.wait(5))
-                self.assertEqual(self.call("/api/tasks/" + task["id"] + "/cancel", {}, self.admin)[0], 200)
+                url = "/api/tasks/" + task["id"]
+                code, response, _ = self.call(url + "/cancel", {}, self.admin, workspace=True)
+                self.assertEqual(code, 200)
+                self.assertTrue(response.get("batch_settling"))
+                self.assertTrue(self.call(url, cookie=self.admin, workspace=True)[1].get("batch_settling"))
+                self.assertNotIn("batch_settling", self.call(url, cookie=self.admin)[1])
                 self.assertTrue(self.server.agent.workers[task["id"]].is_alive())
                 cancelled = self.server.agent.archive.get(task["id"])
                 self.assertEqual(cancelled["status"], "已取消")
+                self.assertNotIn("batch_settling", cancelled)
+                self.assertIn("已取消", [node["status"] for node in cancelled["nodes"]])
+                self.assertNotIn("运行中", [node["status"] for node in cancelled["nodes"]])
                 files_before = {name: Path(self.folder.name, name).read_bytes()
                                 for name in ("model-settings.json", "source-settings.json")}
                 for route, payload in changes:
@@ -397,6 +471,10 @@ class RuntimePolicyTests(unittest.TestCase):
                     worker.join(5)
                     self.assertFalse(worker.is_alive())
         settled = self.server.agent.archive.get(task["id"])
+        refreshed = self.call("/api/tasks/" + task["id"], cookie=self.admin, workspace=True)[1]
+        self.assertFalse(refreshed.get("batch_settling"))
+        self.assertEqual(refreshed["revision"], settled["revision"])
+        self.assertEqual(refreshed["ledger"], settled["ledger"])
         self.assertEqual(settled["status"], "已取消")
         self.assertEqual(settled["ledger"]["used"]["data_requests"], 4)
         self.assertEqual(settled["ledger"]["used"]["model_calls"], 1)
