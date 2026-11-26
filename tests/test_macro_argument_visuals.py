@@ -1,5 +1,6 @@
 """Macro arguments retain their own observed plots after combined chart selection."""
 from copy import deepcopy
+import io
 import socket
 import json
 import unittest
@@ -13,12 +14,12 @@ from researchhelper.draft_visuals import logic_figure_plan
 from researchhelper.report_designer import design
 
 
-def fixture():
+def fixture(*, cpi_readings=(1.0, None, .8, .9)):
     task=dict(id='macro-argument-fixture',version=1,input_hash='macro-input',cutoff='2026-10-31T16:00:00+08:00',
         question='比较CPI及分项的已观测变化',entry='宏观',intent='解释变化',objects=['中国CPI'],synthetic=True,
         materials=[],questions=[],evidence=[],calculations=[],knowledge={})
     dates=['2026-06-30','2026-07-31','2026-08-31','2026-09-30']
-    series=[('M002826730','CPI:当月同比',[1.0,None,.8,.9]),
+    series=[('M002826730','CPI:当月同比',list(cpi_readings)),
             ('M002826732','CPI:食品:当月同比',[-1.6,-1.5,-1.4,-1.7]),
             ('M002840897','CPI:消费品:当月同比',[1.1,.2,.8,1.0])]
     snapshot=dict(errorcode=0,tables=[dict(id=[code],index_name=[label]*4,time=dates,value=values)
@@ -56,7 +57,7 @@ class MacroArgumentVisualTests(unittest.TestCase):
         before=canonical(self.content);plots=logic_figure_plan(self.content)
         self.assertEqual(len(plots),4)
         self.assertEqual([row['paper_logic'] for row in plots],['logic-1','logic-2','logic-3','logic-4'])
-        self.assertEqual([row['auto_visual']['scheme'] for row in plots],['line','line','line','lollipop'])
+        self.assertEqual([row['auto_visual']['scheme'] for row in plots],['line','line','line','diverging_bar'])
         self.assertFalse(any(row['target'].startswith('supplement') for row in plots))
         self.assertEqual(canonical(self.content),before)
 
@@ -75,36 +76,42 @@ class MacroArgumentVisualTests(unittest.TestCase):
         self.assertEqual(plot['plot_context']['context_data_refs'],['D7'])
         self.assertNotIn('D5',plot['data_refs'])
 
+    def test_missing_periods_do_not_count_toward_the_chart_minimum(self):
+        content = fixture(cpi_readings=(1.0, None, None, .9))
+        self.assertEqual(argument(content, 1), [])
+        for index in (2, 3):
+            self.assertEqual(argument(content, index)[0]['auto_visual']['scheme'], 'line')
+        content['draft']['visual_design_version'] = 1
+        self.assertEqual(argument(content,1),[])
+
     def test_changed_context_cell_disables_only_that_series_expansion(self):
         content=deepcopy(self.content);content['draft']['facts'][1].update(value=999,raw_value=999)
-        plot=argument(content,1)[0]
-        self.assertNotIn('plot_context',plot)
-        self.assertEqual(plot['values'],[1.0,.9])
-        self.assertEqual(plot['auto_visual']['scheme'],'lollipop')
+        self.assertEqual(argument(content,1), [])
         self.assertEqual(len(argument(content,2)[0]['values']),4)
+        content['draft']['visual_design_version'] = 1
+        self.assertEqual(argument(content,1),[])
 
     def test_changed_original_hash_does_not_supply_context(self):
         content=deepcopy(self.content);content['source_records'][0]['snapshot']['tables'][0]['value'][1]=999
         for index in (1,2,3):
-            plot=argument(content,index)[0]
-            self.assertNotIn('plot_context',plot)
-            self.assertEqual(len(plot['data_refs']),2)
+            self.assertEqual(argument(content,index), [])
 
     def test_another_source_cannot_fill_the_cited_series(self):
         content=deepcopy(self.content);other=deepcopy(content['source_records'][0]);other['id']='other-original'
         content['source_records'].append(other);content['draft']['facts'][1]['artifact_id']=other['id']
-        self.assertNotIn('plot_context',argument(content,1)[0])
+        self.assertEqual(argument(content,1), [])
 
     def test_future_window_is_not_expanded(self):
         content=deepcopy(self.content);content['cutoff']='2026-09-29T16:00:00+08:00'
-        self.assertNotIn('plot_context',argument(content,1)[0])
+        self.assertEqual(argument(content,1), [])
 
     def test_same_month_comparison_keeps_literal_values_and_overlapping_categories(self):
         plot=argument(self.content,4)[0]
         self.assertEqual(plot['context'],'2026-09-30')
-        self.assertEqual(plot['dates'],['CPI:当月同比','CPI:食品:当月同比','CPI:消费品:当月同比'])
-        self.assertEqual(plot['values'],[.9,-1.7,1.0]);self.assertEqual(plot['unit'],'%')
-        self.assertEqual(plot['point_refs'],[['D4'],['D8'],['D12']])
+        data=plot['auto_visual']['data']
+        self.assertEqual(data['labels'],['CPI:消费品:当月同比','CPI:当月同比','CPI:食品:当月同比'])
+        self.assertEqual(data['values'],[1.0,.9,-1.7]);self.assertEqual(plot['unit'],'%')
+        self.assertEqual(plot['point_refs'],[['D12'],['D4'],['D8']])
         self.assertNotIn('plot_context',plot)
 
     def test_different_months_or_units_do_not_become_a_comparable_cross_section(self):
@@ -113,12 +120,54 @@ class MacroArgumentVisualTests(unittest.TestCase):
         content=deepcopy(self.content);content['draft']['facts'][3]['unit']='元'
         self.assertEqual(argument(content,4),[])
 
-    def test_full_multi_series_argument_keeps_the_combined_views(self):
+    def test_full_multi_series_argument_uses_one_primary_view_per_profile(self):
         content=deepcopy(self.content);logic=content['draft']['logics'][0]
         logic['data_refs']=[row['id'] for row in content['draft']['facts']];content['draft']['logics']=[logic]
         plots=argument(content,1)
-        self.assertEqual([row['auto_visual']['scheme'] for row in plots],['multi_line','heatmap'])
+        self.assertEqual([row['auto_visual']['scheme'] for row in plots],['small_multiples'])
+        detailed = logic_figure_plan(content, report_profile='detailed')
+        self.assertEqual([row['auto_visual']['scheme'] for row in detailed],['multi_line'])
         self.assertFalse(any(row.get('argument_only') for row in plots))
+
+    def test_window_view_uses_only_registered_and_cited_changes(self):
+        content=deepcopy(self.content)
+        logic=content['draft']['logics'][0]
+        logic.update(data_refs=[row['id'] for row in content['draft']['facts']],
+                     calculation_refs=[row['id'] for row in content['draft']['calculations']])
+        content['draft']['logics']=[logic]
+        before=canonical(content)
+        plots=argument(content,1)
+        self.assertEqual([row['auto_visual']['scheme'] for row in plots], ['small_multiples','window_change'])
+        window=plots[1]
+        calculations={tuple(row['data_refs']):row for row in content['draft']['calculations']}
+        for series,refs in zip(window['auto_visual']['data']['series'],window['series_point_refs'],strict=True):
+            self.assertEqual(series['values'], [calculations[tuple(ref)]['value'] for ref in refs])
+        from pypdf import PdfReader
+        from researchhelper.publication_graphics import chart_pdf
+        for chart, expected in zip(plots, ('CPI:食品:当月同比','06-30至09-30'), strict=True):
+            paper = PdfReader(io.BytesIO(chart_pdf(chart, palette='red_blue'))).pages[0].extract_text()
+            self.assertIn(expected, paper)
+        self.assertEqual(canonical(content),before)
+        logic['calculation_refs'].pop()
+        self.assertEqual([row['auto_visual']['scheme'] for row in argument(content,1)],['small_multiples'])
+        self.assertEqual([row['auto_visual']['scheme'] for row in logic_figure_plan(content,report_profile='detailed')],['multi_line'])
+
+    def test_single_series_two_changes_keep_the_observed_path_only(self):
+        content = deepcopy(self.content)
+        draft = content['draft']
+        code = draft['facts'][0]['code']
+        draft['facts'] = [row for row in draft['facts'] if row['code'] == code]
+        refs = [row['id'] for row in draft['facts']]
+        draft['calculations'] = [row for row in draft['calculations'] if set(row['data_refs']) <= set(refs)]
+        calculations = [row['id'] for row in draft['calculations']]
+        self.assertEqual(len(calculations), 2)
+        draft['logics'] = [dict(draft['logics'][0],data_refs=refs,calculation_refs=calculations)]
+        for profile in ('standard','detailed'):
+            with self.subTest(profile=profile):
+                plots = logic_figure_plan(content,report_profile=profile)
+                self.assertEqual([row['auto_visual']['scheme'] for row in plots], ['line'])
+                self.assertEqual(plots[0]['data_refs'],refs)
+                self.assertEqual(draft['logics'][0]['calculation_refs'],calculations)
 
     def test_standard_and_internal_share_all_data_and_per_argument_chart_addresses(self):
         before=canonical(self.content)
