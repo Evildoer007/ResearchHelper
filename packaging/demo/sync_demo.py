@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'packaging'))
 from artifact_integrity import verify_directory
 from build_current import build_lock, verify_current_build, write_record
+from release_retention import permanent_cleanup_enabled
 
 DESTINATION = Path('/Users/haoranxu/Desktop/demo/ResearchHelper demo')
 PRIVATE_FILES = {'config.local.json', 'model-settings.json', 'source-settings.json',
@@ -100,7 +101,7 @@ def acceptance(candidate_path, package_path, browser_path, root=ROOT):
                        'native_ui_verified': False, 'real_model_verified': False, 'published': False, 'installed': False}
 
 
-def release_files(candidate):
+def release_files(candidate, version):
     artifact = candidate['directory_artifacts']['demo']
     source = ordinary(artifact['path'])
     verified = verify_directory(artifact, candidate['payload'])
@@ -108,8 +109,9 @@ def release_files(candidate):
     if any(not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value) for value in files.values()):
         raise ValueError('发布文件摘要格式不符')
     manifest = json.loads((source / 'manifest.json').read_text())
-    if (manifest.get('source') != 'ResearchHelper' or manifest.get('version') != '0.10.0' or
-            manifest.get('runtime', {}).get('protocol_id') != 'researchhelper.module-request' or
+    runtime = manifest.get('runtime', {})
+    if (manifest.get('source') != 'ResearchHelper' or manifest.get('version') != version or
+            runtime.get('version') != version or runtime.get('protocol_id') != 'researchhelper.module-request' or
             manifest.get('files') != {name: value for name, value in files.items() if name != 'manifest.json'}):
         raise ValueError('demo内外清单不一致')
     files['researchhelper-release.json'] = files['manifest.json']
@@ -169,20 +171,37 @@ def destination_plan(target, files):
     return {'target': target, 'states': states, 'untouched': untouched_state(target, files)}
 
 
+
+def sync_recovery_directory(root, recovery):
+    """Use the owned transaction namespace; retain explicit legacy recovery."""
+    owned=root/'result/demo-sync-recovery'
+    if recovery is None:
+        recovery=owned if permanent_cleanup_enabled(root) else Path.home()/'.Trash'
+    recovery=ordinary(recovery)
+    if recovery.is_relative_to(root) and recovery!=owned:
+        raise ValueError('仓库内仅允许result/demo-sync-recovery作为同步恢复目录')
+    if recovery==owned:
+        if recovery.exists() and not recovery.is_dir():
+            raise ValueError('项目同步恢复路径不是普通目录')
+        recovery.mkdir(mode=0o700,parents=True,exist_ok=True)
+    if not recovery.is_dir():
+        raise ValueError('同步恢复目录不存在或不可用')
+    return recovery
+
+
 def commit_file(staged, target):
     os.replace(staged, target)
 
 
 def sync_current(candidate_path, package_path, browser_path, *, root=ROOT, recovery=None):
     root = ordinary(root)
-    recovery = ordinary(recovery if recovery is not None else Path.home() / '.Trash')
-    if not recovery.is_dir() or recovery.is_relative_to(root):
-        raise ValueError('恢复目录必须是仓库外既有废纸篓')
+    recovery = sync_recovery_directory(root, recovery)
     with build_lock(root):
         from reconcile_delivery import reconcile_downloads
         reconcile_downloads(root,root/'dist')
         candidate, evidence = acceptance(candidate_path, package_path, browser_path, root)
-        source, files = release_files(candidate)
+        version = (root / 'VERSION').read_text(encoding='utf-8').strip()
+        source, files = release_files(candidate, version)
         targets = (root / 'demo', DESTINATION)
         if targets[0] == targets[1] or any(target.is_relative_to(source) for target in targets):
             raise ValueError('同步目标重叠')
@@ -197,7 +216,7 @@ def sync_current(candidate_path, package_path, browser_path, *, root=ROOT, recov
         receipt_path = output / 'receipt.json'
         backup = recovery / ('ResearchHelper-demo-sync-' + identity) if any(state for _, _, state in changes) else None
         record = {'schema': 'researchhelper.demo-sync.v2', 'status': 'preparing', **evidence,
-                  'destinations': [str(target) for target in targets], 'version': '0.10.0',
+                  'destinations': [str(target) for target in targets], 'version': version,
                   'recovery_directory': str(backup) if backup else None, 'changes': [],
                   'files_per_destination': len(files), 'finder_metadata_excluded': ['regular .DS_Store'],
                   'permanent_deletion': False,
