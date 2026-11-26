@@ -3,6 +3,7 @@
 import copy
 import html
 import unittest
+from lxml import html as dom
 
 from researchhelper.contracts import fingerprint
 from researchhelper.reports import compose, render, report_heading, READER_VERSION
@@ -70,21 +71,33 @@ class ReportReaderTests(unittest.TestCase):
         content['template_version'] = 'rh-paper-2'
         content['content_hash'] = fingerprint({k: v for k, v in content.items() if k != 'content_hash'})
         before = copy.deepcopy(content)
-        paper = render(content, documents.ROOT)
-        self.assertIn("data-reader-version='" + READER_VERSION + "'", paper)
-        self.assertIn('模板rh-paper-2', paper)
-        self.assertIn('留存报告题目', paper)
+        tree = dom.document_fromstring(render(content, documents.ROOT))
+        self.assertEqual(tree.get('data-reader-version'), READER_VERSION)
+        self.assertEqual(tree.get('data-renderer-version'), content['template_version'])
+        scope = tree.get_element_by_id('scope')
+        self.assertIn('模板rh-paper-2', scope.text_content())
+        self.assertIn('留存报告题目：' + content['title'], scope.text_content())
         self.assertEqual(content, before)
         self.assertEqual(self.fixture.agent.export(done['id']), frozen)
 
     def test_original_question_is_saved_even_when_fixture_has_a_short_title(self):
         done = self.complete('etf')
+        frozen = copy.deepcopy(self.fixture.agent.export(done['id']))
         content = compose(done)
         self.assertNotEqual(content['title'], content['question'])
-        paper = render(content, documents.ROOT)
-        self.assertIn('原始问题：' + html.escape(done['question'], quote=True), paper)
-        self.assertIn("aria-label='报告目录'", paper)
-        self.assertIn('navigateSection', paper)
+        tree = dom.document_fromstring(render(content, documents.ROOT))
+        main = tree.find('.//main')
+        scope = tree.get_element_by_id('scope')
+        self.assertIn('原始问题：' + done['question'], scope.text_content())
+        directory = tree.xpath('//*[@aria-label="报告目录"]')
+        self.assertEqual(len(directory), 1)
+        self.assertNotIn(directory[0], list(main.iter()))
+        links = directory[0].xpath('.//a[starts-with(@href,"#")]')
+        self.assertTrue(links)
+        for link in links:
+            self.assertEqual(len(main.xpath('.//*[@id=$ident]', ident=link.get('href')[1:])), 1)
+        self.assertTrue(main.xpath('.//a[@href="#scope" and @aria-haspopup="dialog"]'))
+        self.assertEqual(self.fixture.agent.export(done['id']), frozen)
 
 
 if __name__ == '__main__':
