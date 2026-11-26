@@ -16,6 +16,7 @@ from urllib.error import HTTPError
 
 from researchhelper.contracts import context
 from researchhelper.engine import ResearchAgent
+from researchhelper.evidence import direct_code_reference
 from researchhelper.reasoning import evidence_contract
 from tests import test_authenticated_spawn_workflow_offline as transport
 
@@ -30,6 +31,7 @@ def price_proposals(task):
     contract = evidence_contract(task)
     source = contract["sources"][0]
     needs = [item["id"] for item in contract["question_requirements"]["q1"]]
+    record = next(item for item in task["source_records"] if item["id"] == source["artifact_id"])
     proposals = []
     for row, (date, ident, value) in enumerate((("2026-09-29", "price_start", 10), ("2026-09-30", "price_end", 11))):
         proposals.append({"id": ident, "artifact_id": source["artifact_id"], "object": "600000.SH",
@@ -37,8 +39,7 @@ def price_proposals(task):
             "nature": "已实现事实", "unit": "元", "published_at": None,
             "publication": contract["current_publication_template"], "availability": source["current_availability_reference"],
             "raw_value": value, "raw_unit": "元", "value": value, "conversion_factor": 1, "question_ids": ["q1"],
-            "identity": {"provider_code": "600000.SH", "object": "600000.SH", "basis": "用户明确指定代码与本地响应代码相同",
-                "valid_from": date, "valid_to": date},
+            "direct_code_reference": direct_code_reference(task, record),
             "calculation_context": {"security_id": "600000.SH", "currency": "CNY", "price_basis": "unadjusted",
                 "price_kind": "close", "observation_date": date, "window_start": "2026-09-29", "window_end": "2026-09-30",
                 "corporate_action_status": "unknown"}, "api_context_reference": source["compact_context_reference"],
@@ -64,15 +65,26 @@ class QuestionScopeWorkflowTests(unittest.TestCase):
             self.assertEqual(payload["codes"], "600000.SH")
             return 200, {"errorcode": 0, "tables": [{"thscode": "600000.SH",
                 "time": ["2026-09-29", "2026-09-30"], "table": {"close": [10, 11]}}]}
+        if route == '/api/v1/get_trade_dates':
+            self.assertEqual(headers.get('access_token'), transport.ACCESS)
+            self.assertEqual(payload['marketcode'], '212001')
+            self.assertEqual((payload['startdate'], payload['enddate']), ('2026-09-29', '2026-09-30'))
+            return 200, dict(errorcode=0, tables=[dict(time=['2026-09-29', '2026-09-30'])])
         self.assertEqual(route, "/model")
         self.assertEqual(headers.get("Authorization"), "Bearer " + transport.MODEL_KEY)
         supplied = json.loads(payload["messages"][-1]["content"])
+        if supplied.get('format') == 'researchhelper.table_input':
+            from researchhelper.model_presentation import restore
+            supplied = restore(supplied)
         task = self.server.agent.archive.get(self.ident)
         if "question_contract" in supplied:
             self.phases.append("plan")
             self.assertEqual(supplied["question_contract"]["obligation_policy"]["version"], 1)
             result = {"questions": [{"id": "q1", "question": task["question"], "kind": "fact", "required": True,
-                "evidence_needs": ["两日同代码收盘原值及共同口径"], "method_needs": ["observed_price_return_v1"]}],
+                "evidence_needs": ["两日同代码收盘原值及共同口径"],
+                "evidence_need_constraints": {"两日同代码收盘原值及共同口径": {"value_kind": "number",
+                    "unit_dimension": "price", "minimum_count": 2, "period_kind": "point"}},
+                "method_needs": ["observed_price_return_v1"]}],
                 "data_requests": [{"id": "two_prices", "source": "ifind", "operation": "cmd_history_quotation",
                     "question_ids": ["q1"], "parameters": {"codes": "600000.SH", "indicators": "close",
                         "startdate": "2026-09-29", "enddate": "2026-09-30",
@@ -100,7 +112,7 @@ class QuestionScopeWorkflowTests(unittest.TestCase):
             result = {"question_ids": ["q1"], "reason": "", "expected_change": "", "data_requests": [],
                 "calculations": [], "artifact_ids": [], "stop_reason": "本地负向检查没有新的依据，不补造总回报"}
         else:
-            raise AssertionError("Unexpected local model phase")
+            raise AssertionError("Unexpected local model phase: " + ', '.join(sorted(supplied)))
         return 200, {"model": "local-fixture", "choices": [{"finish_reason": "stop",
             "message": {"content": json.dumps(result, ensure_ascii=False)}}]}
 
@@ -123,7 +135,10 @@ class QuestionScopeWorkflowTests(unittest.TestCase):
         self.assertEqual(len(done["evidence"]), 2)
         self.assertEqual(len(done["calculations"]), 1)
         self.assertAlmostEqual(done["calculations"][0]["output"]["value"], 10)
-        self.assertEqual(done["ledger"]["used"]["data_requests"], 2)
+        self.assertEqual(done["ledger"]["used"]["data_requests"], 3)
+        calendar=[event for event in done['ledger']['dispatches'] if event.get('operation')=='get_trade_dates']
+        self.assertEqual(len(calendar), 1)
+        self.assertEqual(calendar[0]['status'], '成功')
         self.assertEqual(done["theses"], [])
         self.assertIsNotNone(done["delivery"])
         report = self.server.agent.export(self.ident)
@@ -138,11 +153,13 @@ class QuestionScopeWorkflowTests(unittest.TestCase):
         self.assertEqual(restarted.export(self.ident)["digest"], report["digest"])
         self.assertEqual(restarted.archive.get(self.ident)["ledger"], done["ledger"])
         BASE.mkdir(parents=True, exist_ok=True)
-        output = Path(tempfile.mkdtemp(prefix="negative-" if invalid_answer else "positive-", dir=BASE))
+        temporary = tempfile.TemporaryDirectory(prefix="negative-" if invalid_answer else "positive-", dir=BASE)
+        self.addCleanup(temporary.cleanup)
+        output = Path(temporary.name)
         (output / "report.html").write_text(report["html"])
         (output / "receipt.json").write_text(json.dumps({"status": done["status"], "phases": self.phases,
             "task_id": self.ident, "evidence_count": 2, "calculation_count": 1, "question_status": done["questions"][0]["status"],
-            "model_fixture_calls": done["ledger"]["used"]["model_calls"], "data_fixture_calls": 2,
+            "model_fixture_calls": done["ledger"]["used"]["model_calls"], "data_fixture_calls": 3,
             "real_model_calls": 0, "real_supplier_calls": 0, "restarted_report_unchanged": True,
             "report_sha256": hashlib.sha256(report["html"].encode()).hexdigest(), "workflow_fixture": True,
             "negative_case": str(invalid_answer)}, ensure_ascii=False, indent=2))
@@ -178,7 +195,9 @@ class QuestionScopeWorkflowTests(unittest.TestCase):
     def test_independent_skill_matches_app_without_a_second_model(self):
         done, report = self.workflow()
         BASE.mkdir(parents=True, exist_ok=True)
-        output = Path(tempfile.mkdtemp(prefix="parity-", dir=BASE))
+        temporary = tempfile.TemporaryDirectory(prefix="parity-", dir=BASE)
+        self.addCleanup(temporary.cleanup)
+        output = Path(temporary.name)
         installation = output / "installation/researchhelper"
         build_skill_fixture(installation)
 
@@ -189,7 +208,7 @@ class QuestionScopeWorkflowTests(unittest.TestCase):
         installed_hashes = {str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in installation.rglob("*") if path.is_file()}
         for name in ("planning.py", "engine.py", "reasoning.py", "numeric_integrity.py"):
             self.assertEqual(hashlib.sha256((installation / "researchhelper" / name).read_bytes()).hexdigest(),
-                             hashlib.sha256((ROOT / "core/src/researchhelper" / name).read_bytes()).hexdigest())
+                             hashlib.sha256(source_file("core/src/researchhelper/" + name).read_bytes()).hexdigest())
         fixed = {"question": done["question"], "plan": done["reasoning_state"]["plan"]["proposed"],
                  "expected_answer": done["questions"][0]["answer"]}
         (output / "fixed-input.json").write_text(json.dumps(fixed, ensure_ascii=False))
@@ -216,11 +235,19 @@ answers={'q1':{'refs':['price_start','price_end'],'calculation_refs':['price_cha
  {'source':'calculation','ref':'price_change','path':'value','format':'signed','digits':2},
  {'text':'。公司行为未核验，不代表净值收益、持有人总回报或买卖结论。'}]}}}
 second=session.run(task['id'],evidence_specs=specs,answers=answers,calculations=plan['calculations'],defer_delivery=True)
-assert second['status']=='待开始' and not second['delivery'] and second['questions'][0]['status']=='已回答',second.get('error') or second['gaps']
+assert second['status']=='待开始' and not second['delivery'] and len(second['evidence'])==2 and len(second['calculations'])==1,second.get('error') or second['gaps']
+request=session.argument_review_inputs(task['id'])['request']
+assert request['targets'] and all(t['text']==fixed['expected_answer'] for t in request['targets'])
+wire=dict(version=request['version'],review_hash=request['review_hash'],
+ questions=[dict(question_id='q1',status='answered',missing_evidence=[],reason='固定合成原值的协议核对，不代表金融质量')],
+ reviews=[dict(target_id=t['id'],segments=[dict(text=t['text'],verdict='supported',
+  basis_refs=['evidence:price_start','evidence:price_end','calculation:price_change'],explanation='两端合成原值按登记方法计算，明确保留未复权口径')]) for t in request['targets']])
+session.review_arguments(task['id'],wire)
 final=session.deliver(task['id'])
 assert final['status']=='已完成',final.get('error') or final['gaps']
 assert final['questions'][0]['answer']==fixed['expected_answer']
-assert final['ledger']['used']['model_calls']==0 and final['ledger']['used']['data_requests']==2
+assert final['ledger']['used']['model_calls']==0 and final['ledger']['used']['data_requests']==3
+assert [event['operation'] for event in final['ledger']['dispatches']]==['get_access_token','cmd_history_quotation','get_trade_dates']
 assert session.agent.model is None and len(final['evidence'])==2 and len(final['calculations'])==1
 assert final['calculations'][0]['output']['value']>9.999999 and final['calculations'][0]['output']['value']<10.000001
 target=session.export(task['id']);stored=session.archive.report(task['id'],1)
@@ -228,10 +255,11 @@ restored=module.Session(out/'project')
 assert restored.archive.report(task['id'],1)==stored and restored.status(task['id'])['ledger']==final['ledger']
 import researchhelper.engine
 assert Path(researchhelper.engine.__file__).is_relative_to(install)
+session.agent.close_runtime();restored.agent.close_runtime()
 for event in final['ledger']['dispatches']:
  if event.get('network_request_started'):assert event['network_worker_reaped'] and event['transport_receiver_stopped']
 (out/'skill-result.json').write_text(json.dumps({'status':final['status'],'answer':final['questions'][0]['answer'],
- 'calculation':final['calculations'][0]['output'],'data_fixture_calls':2,'model_fixture_calls':0,
+ 'calculation':final['calculations'][0]['output'],'data_fixture_calls':3,'model_fixture_calls':0,
  'restarted_report_unchanged':True,'report_path':str(target),'model_is_none':True},ensure_ascii=False,indent=2))
 '''
         child = subprocess.run(["/opt/anaconda3/envs/MachineLearning/bin/python", "-I", "-B", "-c", program,
@@ -242,12 +270,12 @@ for event in final['ledger']['dispatches']:
         self.assertEqual(skill["answer"], done["questions"][0]["answer"])
         self.assertEqual(skill["calculation"], done["calculations"][0]["output"])
         self.assertTrue(skill["model_is_none"])
-        self.assertEqual(skill["data_fixture_calls"], 2)
+        self.assertEqual(skill["data_fixture_calls"], 3)
         self.assertEqual(skill["model_fixture_calls"], 0)
         self.assertFalse(self.fixture_errors, self.fixture_errors)
         (output / "receipt.json").write_text(json.dumps({"status": "passed", "same_fixed_input": True,
             "numeric_outputs_equal": True, "answers_equal": True, "skill_has_no_second_model": True,
             "real_model_calls": 0, "real_supplier_calls": 0, "candidate_only": True,
             "app_model_fixture_calls": 3, "skill_model_fixture_calls": 0,
-            "app_data_fixture_calls": 2, "skill_data_fixture_calls": 2,
+            "app_data_fixture_calls": 3, "skill_data_fixture_calls": 3,
             "skill_result": str(output / "skill-result.json")}, ensure_ascii=False, indent=2))
