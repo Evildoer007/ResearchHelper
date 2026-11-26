@@ -258,7 +258,7 @@ class AcquiredCandidateWorkflowTests(unittest.TestCase):
     def test_candidate_never_repairs_missing_identity_or_availability(self):
         task, record = self.fixture.acquired()
         source = evidence_contract(task)["sources"][0]
-        for missing in ("identity", "availability"):
+        for missing in ("direct_code_reference", "availability"):
             proposal = self.fixture.spec(task, record)
             proposal.update(source["api_cells"]["cells"][0]["proposal_fields"])
             proposal.pop(missing)
