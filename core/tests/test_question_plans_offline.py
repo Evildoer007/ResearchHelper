@@ -6,7 +6,8 @@ import unittest
 from pathlib import Path
 
 from researchhelper.archive import ResearchArchive
-from researchhelper.cases import CUTOFF, evidence, get_case
+from researchhelper.cases import CUTOFF
+from tests.host_fixture_support import policy_proposal, fee_calculation, fee_originals
 from researchhelper.contracts import ContractError, charge, module_result, request, validate_request, validate_result
 from researchhelper.engine import ResearchAgent
 from researchhelper.reports import compose
@@ -19,14 +20,17 @@ class QuestionPlanTests(unittest.TestCase):
         folder = tempfile.TemporaryDirectory(prefix="question-plan-", dir=ROOT / "result" / "acceptance")
         self.addCleanup(folder.cleanup)
         self.agent = ResearchAgent(ResearchArchive(folder.name), ROOT, offline=True)
-        self.fact = evidence("original", "政策原文", "生效时间为2026年7月19日。")
+        self.addCleanup(self.agent.close_runtime)
 
     def create(self, questions=None, **options):
-        return self.agent.create("核查原文日期", cutoff=CUTOFF, questions=questions or [
+        self.current_task = self.agent.create("核查原文日期", cutoff=CUTOFF, questions=questions or [
             {"id": "q1", "question": "原文何时生效", "kind": "fact"}], **options)
+        return self.current_task
 
     def facts(self, answers=None, **extra):
-        return dict(evidence=[self.fact], answers=answers or {
+        spec = policy_proposal(self.agent, self.current_task["id"], "original", "政策原文",
+                               "生效时间为2026年7月19日。", ["q1"])
+        return dict(evidence_specs=[spec], answers=answers or {
             "q1": {"answer": "原文于2026年7月19日生效。", "refs": ["original"]}}, **extra)
 
     def test_plain_fact_delivers_without_invented_thesis(self):
@@ -41,11 +45,10 @@ class QuestionPlanTests(unittest.TestCase):
         self.assertEqual(report["content"]["questions"][0]["refs"], ["original"])
 
     def test_comparison_uses_registered_calculation_without_thesis(self):
-        case = get_case("etf")
         task = self.agent.create("比较年度费用", entry="ETF", intent="比较对象", cutoff=CUTOFF, questions=[
-            {"question": "同口径费用差是多少", "kind": "comparison", "method_needs": ["fee_difference_v1"]}])
-        spec = dict(case["calculation"], id="fee_delta", question_ids=["q1"])
-        host = {"evidence": case["evidence"], "calculations": [spec], "answers": {
+            {"question": "同口径费用差是多少", "kind": "comparison", "method_needs": ["fee_difference_v2"]}])
+        spec = fee_calculation()
+        host = {"evidence_specs": fee_originals(self.agent, task["id"]), "calculations": [spec], "answers": {
             "q1": {"answer": "A比B低0.40个百分点，不等于实际收益差。", "refs": ["e1", "e2"], "calculation_refs": ["fee_delta"]}}}
         final = self.agent.start(task["id"], host)
         self.assertEqual(final["status"], "已完成", final.get("error"))
@@ -67,7 +70,7 @@ class QuestionPlanTests(unittest.TestCase):
         task = self.create([
             {"id": "q1", "question": "原文日期", "kind": "fact", "group": "date"},
             {"id": "extra", "question": "可选费用比较", "kind": "comparison", "required": False, "group": "fees"}])
-        spec = dict(get_case("etf")["calculation"], question_ids=["extra"])
+        spec = fee_calculation(question_ids=["extra"])
         final = self.agent.start(task["id"], self.facts(calculations=[spec]))
         self.assertEqual(final["status"], "已完成", final.get("error"))
         date_node = next(n for n in final["nodes"] if n["id"] == "answer")
@@ -91,21 +94,20 @@ class QuestionPlanTests(unittest.TestCase):
         self.assertTrue(any("论点" in gap for gap in final["gaps"]))
 
     def test_thesis_does_not_inherit_unrelated_calculations(self):
-        case = get_case("etf")
         task = self.create()
-        host = self.facts(calculations=[case["calculation"], dict(case["calculation"], id="other_delta")],
+        host = self.facts(calculations=[fee_calculation(), fee_calculation("other_delta")],
                           theses=[{"title": "原文日期已确认", "judgment": "支持", "support": ["original"],
                                    "counter": [], "investment_meaning": "仅核查日期", "limitation": "限定原文"}])
-        host["evidence"] += case["evidence"]
+        host["evidence_specs"] += fee_originals(self.agent, task["id"])
         final = self.agent.start(task["id"], host)
         self.assertEqual(final["status"], "已完成", final.get("error"))
         self.assertEqual(len(final["calculations"]), 2)
         self.assertEqual(final["theses"][0]["calculation_refs"], [])
 
     def test_required_method_must_have_answer_calculation_reference(self):
-        task = self.create([{"question": "年度费差", "kind": "comparison", "method_needs": ["fee_difference_v1"]}])
-        host = self.facts(calculations=[get_case("etf")["calculation"]])
-        host["evidence"] += get_case("etf")["evidence"]
+        task = self.create([{"question": "年度费差", "kind": "comparison", "method_needs": ["fee_difference_v2"]}])
+        host = self.facts(calculations=[fee_calculation()])
+        host["evidence_specs"] += fee_originals(self.agent, task["id"])
         final = self.agent.start(task["id"], host)
         self.assertEqual(final["status"], "部分完成")
         self.assertEqual(final["questions"][0]["status"], "未回答")
@@ -190,12 +192,11 @@ class QuestionPlanTests(unittest.TestCase):
             compose(changed)
 
     def test_answer_cannot_borrow_another_questions_calculation(self):
-        case = get_case("etf")
         task = self.create([
             {"id": "q1", "question": "日期核查", "kind": "fact", "group": "date"},
             {"id": "fees", "question": "费用核查", "kind": "comparison", "group": "fees"}])
-        host = self.facts(calculations=[dict(case["calculation"], id="fee_only", question_ids=["fees"])])
-        host["evidence"] += case["evidence"]
+        host = self.facts(calculations=[fee_calculation("fee_only", ["fees"])])
+        host["evidence_specs"] += fee_originals(self.agent, task["id"], ["fees"])
         host["answers"]["q1"].update(refs=["original", "e1", "e2"], calculation_refs=["fee_only"])
         final = self.agent.start(task["id"], host)
         self.assertEqual(final["questions"][0]["status"], "未回答")
