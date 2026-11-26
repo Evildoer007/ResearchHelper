@@ -40,6 +40,58 @@ CHECKS=r'''
 '''
 
 
+BOOTSTRAP_CHECKS=r"""
+  const lazyBefore=await page.evaluate(()=>({id:selected.id,version:selected.version,revision:selected.revision,
+    messages:selected.messages?.length||0,text:draft.composerTexts?.[selected.id]||''}));
+  const lazyResponse=await context.request.get(new URL('/api/bootstrap',base).href,{headers:{'X-ResearchHelper-View':'workspace-v2'}});
+  const lazyBootstrap=await lazyResponse.json();
+  check('startup task list contains summaries without original payloads',lazyResponse.status()===200&&lazyBootstrap.tasks.length>0&&lazyBootstrap.tasks.every(task=>
+    task.workspace_summary_version===1&&!('source_records' in task)&&!('materials' in task)&&!('evidence' in task)&&!('pending_content' in task)));
+  const lazyMetadata=lazyBootstrap.tasks.find(task=>task.id===lazyBefore.id);
+  check('startup summary retains version revision and round count',lazyMetadata?.version===lazyBefore.version&&lazyMetadata.revision===lazyBefore.revision&&lazyMetadata.message_count===lazyBefore.messages);
+  const lazyRoundChoice=await page.evaluate(()=>{
+    const original=tasks;
+    try{
+      const base={id:'old-round',thread_id:'summary-order-fixture',question:'轮次选择样本',status:'待开始',cutoff:'2026-01-01',created_at:'2026-01-03',workspace_summary_version:1,message_count:1};
+      tasks=[base,{...base,id:'latest-round',created_at:'2026-01-02',message_count:3}];
+      return taskCatalog()[0]?.id;
+    }finally{tasks=original}
+  });
+  check('summary round ordering still prefers actual conversation length',lazyRoundChoice==='latest-round');
+  await page.evaluate(()=>remember());
+  const lazyReads=[];
+  const lazyObserve=request=>{if(request.method()==='GET'&&new URL(request.url()).pathname==='/api/tasks/'+lazyBefore.id)lazyReads.push(request.url())};
+  page.on('request',lazyObserve);
+  await page.reload();await page.waitForFunction(()=>workspaceReady&&!initializing);
+  page.off('request',lazyObserve);
+  check('restoring one selected task reads its details once',lazyReads.length===1);
+  check('restored task has real details before research controls become ready',await page.evaluate(id=>selected?.id===id&&!selected.workspace_summary_version&&Array.isArray(selected.questions)&&selected.ledger&&Array.isArray(selected.materials),lazyBefore.id));
+  check('unselected startup tasks stay as small metadata entries',await page.evaluate(id=>tasks.filter(task=>task.id!==id).every(task=>task.workspace_summary_version===1&&!task.source_records&&!task.evidence),lazyBefore.id));
+  check('restoring task leaves its unsent text unchanged',await page.locator('#chat-input').inputValue()===lazyBefore.text);
+  let lazyRelease,lazyNotify;
+  const lazyHold=new Promise(resolve=>{lazyRelease=resolve}),lazySeen=new Promise(resolve=>{lazyNotify=resolve});
+  let lazyHeld=false;
+  const lazyGate=async route=>{
+    if(route.request().method()==='GET'&&!lazyHeld){lazyHeld=true;lazyNotify();await lazyHold}
+    await route.continue();
+  };
+  const lazyPattern='**/api/tasks/'+lazyBefore.id;
+  await page.route(lazyPattern,lazyGate);
+  try{
+    await page.reload({waitUntil:'domcontentloaded'});await lazySeen;
+    await page.locator('#chat-input').evaluate(input=>{input.value='恢复期间输入的新研究问题';input.dispatchEvent(new Event('input',{bubbles:true}))});
+    lazyRelease();await page.waitForFunction(()=>workspaceReady&&!initializing);
+    check('input arriving during task restore remains a new unsent question',await page.evaluate(()=>selected===null&&draft.composerTexts.new==='恢复期间输入的新研究问题')&&await page.locator('#chat-input').inputValue()==='恢复期间输入的新研究问题');
+    check('late input does not overwrite the original task draft',await page.evaluate(({id,text})=>(draft.composerTexts[id]||'')===text,lazyBefore));
+  }finally{lazyRelease();await page.unroute(lazyPattern,lazyGate)}
+  await page.evaluate(id=>loadSelectedTask(id),lazyBefore.id);
+  await page.waitForFunction(id=>selected?.id===id&&!selectingTaskId,lazyBefore.id);
+  check('task selection reads full details after an interrupted restoration',await page.evaluate(id=>selected.id===id&&!selected.workspace_summary_version&&draft.composerTexts.new==='恢复期间输入的新研究问题',lazyBefore.id));
+  check('original task draft returns after leaving the new question',await page.locator('#chat-input').inputValue()===lazyBefore.text);
+"""
+CHECKS=BOOTSTRAP_CHECKS+CHECKS
+
+
 def fixture(output):
     target,digest=original_fixture(output)
     text=target.read_text()
@@ -57,6 +109,15 @@ def fixture(output):
     return target,digest
 
 
+def run():
+    baseline = notebook.baseline
+    previous_fixture = baseline.browser_fixture
+    try:
+        baseline.browser_fixture = fixture
+        return baseline.run()
+    finally:
+        baseline.browser_fixture = previous_fixture
+
+
 if __name__=='__main__':
-    notebook.baseline.browser_fixture=fixture
-    notebook.baseline.run()
+    run()
