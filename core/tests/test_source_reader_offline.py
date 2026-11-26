@@ -5,8 +5,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.error import URLError
 from unittest.mock import patch
 
+from lxml import html
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
@@ -197,20 +199,26 @@ class SourceReaderTests(unittest.TestCase):
         self.assertEqual(result["materials"][0]["snapshot"], task["materials"][0]["snapshot"])
         report = self.agent.export(task["id"])
         self.assertTrue(report["content"]["reading_coverage"])
-        self.assertIn("本轮读取", report["html"])
-        self.assertIn("查看原件读取范围", report["html"])
-        self.assertIn("关键词定位不证明", report["html"])
+        page = html.document_fromstring(report['html'])
+        main, = page.xpath('//main')
+        self.assertNotIn('本轮读取', main.text_content())
+        link, = main.xpath('.//a[@href="#scope" and @aria-haspopup="dialog"]')
+        scope = page.get_element_by_id(link.get('href')[1:]).text_content()
+        self.assertIn('原件读取范围', scope)
+        self.assertIn('读取范围不等于核验通过', scope)
         altered = copy.deepcopy(result)
         altered["reasoning_state"]["reading"]["bundle"]["coverage"][0]["omitted_characters"] = 0
         with self.assertRaises(ContractError):
             compose(altered)
 
-    def test_four_call_limit_retains_read_evidence_without_spending_delivery_reserve(self):
+    def test_four_call_limit_uses_delivery_reserve_for_one_final_attempt(self):
         task = self.task(limits={"model_calls":4})
-        result, _ = self.run_model(task,[fixtures.AutonomousReasoningTests.plan(task), {"requests":self.selection(task)},
-                                        {"evidence_specs":[fixtures.AutonomousReasoningTests.policy_spec(task)]}])
-        self.assertEqual(result["status"],"部分完成",result.get("error"))
-        self.assertEqual(result["ledger"]["used"]["model_calls"],3)
+        result, model = self.run_model(task, [fixtures.AutonomousReasoningTests.plan(task),
+            {"requests": self.selection(task)}, {"evidence_specs": [fixtures.AutonomousReasoningTests.policy_spec(task)]},
+            fixtures.AutonomousReasoningTests.answer()])
+        self.assertEqual(result["status"], "已完成", result.get("error"))
+        self.assertEqual(result["ledger"]["used"]["model_calls"], 4)
+        self.assertEqual(len(model.requests), 4)
         self.assertEqual(len(result["evidence"]),1)
         self.assertTrue(result["delivery"])
 
@@ -221,21 +229,115 @@ class SourceReaderTests(unittest.TestCase):
         self.assertEqual(len(model.requests),1)
         self.assertIn("长原件读取与提取额度不足","".join(result["gaps"]))
 
+    def test_final_transport_failure_delivers_verified_evidence_with_original_charge(self):
+        for call_limit in (4, 8):
+            with self.subTest(call_limit=call_limit):
+                task = self.task(limits={"model_calls": call_limit})
+
+                def interrupted(_):
+                    raise URLError("controlled final analysis outage")
+
+                result, model = self.run_model(task, [fixtures.AutonomousReasoningTests.plan(task),
+                    {"requests": self.selection(task)},
+                    {"evidence_specs": [fixtures.AutonomousReasoningTests.policy_spec(task)]}, interrupted])
+                saved = self.agent.archive.get(task["id"])
+                self.assertEqual(saved["status"], "部分完成", result.get("error"))
+                self.assertEqual(saved["ledger"]["used"]["model_calls"], 4)
+                self.assertEqual(len(model.requests), 4)
+                self.assertEqual(saved["ledger"]["dispatches"][-1]["failure_code"], "connection_failed")
+                self.assertEqual(len(saved["evidence"]), 1)
+                self.assertEqual(saved["questions"][0]["status"], "未回答")
+                self.assertFalse(saved["theses"])
+                self.assertTrue(any(gap.get("category") == "analysis_transport" for gap in saved["gap_records"]))
+                report = self.agent.export(task["id"])
+                self.assertIn("政策自2026年7月21日起生效。", report["html"])
+                self.assertEqual(report["content"]["evidence"], saved["evidence"])
+                self.assertIn("模型分析未完成，已保留可核对的依据，相关结论待补。", report["content"]["limitations"])
+                if call_limit == 4:
+                    self.assertEqual(saved["reasoning_state"]["final_delivery"]["status"], "未采用")
+
+    def test_cancel_during_final_transport_failure_does_not_freeze_a_report(self):
+        task = self.task(limits={"model_calls": 4})
+
+        def interrupted(_):
+            self.agent.cancel(task["id"])
+            raise URLError("controlled disconnect after cancel")
+
+        result, model = self.run_model(task, [fixtures.AutonomousReasoningTests.plan(task),
+            {"requests": self.selection(task)},
+            {"evidence_specs": [fixtures.AutonomousReasoningTests.policy_spec(task)]}, interrupted])
+        self.assertEqual(result["status"], "已取消")
+        self.assertIsNone(result["delivery"])
+        self.assertEqual(len(result["evidence"]), 1)
+        self.assertEqual(result["ledger"]["used"]["model_calls"], len(model.requests))
+        self.assertEqual(len(model.requests), 4)
+        self.assertFalse(any(gap.get("category") == "analysis_transport" for gap in result["gap_records"]))
+
+    def test_invalid_final_response_preserves_verified_evidence_and_saves_report(self):
+        def envelope(content, **fields):
+            return json.dumps(dict(choices=[dict(finish_reason="stop",
+                message=dict(role="assistant", content=content))], **fields)).encode()
+
+        cases = (
+            ("empty_content", envelope("  ")),
+            ("invalid_response_shape", b'{"choices":[{}]}'),
+            ("invalid_response_json", b'PRIVATE_INVALID_BODY_DO_NOT_KEEP'),
+            ("invalid_response_shape", envelope("{}", usage={"total_tokens": float("nan")})),
+            ("duplicate_response_field",
+             b'{"choices":[],"choices":[{"message":{"content":"PRIVATE_INVALID_BODY_DO_NOT_KEEP"}}]}'),
+            ("duplicate_response_field",
+             b'{"choices":[{"message":{"content":"PRIVATE_INVALID_BODY_DO_NOT_KEEP","content":"{}"}}]}'),
+        )
+        for expected, response in cases:
+            with self.subTest(failure=expected, body_length=len(response)):
+                task = self.agent.create("这份政策什么时候生效？", objects=["材料示例政策"],
+                    cutoff=fixtures.CUTOFF, limits={"model_calls": 3})
+                quote = "政策自2026年7月21日起生效。"
+                task = self.agent.add_material(task["id"], "policy.txt",
+                    ("材料示例政策\n\n发布日期：2026年7月19日。\n\n" + quote).encode())
+                plan = fixtures.AutonomousReasoningTests.plan(task)
+                extract = {"evidence_specs": [fixtures.AutonomousReasoningTests.policy_spec(task)]}
+                with patch.object(self.agent.model, "_request_bytes",
+                        side_effect=[envelope(json.dumps(plan)), envelope(json.dumps(extract)), response]) as dispatch:
+                    result = self.agent.start(task["id"])
+                saved = self.agent.archive.get(task["id"])
+                self.assertEqual(saved["status"], "部分完成", result.get("error"))
+                self.assertEqual(saved["ledger"]["used"]["model_calls"], dispatch.call_count)
+                self.assertEqual(dispatch.call_count, 3)
+                self.assertEqual(saved["ledger"]["used"]["data_requests"], 0)
+                event = saved["ledger"]["dispatches"][-1]
+                self.assertEqual((event["research_phase"], event["failure_code"], event["status"]),
+                    ("analyze", expected, "失败"))
+                self.assertEqual(saved["reasoning_state"]["final_delivery"]["status"], "未采用")
+                self.assertEqual(saved["questions"][0]["status"], "未回答")
+                self.assertFalse(saved["theses"] or saved["tracking"])
+                self.assertEqual(len(saved["evidence"]), 1)
+                report = self.agent.export(task["id"])
+                self.assertIn(quote, report["html"])
+                self.assertEqual(report["content"]["evidence"], saved["evidence"])
+                self.assertNotIn("PRIVATE_INVALID_BODY_DO_NOT_KEEP", canonical(saved) + report["html"])
+
     def test_reading_and_extraction_checkpoints_reused_after_analysis_interrupt(self):
         task=self.task()
-        failed,first=self.run_model(task,[fixtures.AutonomousReasoningTests.plan(task),{"requests":self.selection(task)},
-                                         {"evidence_specs":[fixtures.AutonomousReasoningTests.policy_spec(task)]},"not-json"])
-        self.assertEqual(failed["status"],"失败")
+
+        def interrupted(_):
+            self.agent.cancel(task['id'])
+            raise URLError('controlled analysis stop')
+
+        stopped,first=self.run_model(task,[fixtures.AutonomousReasoningTests.plan(task),{"requests":self.selection(task)},
+                                         {"evidence_specs":[fixtures.AutonomousReasoningTests.policy_spec(task)]},interrupted])
+        self.assertEqual(stopped["status"],"已取消")
+        self.assertIsNone(stopped['delivery'])
         self.assertEqual(len(first.requests),4)
-        self.assertTrue(failed.get("reasoning_state",{}).get("reading"))
-        self.assertEqual(failed["ledger"]["used"]["model_calls"],4)
+        self.assertTrue(stopped.get("reasoning_state",{}).get("reading"))
+        self.assertEqual(stopped["ledger"]["used"]["model_calls"],4)
         final,resumed=self.run_model(task,[fixtures.AutonomousReasoningTests.answer()])
         self.assertEqual(final["status"],"已完成",final.get("error"))
         self.assertEqual(len(resumed.requests),1)
         self.assertEqual(final["ledger"]["used"]["model_calls"],5)
         self.assertEqual(final["cutoff"],task["cutoff"])
         self.assertEqual(final["batch"],2)
-        self.assertEqual(final["reasoning_state"]["reading"],failed["reasoning_state"]["reading"])
+        self.assertEqual(final["reasoning_state"]["reading"],stopped["reasoning_state"]["reading"])
 
     def test_cancelled_selection_is_not_accepted_and_resume_does_not_refund_calls(self):
         task=self.task()
