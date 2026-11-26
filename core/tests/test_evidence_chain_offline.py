@@ -19,13 +19,25 @@ from unittest.mock import Mock, patch
 from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, fingerprint, validate_evidence
 from researchhelper.engine import ResearchAgent
-from researchhelper.evidence import CAPABILITIES, FIELD_REGISTRY, EvidenceCollector, business_payload
+from researchhelper.evidence import (CAPABILITIES, FIELD_REGISTRY, EvidenceCollector,
+    current_snapshot_reference, direct_code_reference)
 from researchhelper.reports import compose
 
 ROOT = Path(__file__).resolve().parents[2]
 PARAMS = {"ts_code": "600000.SH", "start_date": "20260719", "end_date": "20260719", "fields": "ts_code,trade_date,close,amount"}
 IFIND_PARAMS = {"codes": "600000.SH", "indicators": "close", "startdate": "2026-07-19", "enddate": "2026-07-19",
                 "functionpara": {"Currency": "RMB", "CPS": "1", "Fill": "Omit"}}
+
+
+QUOTE_RESPONSE = {"errorcode": 0, "tables": [
+    {"thscode": "600000.SH", "time": ["2026-07-19"], "table": {"close": [10]}}]}
+DAILY_ROWS = [{"ts_code": "600000.SH", "trade_date": "20260719", "close": 10, "amount": 2}]
+
+
+def isolated_response(event):
+    # The tests supply replies locally. The actual acquisition code creates
+    # the ledger binding from these fixture transport outcomes.
+    event.update(transport_isolated=True, network_request_started=True, network_worker_reaped=True)
 
 
 def publication(at="2026-07-19"):
@@ -43,7 +55,8 @@ class EvidenceChainTests(unittest.TestCase):
         folder = tempfile.TemporaryDirectory(prefix="evidence-chain-", dir=ROOT / "result/acceptance")
         self.addCleanup(folder.cleanup)
         self.agent = ResearchAgent(ResearchArchive(folder.name), ROOT, offline=True)
-        self.task = self.agent.create("核验原值", objects=["材料示例公司"], cutoff="2026-07-20T18:00:00+08:00",
+        self.addCleanup(self.agent.close_runtime)
+        self.task = self.agent.create("核验原值", objects=["材料示例公司", "600000.SH"], cutoff="2026-07-20T18:00:00+08:00",
                                       questions=[{"id": "q1", "question": "原值是多少", "kind": "fact"}])
 
     def snapshot(self, source="tinyshare", payload=None, params=None):
@@ -51,6 +64,46 @@ class EvidenceChainTests(unittest.TestCase):
         result = self.agent.add_snapshot(self.task["id"], source, "daily" if source == "tinyshare" else "cmd_history_quotation",
                                           params or (PARAMS if source == "tinyshare" else IFIND_PARAMS), response)
         return result["source_records"][-1]
+
+    def create_current(self):
+        self.task = self.agent.create("核验600000.SH本次取得的原值", objects=["600000.SH"], research_mode="current",
+            questions=[{"id": "q1", "question": "原值是多少", "kind": "fact"}])
+
+    def acquired(self, source="tinyshare", rows=None):
+        self.create_current()
+        collector = EvidenceCollector(False)
+        if source == "tinyshare":
+            def receive(task, operation, parameters, token, timeout, event, provider):
+                isolated_response(event)
+                event["sdk_wire_requests_started"] = 1
+                return copy.deepcopy(DAILY_ROWS if rows is None else rows)
+            with patch.object(collector, "_require_tinyshare", return_value=object()), \
+                    patch.object(collector, "_tinyshare_rows", side_effect=receive):
+                record = collector.external(self.task, source, "daily", PARAMS, {"token": "fixture"})
+        else:
+            def receive(task, request, timeout, event):
+                isolated_response(event)
+                return copy.deepcopy(QUOTE_RESPONSE)
+            with patch.object(collector, "_http_json", side_effect=receive):
+                record = collector.external(self.task, source, "cmd_history_quotation", IFIND_PARAMS,
+                                            {"access_token": "fixture"})
+        self.task["source_records"].append(record)
+        self.task = self.agent.archive.save(self.task)
+        return record
+
+    def current_spec(self, artifact, **overrides):
+        locator = {"row": 0, "field": "close"}
+        if artifact["source"] == "ifind":
+            locator["table"] = 0
+        result = self.spec(artifact, object="600000.SH", record_locator=locator,
+            published_at=None, publication=dict(at=None, basis_ref=None, precision="未知",
+                timezone="未知", certainty="未知", basis="当前取数回执与首次公开时间分开"),
+            availability=current_snapshot_reference(self.task, artifact),
+            direct_code_reference=direct_code_reference(self.task, artifact))
+        result.pop("identity")
+        self.assertIsNotNone(result["availability"])
+        self.assertIsNotNone(result["direct_code_reference"])
+        return dict(result, **overrides)
 
     def spec(self, artifact, **overrides):
         result = {"id": "close_value", "artifact_id": artifact["id"], "object": "材料示例公司", "record_locator": {"row": 0, "field": "close"},
@@ -66,10 +119,14 @@ class EvidenceChainTests(unittest.TestCase):
         return self.agent.start(self.task["id"], {"evidence_specs": [spec], "answers": {"q1": {"answer": "核查原文或原始字段。", "refs": [spec["id"]]}}})
 
     def material(self, text="政策自2026年7月19日起生效。", **overrides):
-        task = self.agent.add_material(self.task["id"], "policy.txt", text.encode())
+        release = "发布日期：2026年7月19日。"
+        payload = (release + "\n\n" + text).encode()
+        task = self.agent.add_material(self.task["id"], "policy.txt", payload)
         record = task["materials"][-1]
-        spec = {"id": "policy_fact", "artifact_id": record["id"], "object": "材料示例公司", "record_locator": {"part": "段落1"},
-                "text": text, "published_at": "2026-07-19", "publication": publication(), "period": "2026年7月",
+        basis = dict(kind="material", artifact_id=record["id"], snapshot_hash=record["snapshot_hash"],
+                     part="段落1", quote=release)
+        spec = {"id": "policy_fact", "artifact_id": record["id"], "object": "材料示例公司", "record_locator": {"part": "段落2"},
+                "text": text, "published_at": "2026-07-19", "publication": dict(publication(), basis_ref=basis), "period": "2026年7月",
                 "nature": "合同政策条款", "unit": "不适用", "question_ids": ["q1"], "review": review("合同政策条款")}
         spec.update(overrides)
         return record, spec
@@ -84,36 +141,41 @@ class EvidenceChainTests(unittest.TestCase):
     def filing(self, directory=None, text="已实现营业收入100百万元。"):
         task = self.agent.add_filing(self.task["id"], directory or self.directory(), "original.txt", text.encode() if text else None)
         record = task["source_records"][-1]
+        released = record["directory"]["published_at"]
+        basis = dict(kind="directory", artifact_id=record["id"], snapshot_hash=record["hash"], field="published_at")
         spec = {"id": "revenue", "artifact_id": record["id"], "object": "材料示例公司", "record_locator": {"part": "段落1"},
-                "text": text, "published_at": record["directory"]["published_at"], "publication": publication(record["directory"]["published_at"]),
+                "text": text, "published_at": released, "publication": dict(publication(released), basis_ref=basis),
                 "period": "2026年上半年", "nature": "已实现事实", "unit": "百万元", "raw_unit": "百万元", "raw_token": "100",
                 "raw_value": 100, "value": 100, "conversion_factor": 1, "question_ids": ["q1"], "review": review()}
         return record, spec
 
     def test_tinyshare_original_cell_and_two_distinct_receipts(self):
-        task = self.run_spec(self.spec(self.snapshot()))
+        task = self.run_spec(self.current_spec(self.acquired()))
         self.assertEqual(task["status"], "已完成", task.get("error"))
         evidence = task["evidence"][0]
         self.assertEqual(evidence["source_receipt"]["component"], "EvidenceCollector")
         self.assertEqual(evidence["applicability_receipt"]["component"], "ResearchAnalyzer")
-        self.assertEqual(task["ledger"]["used"]["data_requests"], 0)
+        self.assertEqual(task["ledger"]["used"]["data_requests"], 1)
+        self.assertEqual(evidence["identity"]["mode"], "direct_provider_observation")
+        self.assertIsNone(evidence["published_at"])
         self.assertFalse(task["synthetic"])
 
     def test_ifind_original_table_and_currency_definition(self):
-        raw = {"errorcode": 0, "tables": [{"thscode": "600000.SH", "time": ["2026-07-19"], "table": {"close": [10]}}]}
-        record = self.snapshot("ifind", raw)
-        final = self.run_spec(self.spec(record, record_locator={"table": 0, "row": 0, "field": "close"}))
+        record = self.acquired("ifind")
+        final = self.run_spec(self.current_spec(record))
         self.assertEqual(final["status"], "已完成", final.get("error"))
+        self.assertEqual(final["evidence"][0]["unit"], "元")
+        self.assertEqual(final["evidence"][0]["raw_value"], 10)
 
     def test_thousand_yuan_conversion_preserves_raw_value(self):
-        spec = self.spec(self.snapshot(), record_locator={"row": 0, "field": "amount"}, raw_value=2, raw_unit="千元", value=2000, conversion_factor=1000)
+        spec = self.current_spec(self.acquired(), record_locator={"row": 0, "field": "amount"}, raw_value=2, raw_unit="千元", value=2000, conversion_factor=1000)
         final = self.run_spec(spec)
         self.assertEqual(final["status"], "已完成", final.get("error"))
         self.assertEqual(final["evidence"][0]["raw_value"], 2)
         self.assertEqual(final["evidence"][0]["value"], 2000)
 
     def test_bad_numeric_value_is_rejected_not_repaired(self):
-        final = self.run_spec(self.spec(self.snapshot(), value=11))
+        final = self.run_spec(self.current_spec(self.acquired(), value=11))
         self.assertEqual(final["status"], "部分完成", final.get("error"))
         self.assertEqual(final["evidence"], [])
         self.assertIn("换算", final["rejected_evidence"][0]["rejection"])
@@ -121,13 +183,18 @@ class EvidenceChainTests(unittest.TestCase):
     def test_date_only_not_available_intraday(self):
         self.task["cutoff"] = "2026-07-19T10:00:00+08:00"
         self.agent.archive.save(self.task)
-        final = self.run_spec(self.spec(self.snapshot()))
+        _, spec = self.material()
+        final = self.run_spec(spec)
         self.assertEqual(final["status"], "部分完成")
-        self.assertEqual(final["rejected_evidence"][0]["source_check"], "通过")
-        self.assertEqual(final["rejected_evidence"][0]["applicability_check"], "不通过")
+        rejection = final["rejected_evidence"][0]
+        self.assertEqual(rejection["source_check"], "通过")
+        self.assertEqual(rejection["applicability_check"], "不通过")
+        self.assertIn("晚于研究截止时点", rejection["rejection"])
 
     def test_fetch_timestamp_not_substituted_for_publication(self):
-        final = self.run_spec(self.spec(self.snapshot(), publication={}))
+        record = self.acquired()
+        observed = record["obtained_at"]
+        final = self.run_spec(self.current_spec(record, published_at=observed, publication=publication(observed)))
         self.assertEqual(final["status"], "部分完成")
         self.assertIn("首次公开", final["rejected_evidence"][0]["rejection"])
 
@@ -140,15 +207,19 @@ class EvidenceChainTests(unittest.TestCase):
         self.assertIn("证券代码", final["rejected_evidence"][0]["rejection"])
 
     def test_response_date_outside_request_is_rejected(self):
-        raw = {"code": 0, "data": [{"ts_code": "600000.SH", "trade_date": "20260718", "close": 10}]}
-        final = self.run_spec(self.spec(self.snapshot(payload=raw), period="2026-07-18"))
+        record = self.acquired(rows=[dict(DAILY_ROWS[0], trade_date="20260718")])
+        final = self.run_spec(self.current_spec(record, period="2026-07-18"))
         self.assertEqual(final["status"], "部分完成")
         self.assertIn("请求范围", final["rejected_evidence"][0]["rejection"])
 
     def test_forecast_cannot_pass_realized_only_review(self):
-        final = self.run_spec(self.spec(self.snapshot(), nature="管理层展望"))
+        _, spec = self.material(text="管理层预计下期收入可能增长。", nature="管理层展望", review=review())
+        final = self.run_spec(spec)
         self.assertEqual(final["status"], "部分完成")
-        self.assertIn("预测", final["rejected_evidence"][0]["rejection"])
+        rejection = final["rejected_evidence"][0]
+        self.assertEqual(rejection["source_check"], "通过")
+        self.assertEqual(rejection["applicability_check"], "不通过")
+        self.assertIn("预测", rejection["rejection"])
 
     def test_material_keeps_original_bytes_and_exact_paragraph(self):
         _, spec = self.material()
@@ -232,7 +303,7 @@ class EvidenceChainTests(unittest.TestCase):
         self.assertIn("归档", final["rejected_evidence"][0]["rejection"])
 
     def test_tampered_application_conditions_fail_report_recheck(self):
-        final = self.run_spec(self.spec(self.snapshot()))
+        final = self.run_spec(self.current_spec(self.acquired()))
         final["evidence"][0]["applicability_review"]["conditions"] = ["改写条件"]
         with self.assertRaises(ContractError):
             compose(final)
@@ -245,7 +316,7 @@ class EvidenceChainTests(unittest.TestCase):
         self.assertIn("不存在", final["rejected_evidence"][0]["rejection"])
 
     def test_boolean_conversion_factor_is_not_a_numeric_contract(self):
-        final = self.run_spec(self.spec(self.snapshot(), conversion_factor=True))
+        final = self.run_spec(self.current_spec(self.acquired(), conversion_factor=True))
         self.assertEqual(final["status"], "部分完成", final.get("error"))
         self.assertIn("换算倍数", final["rejected_evidence"][0]["rejection"])
 
@@ -285,10 +356,11 @@ class EvidenceChainTests(unittest.TestCase):
 
     def test_doc_registry_never_promotes_offline_sample_to_live_permission(self):
         self.run_spec(self.spec(self.snapshot()))
-        for definition in FIELD_REGISTRY.values():
-            self.assertEqual(definition["permission"], "未验收")
-            self.assertEqual(definition["live_samples"], [])
-        self.assertIn("fund_daily", CAPABILITIES["tinyshare"]["endpoints"])
+        for source in ("ifind", "tinyshare"):
+            self.assertEqual(CAPABILITIES[source]["state"], "真实权限未验收")
+        for operation in ("ifind.cmd_history_quotation", "tinyshare.daily", "tinyshare.fund_daily"):
+            self.assertEqual(FIELD_REGISTRY[operation]["permission"], "未验收")
+            self.assertEqual(FIELD_REGISTRY[operation]["live_samples"], [])
 
     def test_mocked_tinyshare_uses_isolated_token_timeout_and_ledger(self):
         fake_result = Mock()
@@ -303,18 +375,24 @@ class EvidenceChainTests(unittest.TestCase):
         self.assertNotIn("independent-fake-token", json.dumps(record))
 
     def test_mocked_ifind_dispatch_checkpoint_and_no_silent_fallback(self):
-        raw = {"errorcode": 0, "tables": [{"thscode": "600000.SH", "time": ["2026-07-19"], "table": {"close": [10]}}]}
-        self.agent.offline = False
-        self.agent.collector.offline = False
+        self.create_current()
+        self.agent.offline = self.agent.collector.offline = False
         self.agent.source_credentials = {"ifind": {"access_token": "independent-fake-token"}}
-        need = {"id": "daily_close", "operation": "cmd_history_quotation", "parameters": IFIND_PARAMS, "question_ids": ["q1"]}
-        spec = self.spec({"id": "pending"}, record_locator={"table": 0, "row": 0, "field": "close"})
-        spec.pop("artifact_id")
-        spec["request_id"] = "daily_close"
-        with patch("urllib.request.urlopen", return_value=io.BytesIO(json.dumps(raw).encode())) as transport:
-            final = self.agent.start(self.task["id"], {"data_requests": [need], "evidence_specs": [spec], "answers": {"q1": {"answer": "10元", "refs": [spec["id"]]}}})
+        need = dict(id="daily_close", source="ifind", operation="cmd_history_quotation",
+                    parameters=IFIND_PARAMS, question_ids=["q1"], selection_reason="核验收盘原值")
+        def receive(task, request, timeout, event):
+            self.assertEqual(request.get_header("Access_token"), "independent-fake-token")
+            persisted = self.agent.archive.get(task["id"])
+            self.assertEqual(persisted["ledger"]["used"]["data_requests"], 1)
+            self.assertEqual(persisted["ledger"]["dispatches"][-1]["status"], "已派发")
+            isolated_response(event)
+            return copy.deepcopy(QUOTE_RESPONSE)
+        with patch.object(self.agent.collector, "_http_json", side_effect=receive) as transport:
+            self.task = self.agent.start(self.task["id"], {"data_requests": [need]}, defer_delivery=True)
+            record = self.task["source_records"][0]
+            final = self.run_spec(self.current_spec(record))
         self.assertEqual(final["status"], "已完成", final.get("error"))
-        self.assertEqual(transport.call_count, 1)
+        transport.assert_called_once()
         self.assertEqual(final["ledger"]["used"]["data_requests"], 1)
         self.assertEqual(final["source_records"][0]["data_need_ids"], ["daily_close"])
         self.assertNotIn("independent-fake-token", json.dumps(final))
