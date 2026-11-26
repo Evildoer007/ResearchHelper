@@ -68,6 +68,9 @@ class APIValueReferenceTests(unittest.TestCase):
         self.assertEqual(result["raw_value"], raw)
         self.assertEqual(result["value"], 123456789012345678901234567890123)
         self.assertEqual((result["raw_unit"], result["unit"], result["conversion_factor"]), ("千元", "元", 1000))
+        from researchhelper.publication_content import publication_dataset
+        row, = publication_dataset({"evidence": [result]})["rows"]
+        self.assertEqual(row[3:5], [raw, "千元"])
 
     def test_unrepresentable_decimal_not_silently_rounded(self):
         record = self.fixture.record()
@@ -216,7 +219,7 @@ class AcquiredAPIValueWorkflowTests(unittest.TestCase):
         self.assertNotIn("api_value_reference", item)
 
     def test_identity_time_and_semantic_reviews_are_not_generated(self):
-        for key in ("identity", "availability", "review"):
+        for key in ("direct_code_reference", "availability", "review"):
             spec = self.proposal()
             spec.pop(key)
             with self.subTest(field=key), self.assertRaises(ContractError):
@@ -224,7 +227,7 @@ class AcquiredAPIValueWorkflowTests(unittest.TestCase):
 
     def test_wrong_identity_and_unknown_currency_still_fail(self):
         spec = self.proposal()
-        spec["identity"]["provider_code"] = "510500.SH"
+        spec["direct_code_reference"]["provider_code"] = "510500.SH"
         with self.assertRaises(ContractError):
             self.approved(spec)
         spec = self.proposal()
