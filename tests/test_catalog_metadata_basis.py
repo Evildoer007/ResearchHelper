@@ -1,28 +1,27 @@
-"""Readonly replay of actual originals, not new live extraction acceptance."""
-import hashlib
-import json
+"""Verify catalogue provenance on two independent offline PDF disclosures."""
 import unittest
 from unittest.mock import patch
 
-from tests import ROOT
-from researchhelper.catalog_metadata import POLICY, scope_basis
+from tests.fee_disclosure_fixture import fee_task
+from researchhelper.catalog_metadata import POLICY, QUERY_POLICY, scope_basis
 from researchhelper.contracts import ContractError, fingerprint
 from researchhelper.planning import input_fingerprint
 from researchhelper.reasoning import analysis_contract
 from researchhelper.argument_support import review_request, review_messages
 
-ORIGINAL = ROOT/'result/acceptance/autonomous-data-phase-6hjk3w0z/task.json'
-
 
 class CatalogMetadataBasisTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.original_digest = hashlib.sha256(ORIGINAL.read_bytes()).hexdigest()
-        cls.retained = json.loads(ORIGINAL.read_text())
+        cls.retained = fee_task(multiple_catalogue_rows=True)
+        cls.retained.pop(POLICY, None)
+        cls.retained.pop(QUERY_POLICY, None)
+        cls.retained['input_hash'] = input_fingerprint(cls.retained)
+        cls.original_digest = fingerprint(cls.retained)
 
     @classmethod
     def tearDownClass(cls):
-        assert hashlib.sha256(ORIGINAL.read_bytes()).hexdigest() == cls.original_digest
+        assert fingerprint(cls.retained) == cls.original_digest
 
     def setUp(self):
         # Change only this detached metadata policy, never old research files
@@ -33,11 +32,11 @@ class CatalogMetadataBasisTests(unittest.TestCase):
         guard = patch('socket.socket.connect', side_effect=AssertionError('Offline replay'))
         guard.start(); self.addCleanup(guard.stop)
 
-    def test_actual_directory_dates_are_not_first_publication(self):
+    def test_supplier_directory_dates_are_not_first_publication(self):
         result = scope_basis(self.task)
         rows = {row['provider_code']: row for row in result['records']}
-        self.assertEqual(rows['510300.SH']['supplier_announcement_date'], '2026-08-29')
-        self.assertEqual(rows['159919.SZ']['supplier_announcement_date'], '2026-08-31')
+        self.assertEqual(rows['510300.SH']['supplier_announcement_date'], '2026-07-21')
+        self.assertEqual(rows['510500.SH']['supplier_announcement_date'], '2026-07-22')
         self.assertTrue(all(row['supplier_publication_at'] is None for row in rows.values()))
         self.assertTrue(all(row['query_completeness'] == '未证实' for row in rows.values()))
         for key in ('financial_approval', 'first_publication_approved', 'historical_availability_approved',
