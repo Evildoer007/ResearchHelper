@@ -1,15 +1,20 @@
 """Market-background source contracts; every provider response is fabricated."""
 
 import json
+import copy
+from pathlib import Path
 import sys
 import types
 import unittest
 from unittest.mock import Mock, patch
 
 from researchhelper.analyzer import ResearchAnalyzer
+from researchhelper.archive import ResearchArchive
+from researchhelper.engine import ResearchAgent
+from tests.identity_fixture_support import synthetic_identity_basis
 from researchhelper.contracts import ContractError, budget, fingerprint, validate_evidence
 from researchhelper.evidence import (CAPABILITIES, FIELD_REGISTRY, TINYSHARE_DOCS, EvidenceCollector,
-    candidate_evidence, extract_material, material_record, snapshot_record, validate_tinyshare_request)
+    candidate_evidence, current_snapshot_reference, direct_code_reference, extract_material, material_record, snapshot_record, validate_tinyshare_request)
 
 
 class MarketBackgroundSourceTests(unittest.TestCase):
@@ -23,6 +28,8 @@ class MarketBackgroundSourceTests(unittest.TestCase):
         self.text = "合成验收材料，非真实市场数据。600000.SH市场背景指标于2026年10月1日公布。"
         self.material = material_record(self.task, extract_material("publication.txt", self.text.encode()), self.text.encode())
         self.task["materials"].append(self.material)
+        self.identity = synthetic_identity_basis(self.task, 'tinyshare', '600000.SH',
+                                                 '2026-09-01', '2026-09-30')
         network = patch("socket.socket.connect", side_effect=AssertionError("External networking forbidden"))
         network.start()
         self.addCleanup(network.stop)
@@ -40,8 +47,7 @@ class MarketBackgroundSourceTests(unittest.TestCase):
         spec = {"id": "market_" + field, "artifact_id": artifact["id"], "object": "600000.SH", "record_locator": {"row": 0, "field": field},
                 "period": "2026-09-30", "nature": "已实现事实", "raw_value": raw_value, "raw_unit": definition["raw_unit"],
                 "value": raw_value * definition["factor"], "unit": definition["unit"], "conversion_factor": definition["factor"],
-                "question_ids": ["q1"], "published_at": "2026-10-01", "identity": {"provider_code": "600000.SH", "object": "600000.SH",
-                    "basis": "任务明确指定单只证券代码", "valid_from": "2026-01-01", "valid_to": "2026-12-31"},
+                "question_ids": ["q1"], "published_at": "2026-10-01", "identity": copy.deepcopy(self.identity),
                 "publication": {"at": "2026-10-01", "precision": "日", "timezone": "Asia/Shanghai", "certainty": "已确认",
                     "basis": "留存合成原文披露时间，非交易日推定", "basis_ref": {"artifact_id": self.material["id"],
                     "snapshot_hash": self.material["snapshot_hash"], "part": "段落1", "quote": self.text}},
@@ -55,6 +61,49 @@ class MarketBackgroundSourceTests(unittest.TestCase):
         item = ResearchAnalyzer().assess(self.task, candidate, spec["review"], self.task["source_records"])
         validate_evidence(item, self.task)
         return item
+
+    def approved_current(self, field, raw_value):
+        """Use an isolated SDK worker and loopback HTTP, never a fabricated receipt."""
+        from tests import test_sdk_wire_budget_offline as wire
+        if not hasattr(self, 'current_sdk'):
+            self.current_sdk = wire.SDKWireBudgetTests()
+            self.addCleanup(self.current_sdk.doCleanups)
+            self.current_sdk.setUp()
+            self.current_sdk.mode = 'query'
+            self.current_agent = ResearchAgent(ResearchArchive(self.current_sdk.root / 'market-store'),
+                Path(__file__).resolve().parents[2], offline=True,
+                require_argument_support=getattr(self, 'require_argument_support', False))
+            self.addCleanup(self.current_agent.close_runtime)
+        fixture = self.current_sdk
+        fixture.response_rows = [dict(ts_code='600000.SH', trade_date='20260930', **{field: raw_value})]
+        with patch('researchhelper.engine.now', return_value='2026-10-02T18:00:00+08:00'), \
+             patch('researchhelper.evidence.now', return_value='2026-10-02T18:00:00+08:00'), \
+             patch.dict('os.environ', dict(SDK_LOCAL_ENDPOINT=f'http://127.0.0.1:{fixture.server.server_port}',
+                                          SDK_LOCAL_MODE='query', NO_PROXY='*')):
+            task = self.current_agent.create('核对600000.SH本次取得的合成市场读数', objects=['600000.SH'],
+                                             research_mode='current', questions=[dict(id='q1',
+                                                 question='核对当前取得的市场指标原值', kind='fact')])
+            params = dict(self.params, fields='ts_code,trade_date,' + field)
+            record = fixture.collector.external(task, 'tinyshare', 'daily_basic', params, {'token': 'synthetic-only'})
+            task['source_records'].append(record)
+        spec = self.spec(record, field, raw_value)
+        spec.pop('identity')
+        spec.update(availability=current_snapshot_reference(task, record),
+            direct_code_reference=direct_code_reference(task, record), published_at=None,
+            publication=dict(at=None, basis_ref=None, precision='未知', timezone='未知', certainty='未知',
+                             basis='合成HTTP响应，只核对当前版本，不证明历史首发时间'))
+        self.assertIsNotNone(spec['availability'])
+        self.assertIsNotNone(spec['direct_code_reference'])
+        item = candidate_evidence(task, record, spec)
+        item = ResearchAnalyzer().assess(task, item, spec['review'], [record])
+        validate_evidence(item, task)
+        self.assertEqual(item['identity']['mode'], 'direct_provider_observation')
+        self.assertIsNone(item['published_at'])
+        self.assertEqual(task['ledger']['used']['data_requests'], 1)
+        self.assertEqual(task['ledger']['dispatches'][0]['sdk_wire_requests_started'], 1)
+        self.assertTrue(task['ledger']['dispatches'][0]['network_worker_reaped'])
+        self.current_task, self.current_spec = task, spec
+        return record, item
 
     def test_daily_basic_registration_is_independent_and_does_not_claim_permissions(self):
         definition = FIELD_REGISTRY["tinyshare.daily_basic"]
@@ -78,8 +127,7 @@ class MarketBackgroundSourceTests(unittest.TestCase):
         for field, definition in FIELD_REGISTRY["tinyshare.daily_basic"]["fields"].items():
             with self.subTest(field=field):
                 raw = 3.125
-                artifact = self.snapshot(field, raw)
-                item = self.approve(artifact, self.spec(artifact, field, raw))
+                artifact, item = self.approved_current(field, raw)
                 self.assertEqual(item["raw_value"], raw)
                 self.assertEqual(item["raw_unit"], definition["raw_unit"])
                 self.assertEqual(item["value"], raw * definition["factor"])
@@ -103,8 +151,7 @@ class MarketBackgroundSourceTests(unittest.TestCase):
             artifact = self.snapshot("pe", empty)
             with self.subTest(empty=empty), self.assertRaises(ContractError):
                 self.approve(artifact, self.spec(artifact, "pe", 0))
-        artifact = self.snapshot("pb", -1.5)
-        item = self.approve(artifact, self.spec(artifact, "pb", -1.5))
+        artifact, item = self.approved_current("pb", -1.5)
         self.assertEqual(item["value"], -1.5)
         self.assertNotIn("recommendation", item)
 
