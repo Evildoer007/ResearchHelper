@@ -7,7 +7,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from researchhelper.archive import ResearchArchive
-from researchhelper.cases import CUTOFF, evidence, get_case
+from researchhelper.cases import CUTOFF, get_case
+from tests.host_fixture_support import policy_proposal
 from researchhelper.contracts import ContractError
 from researchhelper.engine import ResearchAgent
 from researchhelper.planning import build_plan, normalize_questions
@@ -101,9 +102,11 @@ class InterleavingPlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="research-interleaving-") as folder:
             agent = ResearchAgent(ResearchArchive(folder), ROOT, offline=True)
             task = agent.create("核查政策、解释影响并比较", cutoff=CUTOFF, questions=questions)
-            source = evidence("original", "合成政策", "政策已生效。A与B适用同样条件，影响相同。")
-            host = dict(evidence=[source], answers={
-                q["id"]: {"answer": source["text"], "refs": ["original"]} for q in questions},
+            self.addCleanup(agent.close_runtime)
+            text = "政策已生效。A与B适用同样条件，影响相同。"
+            source = policy_proposal(agent, task["id"], "original", "合成政策", text, [q["id"] for q in questions])
+            host = dict(evidence_specs=[source], answers={
+                q["id"]: {"answer": text, "refs": ["original"]} for q in questions},
                 theses=[dict(title="政策影响相同", judgment="支持", support=["original"], counter=[],
                              investment_meaning="仅解释适用影响", limitation="合成核验", question_ids=["q2"])])
             step = agent._step
@@ -118,6 +121,7 @@ class InterleavingPlanTests(unittest.TestCase):
                 stopped = agent.start(task["id"], host)
             self.assertEqual(stopped["status"], "已取消", stopped.get("error"))
             restored = ResearchAgent(ResearchArchive(folder), ROOT, offline=True)
+            self.addCleanup(restored.close_runtime)
             resumed = restored.start(task["id"])
             self.assertEqual(resumed["status"], "已完成", resumed.get("error"))
             self.assertTrue(all(q["status"] == "已回答" for q in resumed["questions"]))
