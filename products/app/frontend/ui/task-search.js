@@ -6,9 +6,10 @@
     const dialog=document.createElement('dialog');
     dialog.className='task-search-dialog';dialog.setAttribute('aria-label','搜索任务');
     const input=document.createElement('input');
-    input.type='search';input.placeholder='搜索任务或报告';input.setAttribute('aria-label','搜索任务');
+    input.type='search';input.placeholder='搜索任务';input.setAttribute('aria-label','搜索任务');
     const close=document.createElement('button');
-    close.type='button';close.textContent='×';close.setAttribute('aria-label','关闭搜索');
+    close.type='button';close.className='workspace-modal-close';close.setAttribute('aria-label','关闭搜索');
+    close.innerHTML='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
     const header=document.createElement('header');header.append(input,close);
     const list=document.createElement('div');
     const feedback=document.createElement('p');feedback.setAttribute('role','status');feedback.hidden=true;
@@ -50,11 +51,11 @@
       const rows=entries(query),disabled=!canSelect();
       const next=JSON.stringify([query,disabled,rows]);
       if(next===snapshot)return;
-      const focused=list.contains(document.activeElement)?{kind:document.activeElement.dataset.kind,id:document.activeElement.dataset.id}:null;
+      const focused=list.contains(document.activeElement)?document.activeElement.dataset.id:null;
       list.replaceChildren();feedback.hidden=true;snapshot=next;
       for(const row of rows){
         const button=document.createElement('button');button.type='button';button.textContent=row.title;
-        button.dataset.kind=row.kind;button.dataset.id=row.id;button.disabled=disabled;
+        button.dataset.id=row.id;button.disabled=disabled;
         button.onclick=()=>{
           // Re-resolve through RH's catalog at activation: a result is not a
           // retained authorization to switch after a task begins saving.
@@ -64,10 +65,10 @@
         };
         list.append(button);
       }
-      if(!rows.length){const empty=document.createElement('p');empty.textContent=query?'未找到任务或报告':'尚无任务或报告';list.append(empty)}
+      if(!rows.length){const empty=document.createElement('p');empty.textContent=query?'未找到任务':'尚无任务';list.append(empty)}
       if(!canSelect()){feedback.textContent='正在保存研究，请稍候';feedback.hidden=false}
       if(focused){
-        const target=[...list.children].find(button=>!button.disabled&&button.dataset.kind===focused.kind&&button.dataset.id===focused.id);
+        const target=[...list.children].find(button=>!button.disabled&&button.dataset.id===focused);
         (target||input).focus({preventScroll:true});
       }
     }
