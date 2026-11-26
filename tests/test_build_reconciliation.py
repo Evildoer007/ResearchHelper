@@ -1,6 +1,7 @@
 """Known generated copies never require moving unknown user files."""
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch,Mock
@@ -34,6 +35,57 @@ class DownloadReconciliationTests(unittest.TestCase):
         self.assertEqual(self.canonical.read_bytes(),before)
         record=json.loads(Path(result['receipt']).read_text())
         self.assertEqual((Path(record['recovery'])/self.copy.name).read_bytes(),b'previous generated fixture')
+
+    def test_a_recorded_numbered_file_cannot_replace_the_missing_download_or_be_cleaned(self):
+        self.canonical.unlink()
+        plan = download_inventory(self.root,self.dist)
+        self.assertEqual(plan['files'],[])
+        self.assertEqual(len(plan['copies']),1)
+        with self.assertRaisesRegex(RuntimeError,'缺少对应正式文件'):
+            self.reconcile()
+        self.assertEqual(self.copy.read_bytes(),b'previous generated fixture')
+        self.assertFalse(self.recovery.exists())
+
+    def test_renamed_prior_version_is_retired_once_the_exact_successor_is_accepted(self):
+        from tests.test_permanent_release_cleanup import recorded_release
+
+        self.canonical.unlink()
+        successor = self.dist/'ResearchHelper-Skill-0.10.1.zip'
+        successor.write_bytes(b'new generated archive')
+        artifact = dict(path=str(successor), sha256=digest(successor), bytes=successor.stat().st_size)
+        candidate = recorded_release(self.root,'successor',artifacts=dict(skill=artifact))
+        with self.assertRaisesRegex(RuntimeError, '保留可恢复副本'):
+            self.reconcile()
+        proof = self.root/'result/acceptance/successor/receipt.json'
+        proof.parent.mkdir(parents=True)
+        record = json.loads(candidate.read_text())
+        proof.write_text(json.dumps(dict(status='scoped_passed', candidate=str(candidate),
+            manifest_sha256=record['manifest_sha256'], dataset_parity=True, service_stopped=True,
+            mount_detached=True, temporary_research_removed=True)))
+        record['postbuild_acceptance'] = dict(status='scoped_passed', path=str(proof), sha256=digest(proof))
+        candidate.write_text(json.dumps(record))
+        self.assertEqual(self.reconcile()['copies'], 1)
+        self.assertEqual(successor.read_bytes(), b'new generated archive')
+        self.assertFalse(self.copy.exists())
+
+    def test_missing_same_name_is_safe_when_an_exact_archived_copy_exists(self):
+        self.canonical.unlink()
+        previous = json.loads(self.candidate.read_text())['artifacts']['skill']
+        archive = Path(previous['path'])
+        archive.parent.mkdir(parents=True)
+        archive.write_bytes(self.copy.read_bytes())
+        self.assertEqual(self.reconcile()['copies'], 1)
+        self.assertEqual(archive.read_bytes(), b'previous generated fixture')
+
+    @unittest.skipUnless(sys.platform == 'darwin', 'macOS process lookup')
+    def test_an_active_numbered_file_is_preserved(self):
+        with subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(10)', str(self.copy)]) as process:
+            try:
+                with self.assertRaisesRegex(RuntimeError, 'live process'):
+                    self.reconcile()
+                self.assertTrue(self.copy.is_file())
+            finally:
+                process.terminate()
 
     def test_an_unknown_file_or_changed_copy_prevents_all_moves(self):
         for mutation in ('unknown','changed','receipt'):
@@ -94,6 +146,24 @@ class ProjectSkillReconciliationTests(unittest.TestCase):
         self.assertEqual((self.target/'SKILL 2.md').read_text(),'user edit')
         self.assertEqual((self.target/'SKILL.md').read_text(),'old instructions')
         self.assertEqual(list((self.home/'.Trash').iterdir()),[])
+
+    def test_known_copies_arriving_after_installation_are_reconciled(self):
+        from skill import install_project_skill as installer
+
+        install = installer.install_project_skill
+        def with_late_copy(*args, **kwargs):
+            result = install(*args, **kwargs)
+            (self.target/'agents 2').mkdir()
+            (self.target/'SKILL 2.md').write_bytes((self.target/'SKILL.md').read_bytes())
+            return result
+
+        with patch.object(installer,'install_project_skill',side_effect=with_late_copy):
+            result = self.update()
+        after = result['post_install_generated_copy_reconciliation']
+        self.assertEqual((after['copies'],after['directories']),(1,1))
+        self.assertFalse((self.target/'agents 2').exists())
+        self.assertFalse((self.target/'SKILL 2.md').exists())
+        self.assertTrue((self.target/'user-empty-notes').is_dir())
 
 
 if __name__=='__main__':unittest.main()
