@@ -23,20 +23,23 @@ from release_contract import VERSION, OUTPUT
 from shared_payload import copy_runtime, copy_tree, hashes, runtime_identity
 from check_build_tools import check, verify_icon
 from windows_installer import installer_command, install_for_verification
-from verify_windows import verify_backend
+from verify_windows import verify_backend, verify_installed_reports
 
 
 def run(command, cwd, environment):
     subprocess.run([str(part) for part in command], cwd=cwd, env=environment, check=True, timeout=900)
 
 
-def windows(output=None):
+def windows(output=None, *, skill_archive=None):
     output = Path(output or OUTPUT).resolve()
     if platform.system() != 'Windows':
         raise RuntimeError('不能在macOS交叉构建或伪造Windows安装包')
     stage = (ROOT / 'result/build-staging').resolve()
     if output == stage or not output.is_relative_to(stage):
         raise RuntimeError('Windows候选只能写入项目构建目录')
+    skill_archive = Path(skill_archive or output / f'ResearchHelper-Skill-{VERSION}.zip')
+    if not skill_archive.is_file() or skill_archive.resolve().parent != output or skill_archive.is_symlink():
+        raise RuntimeError('Windows验收需要本次构建的独立Skill安装包')
     tools = check(ROOT)
     output.mkdir(parents=True, exist_ok=True)
     app = output / 'ResearchHelper-windows-x64'
@@ -112,19 +115,25 @@ def windows(output=None):
     verification = output / 'windows-install-check'
     verification.mkdir()
     installed = verification / 'installed'
-    print('[Windows 5/5] 临时安装验收，不写用户快捷方式或卸载注册。', flush=True)
+    print('[Windows 5/5] 隔离安装并核对三类研究、两版报告、五种导出及独立Skill。', flush=True)
     install_for_verification(setup, installed)
-    if hashes(app) != hashes(installed):
+    installed_files = hashes(app)
+    if installed_files != hashes(installed):
         raise RuntimeError('临时安装物与候选载荷不一致')
-    final = verify_backend(installed / 'Resources/backend/researchhelper-server/researchhelper-server.exe',
-                           installed / 'Resources', verification / 'backend-check')
+    run([installed / 'ResearchHelper.exe', '--check-webview2'], installed, environment)
+    final, reports = verify_installed_reports(
+        installed / 'Resources/backend/researchhelper-server/researchhelper-server.exe',
+        installed / 'Resources', skill_archive, verification / 'research-check', ROOT)
+    if installed_files != hashes(installed) or installed_files != hashes(app):
+        raise RuntimeError('临时安装验收改变了App载荷')
     manifest = {'version': VERSION, 'runtime': runtime_identity(ROOT), 'platform': 'windows', 'architecture': 'x64',
                 'python_embedded': True, 'dotnet_self_contained': True,
                 'webview2_runtime': 'installed prerequisite, not bundled',
                 'signing': 'unsigned', 'installed_to_user': False, 'native_ui_verified': False,
-                'installer_verified': True, 'backend_checks': [staged, final],
+                'installer_verified': True, 'webview2_prerequisite_verified': True,
+                'backend_checks': [staged, final], 'report_acceptance': reports,
                 'real_model_verified': False, 'real_provider_verified': False,
-                'sdk_version': sdk, 'files': hashes(app),
+                'sdk_version': sdk, 'files': installed_files,
                 'installer_sha256': hashlib.sha256(setup.read_bytes()).hexdigest()}
     (output / 'windows-app-manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2))
     return setup
