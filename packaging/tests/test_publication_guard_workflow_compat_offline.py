@@ -12,6 +12,7 @@ import unittest
 from researchhelper.archive import ResearchArchive
 from researchhelper.cases import CUTOFF, get_case
 from researchhelper.engine import ResearchAgent
+from researchhelper.planning import input_fingerprint
 from tests import test_question_plans_offline as question_tests
 from tests import test_numeric_statement_workflow_offline as numeric_tests
 from tests import test_question_plan_interleaving_offline as interleaving_tests
@@ -112,7 +113,16 @@ class PublicationGuardWorkflowCompatibilityTests(unittest.TestCase):
         question_tests.QuestionPlanTests.test_optional_question_missing_does_not_change_completion(self)
 
     def test_optional_missing_calculation_does_not_block_fact(self):
-        question_tests.QuestionPlanTests.test_optional_missing_calculation_does_not_block_fact(self)
+        task = self.create([
+            {'id': 'q1', 'question': '原文日期', 'kind': 'fact', 'group': 'date'},
+            {'id': 'extra', 'question': '可选费用比较', 'kind': 'comparison', 'required': False,
+             'group': 'fees', 'method_needs': ['fee_difference_v1']}])
+        spec = dict(get_case('etf')['calculation'], question_ids=['extra'])
+        final = self.agent.start(task['id'], self.facts(calculations=[spec]))
+        self.assertEqual(final['status'], '已完成', final.get('error'))
+        date_node = next(node for node in final['nodes'] if node['id'] == 'answer')
+        self.assertNotIn('calculation', date_node['dependencies'])
+        self.assertEqual(final['gaps'], [])
 
     def test_independent_core_branch_preserves_valid_answer(self):
         question_tests.QuestionPlanTests.test_independent_core_branch_preserves_valid_answer(self)
@@ -142,6 +152,10 @@ class PublicationGuardWorkflowCompatibilityTests(unittest.TestCase):
     def test_thesis_does_not_inherit_unrelated_calculations(self):
         case = get_case('etf')
         task = self.create()
+        # Reopen the catalogue that owns these existing fee calculations.
+        task['fee_method_catalogue_version'] = 1
+        task['input_hash'] = input_fingerprint(task)
+        self.agent.archive.save(task)
         host = self.facts(calculations=[case['calculation'], dict(case['calculation'], id='other_delta')],
             theses=[{'title': '原文日期已确认', 'judgment': '支持', 'support': ['original'],
                 'counter': [], 'investment_meaning': '仅核查日期', 'limitation': '限定原文'}])
@@ -152,7 +166,9 @@ class PublicationGuardWorkflowCompatibilityTests(unittest.TestCase):
         self.assertEqual(final['theses'][0]['calculation_refs'], [])
 
     def nonfixture_host(self, explicit_reference):
-        task = self.agent.create('比较两只基金的已披露年费率', entry='ETF', intent='比较对象', cutoff=CUTOFF)
+        question = '比较两只基金的已披露年费率'
+        task = self.agent.create(question, entry='ETF', intent='比较对象', cutoff=CUTOFF, questions=[
+            {'id': 'q1', 'question': question, 'kind': 'comparison', 'method_needs': ['fee_difference_v1']}])
         case = get_case('etf')
         calculation = dict(case['calculation'], id='host_fee', question_ids=['q1'])
         answer = {'answer': '费用差为-0.4个百分点，不代表收益优势。', 'refs': ['e1', 'e2']}
@@ -164,7 +180,12 @@ class PublicationGuardWorkflowCompatibilityTests(unittest.TestCase):
         return self.agent.start(task['id'], host)
 
     def test_nonfixture_calculation_with_explicit_reference(self):
-        numeric_tests.NumericStatementWorkflowTests.test_nonfixture_calculation_with_explicit_reference(self)
+        done = self.nonfixture_host(True)
+        self.assertEqual(done['status'], '已完成', done.get('error'))
+        self.assertIsNone(done.get('fixture'))
+        self.assertFalse(done['synthetic'])
+        self.assertAlmostEqual(done['calculations'][0]['output']['value'], -.4)
+        self.assertIn('费用差为-0.4', self.agent.export(done['id'])['html'])
 
     def test_registered_calculation_requires_explicit_reference(self):
         numeric_tests.NumericStatementWorkflowTests.test_registered_calculation_requires_explicit_reference(self)
