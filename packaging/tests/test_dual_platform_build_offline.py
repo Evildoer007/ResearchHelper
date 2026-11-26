@@ -87,6 +87,8 @@ class DualPlatformTests(unittest.TestCase):
                     self.assertIn(artifact, result)
                     self.assertEqual(mac.call_count, int(platform_name == 'macos'))
                     self.assertEqual(win.call_count, int(platform_name == 'windows'))
+                    if platform_name == 'windows':
+                        win.assert_called_once_with('skill')
 
     def test_windows_receipt_requires_setup_and_does_not_invoke_mac_sandbox(self):
         builder = load('packaging/build_all.py', 'rh_windows_receipt')
@@ -166,6 +168,10 @@ class DualPlatformTests(unittest.TestCase):
         source = (ROOT / 'products/app/desktop/windows/Program.cs').read_text()
         self.assertIn('root.TryGetProperty("ready"', source)
         self.assertIn('process.StartInfo.Environment["RESEARCHHELPER_STORE"] = state', source)
+        self.assertIn('process.StartInfo.Environment["RESEARCHHELPER_DESKTOP_LIFETIME"] = "stdin"', source)
+        self.assertIn('RedirectStandardInput = true', source)
+        self.assertIn('process.StandardInput.Close()', source)
+        self.assertNotIn('process.Kill(', source)
         self.assertIn('!IsSameOrigin(source) || source.AbsolutePath != "/"', source)
         self.assertIn('researchhelper_action', source)
         self.assertIn('ShowPrintUI', source)
