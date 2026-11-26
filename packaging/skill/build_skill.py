@@ -32,6 +32,9 @@ def skill(*, install=False, output=None, pdf_renderer=None):
     shutil.copyfile(ROOT / 'packaging/skill/SKILL_README.md', target / 'README.md')
     copy_tree(ROOT / 'references', target / 'references')
     copy_tree(ROOT / 'agents', target / 'agents')
+    visual_guide = target / 'docs' / 'VISUAL_LIBRARY.md'
+    visual_guide.parent.mkdir(exist_ok=True)
+    shutil.copyfile(ROOT / 'docs' / 'VISUAL_LIBRARY.md', visual_guide)
     for module in MODULES:
         guide = target / 'modules' / module / 'module.md'
         guide.parent.mkdir(parents=True, exist_ok=True)
