@@ -102,9 +102,11 @@ class RegisteredMacroObservationOrderTests(retained_order.DraftObservationOrderT
         task=copy.deepcopy(self.task)
         self.assertFalse(current_analysis(task,observations(task)))
         task['draft_analysis']=analyze(task,observations(task))
-        self.assertEqual(task['draft_analysis']['results'],task['draft_report']['calculations'])
+        retained_order.assert_calculation_meaning(self, task['draft_analysis']['results'], task['draft_report']['calculations'])
+        expected = copy.deepcopy(task['draft_analysis']['results'])
         for record in task['source_records']:
             for table in record.get('snapshot',{}).get('tables',[]):
                 if isinstance(table.get('table'),dict):table['table']=dict(reversed(list(table['table'].items())))
         self.assertEqual(observations(task),observations(self.task))
         self.assertTrue(current_analysis(task,observations(task)))
+        self.assertEqual(current_analysis(task,observations(task))['results'], expected)
