@@ -88,18 +88,20 @@ class OHMarketSeriesTests(unittest.TestCase):
         validate_plan(self.task, proposal)
         self.assertEqual(self.task["ledger"]["used"]["data_requests"], 0)
 
-    def test_unknown_entry_does_not_guess_a_family(self):
+    def test_other_entries_use_the_explicit_code_family(self):
         for entry in ("事件", "宏观", "混合", "行业", "产业链"):
             task = self.create(entry, "300033.SZ")
-            self.assertEqual(series_request_shapes(task), [])
-            self.rejects_before_auth(self.params, task)
+            shape = series_request_shapes(task)[0]
+            self.assertEqual(shape["available_codes"], ["300033.SZ"])
+            self.assertEqual(shape["field_parameters"], SERIES_FAMILIES["个股"])
+            self.assertEqual(validate_series_request(task, "date_sequence", self.params), ["2026-09-29", "2026-09-30"])
 
-    def test_invalid_codes_cannot_expand_scope_or_infer_asset_types(self):
+    def test_invalid_codes_and_cross_family_requests_do_not_reach_provider(self):
         for code in ("600000.SH", "300033.SZ,600000.SH", "300033", "00700.HK", "300033.SZ "):
             self.rejects_before_auth(dict(self.params, codes=code))
-        for entry, code in (("ETF", "300033.SZ"), ("个股", "510300.SH"), ("指数", "399001.SZ")):
+        for entry, code in (("ETF", "300033.SZ"), ("个股", "510300.SH"), ("指数", "300033.SZ")):
             task = self.create(entry, code)
-            self.assertEqual(series_request_shapes(task)[0]["available_codes"], [])
+            self.assertEqual(series_request_shapes(task)[0]["available_codes"], [code])
             self.rejects_before_auth(self.parameters(task), task)
 
     def test_unknown_cross_family_and_duplicate_indicators_fail_before_auth(self):
