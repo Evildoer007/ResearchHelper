@@ -24,6 +24,18 @@ class CleanupSafetyTests(unittest.TestCase):
         names = {Path(item['source']).name for item in plan}
         self.assertEqual(names, {'old', 'old-browser-fixture', 'document-delivery-release'})
 
+    def test_new_reference_invalidates_existing_cleanup_plan(self):
+        case = self.root / 'result/acceptance/old-qa-case'
+        case.mkdir()
+        plan = cleanup_plan(self.root, self.candidate)
+        self.assertIn(str(case), {entry['source'] for entry in plan})
+        tests = self.root / 'tests'
+        tests.mkdir()
+        (tests / 'replay.swift').write_text(f'let input = "result/acceptance/{case.name}/task.json"')
+        self.assertNotIn(str(case), {entry['source'] for entry in cleanup_plan(self.root, self.candidate)})
+        with self.assertRaisesRegex(RuntimeError, '仍被回归引用'):
+            validate_targets(plan, self.root, self.candidate)
+
     def test_protected_and_ancestor_targets_are_rejected(self):
         for path in ('demo', 'data', 'dist', 'versions', '.git', 'result', 'result/host-research'):
             with self.subTest(path=path), self.assertRaises(RuntimeError):
