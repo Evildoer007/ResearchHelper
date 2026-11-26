@@ -1,31 +1,39 @@
-/* Editorial reading editions. Disclosed figures sit beside their argument;
-   original research remains intact in contextual reading dialogs. */
-.example-paper{max-width:1080px;margin:32px auto;padding:36px 40px 32px}
-.example-paper .report-header{margin-bottom:24px;padding-bottom:18px}
-.example-paper h1{margin-bottom:10px;font-size:32px}
-.example-conclusion{padding:18px 22px;margin-bottom:24px;border-left:3px solid var(--red);background:var(--NOTE_BG)}
-.example-conclusion h2{color:var(--red);font-size:15px;margin-bottom:8px;padding:0}
+/* Historical public cases use the same A4 reading measure as new reports.
+   Original narratives, observations and inspection records remain intact. */
+.example-reader{display:grid;grid-template-columns:32mm minmax(0,210mm);gap:8mm;align-items:start;justify-content:center;width:min(calc(100% - 48px),260mm);margin:24px auto}
+.example-toc{position:sticky;top:24px;padding-top:12px;font-size:12px;line-height:1.45}
+.example-toc nav{display:grid;gap:2px}
+.example-toc a{display:flex;align-items:center;min-height:36px;padding:6px 0;color:var(--muted);text-decoration:none}
+.example-toc a:hover,.example-toc a:focus-visible{color:var(--red)}
+.example-skip{position:fixed;z-index:10;top:8px;left:8px;transform:translateY(-160%);padding:10px 14px;background:var(--paper);color:var(--red);border:1px solid currentColor}
+.example-skip:focus{transform:none}
+.example-paper{width:210mm;max-width:100%;margin:0;padding:8mm;font-size:12px;line-height:1.5}
+.example-paper .report-header{margin-bottom:12px;padding-bottom:10px}
+.example-paper h1{margin-bottom:6px;font-size:22px;line-height:1.35}
+.example-paper .report-meta{font-size:11px;line-height:1.5}
+.example-conclusion{padding:10px 12px;margin-bottom:10px;border-left:3px solid var(--red);background:var(--NOTE_BG)}
+.example-conclusion h2{color:var(--red);font-size:14px;margin:0 0 5px;padding:0}
 .example-conclusion h2::before{display:none}
-.example-conclusion p{max-width:none;font-weight:600;font-size:16px;margin:0;line-height:1.75;color:var(--INK)}
-.example-block{padding:24px 0;display:grid;grid-template-columns:minmax(0,1fr);gap:16px 28px}
+.example-conclusion p{max-width:none;font-weight:600;font-size:12px;margin:0;line-height:1.55;color:var(--INK)}
+.example-block{padding:12px 0;display:grid;grid-template-columns:minmax(0,1fr);gap:8px;scroll-margin-top:18px}
 .example-logic{padding:0;border:0;min-width:0}
 .argument-text p{max-width:none}
-.argument-support{margin-top:12px}
-.argument-support p{font-size:14px;line-height:1.8;max-width:none;margin:0 0 8px}
-.example-logic h2{font-size:18px;line-height:1.6;margin:0 0 12px;text-wrap:wrap}
-.example-logic p{font-size:14px;margin:0 0 8px;line-height:1.8}
-.example-figures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;min-width:0}
+.argument-support{margin-top:5px}
+.example-logic h2{font-size:15px;line-height:1.5;margin:0 0 6px;text-wrap:wrap}
+.example-logic p,.argument-support p{font-size:12px;margin:0 0 5px;line-height:1.55}
+.example-figures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 18px;min-width:0}
 .example-figures:has(figure:only-child){grid-template-columns:1fr}
-.example-figures figure{margin:0;padding:12px 0 0;min-width:0;border:0;border-top:1px solid #BCC9D7;background:transparent;break-inside:avoid}
-.example-figures figcaption{font-size:15px;margin-bottom:12px;line-height:1.6;color:#28496F}
+.example-figures figure{margin:0;padding:6px 0 0;min-width:0;border:0;border-top:1px solid #BCC9D7;background:transparent;break-inside:avoid}
+.example-figures figcaption{font-size:12px;margin-bottom:5px;line-height:1.5;color:#28496F}
 .inspection-content th,.inspection-content td{min-width:0;padding:8px}
-.example-chart{height:250px;width:100%;min-width:0}
-.chart-dense .example-chart{height:330px}
-.chart-intervals .example-chart{height:150px}
-.chart-samples .example-chart{height:250px}
-.chart-note{font-size:13px;color:var(--muted);max-width:none;line-height:1.65;margin:8px 0}
-.example-risk{border-top:1px solid var(--rule);padding:16px 0 8px}
-.example-risk p{font-size:13px;max-width:none;margin:4px 0}
+.example-chart{height:190px;width:100%;min-width:0}
+.chart-dense .example-chart{height:260px}
+.chart-intervals .example-chart{height:140px}
+.chart-samples .example-chart{height:220px}
+.chart-timeline .example-chart{height:136px}
+.chart-note{font-size:11px;color:var(--muted);max-width:none;line-height:1.5;margin:5px 0}
+.example-risk{border-top:1px solid var(--rule);padding:8px 0 0;scroll-margin-top:18px}
+.example-risk p{font-size:11px;max-width:none;margin:3px 0;line-height:1.5}
 .example-paper .scroll{max-height:none}
 .archived-content .report-table-wrap{max-width:100%;overflow-x:auto}
 .archived-content th,.archived-content td{min-width:0;overflow-wrap:anywhere}
@@ -35,57 +43,43 @@
 .archived-content .report-metric-strip{display:flex;flex-wrap:wrap;gap:20px}
 .archived-content .report-metric span,.archived-content .report-metric small{display:block;font-size:13px}
 .archived-content .report-metric strong{font-size:19px}
-@media screen and (min-width:960px){
-  .example-block:has(.example-figures){grid-template-columns:minmax(0,.85fr) minmax(0,1.65fr);align-items:start}
-  .example-block:has(.example-figures) .example-logic{display:contents}
-  .example-block:has(.example-figures) h2{grid-column:1/-1;margin-bottom:0}
-  .example-block:has(.example-figures) .argument-text{grid-column:1;grid-row:2;padding-right:4px}
-  .example-block:has(.example-figures) .example-figures{grid-column:2;grid-row:2}
+@media(max-width:999px){
+  .example-reader{display:block;width:100%;margin:16px auto}
+  .example-toc{display:none}
+  .example-paper{margin:0 auto;width:min(210mm,calc(100% - 24px))}
 }
-@media(max-width:700px){.example-figures{grid-template-columns:1fr}.example-chart{height:250px}}
-@media(max-width:480px){
-  .example-paper{margin:0;padding:26px 20px 32px}
-  .example-paper h1{font-size:27px}
-  .example-conclusion{padding:14px 16px;margin-bottom:12px}
-  .example-conclusion p{font-size:15px;line-height:1.75}
-  .example-block{padding:20px 0;gap:12px}
+@media(max-width:600px){
+  .example-reader{margin:0}
+  .example-paper{width:100%;padding:20px 16px}
+  .example-paper h1{font-size:22px}
+  .example-figures{grid-template-columns:1fr}
+  .example-chart{height:220px}
+  .chart-timeline .example-chart{height:190px}
 }
 @media print{
-  .example-paper{padding:8px 0 0;margin:0;box-shadow:none}
+  .example-reader{display:block;width:auto;margin:0}
+  .example-toc,.example-skip{display:none!important}
+  .single-page-paper.example-paper{page:research-example;width:196mm;max-width:none;padding:8px 0 0;margin:0;box-shadow:none}
   .example-paper h1{font-size:18pt;margin-bottom:4px}
-  .example-paper .report-header{margin-bottom:4px;padding-bottom:4px}
+  .example-paper .report-header{margin-bottom:6px;padding-bottom:5px}
   .example-conclusion{padding:6px 10px;margin-bottom:4px}
-  .example-conclusion p{font-size:13px;line-height:1.5;margin:0}
-  .example-conclusion h2{font-size:13px;margin-bottom:4px}
-  .example-paper .report-meta{font-size:13px}
-  .example-block{padding:7px 0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px}
-  .example-logic{display:contents}
-  .example-logic h2{grid-column:1/-1;grid-row:1;font-size:14px;line-height:1.5;margin:0 0 4px}
-  .argument-text{grid-column:1/-1;grid-row:2;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px}
-  .argument-text:not(:has(.argument-support)){display:block}
-  .argument-support{margin:0}
-  .argument-text:has(.argument-support p:nth-child(2)){grid-template-columns:repeat(3,minmax(0,1fr))}
-  .argument-support:has(p:nth-child(2)){grid-column:2/span 2;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 18px}
-  .example-logic p,.argument-support p{font-size:13px;line-height:1.5;margin:0 0 3px}
-  .example-figures{grid-column:1/-1;grid-row:3;grid-template-columns:repeat(2,minmax(0,1fr));padding:4px 0 0;gap:12px 18px}
-  .example-figures figure{padding:5px 0 0}
-  .example-figures figcaption{font-size:13px;margin-bottom:3px}
-  .example-chart{height:160px}
-  .example-paper:has(.chart-intervals) .example-chart{height:164px}
-  .chart-dense .example-chart{height:260px}
+  .example-conclusion h2{font-size:13px;margin-bottom:3px}
+  .example-conclusion p{font-size:12px;line-height:1.45}
+  .example-block{padding:6px 0;gap:5px}
+  .example-logic h2{font-size:14px;line-height:1.45;margin-bottom:4px}
+  .example-logic p,.argument-support p{font-size:12px;line-height:1.45;margin-bottom:3px}
+  .example-figures{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 18px}
+  .example-figures figcaption{font-size:12px;margin-bottom:3px}
+  .example-chart{height:148px}
+  .chart-dense .example-chart{height:230px}
   .chart-intervals .example-chart{height:100px}
-  .example-paper .example-block:has(.chart-intervals){grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
-  .example-block:has(.chart-intervals) .argument-text{grid-column:1;grid-row:2;display:block}
-  .example-block:has(.chart-intervals) .argument-support{display:block;margin-top:6px}
-  .example-block:has(.chart-intervals) .example-figures{grid-column:2;grid-row:2;align-self:start;padding:0}
-  .example-paper .chart-intervals .example-chart{height:84px}
-  .example-paper .chart-samples .example-chart{height:172px}
-  .example-paper:has(.chart-intervals) .example-block:has(.example-chart[aria-label*="EOPS"]) .example-chart{height:134px}
-  .example-paper:has(.chart-intervals) .example-block{padding:3px 0}
-  .example-paper:has(.chart-intervals) .example-logic p,
-  .example-paper:has(.chart-intervals) .argument-support p{line-height:1.45}
-  .example-paper:has(.chart-intervals){page:research-example;width:196mm}
-  .example-risk{padding:4px 0}.example-risk p{margin:4px 0;line-height:1.4}
-  .chart-note{margin:4px 0;line-height:1.5}
+  .chart-samples .example-chart{height:176px}
+  .chart-timeline .example-chart{height:100px}
+  .example-block:has(.chart-samples){grid-template-columns:minmax(0,.95fr) minmax(0,1.05fr);column-gap:18px}
+  .example-block:has(.chart-samples) .example-logic{display:contents}
+  .example-block:has(.chart-samples) .example-logic h2{grid-column:1/-1}
+  .example-block:has(.chart-samples) .argument-text{grid-column:1;grid-row:2}
+  .example-block:has(.chart-samples) .example-figures{grid-column:2;grid-row:2}
+  .example-risk{padding:5px 0 0}
 }
 @page research-example{size:A4;margin:7mm}
