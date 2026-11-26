@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from tests import test_original_span_selection as fixtures
+from tests.legacy_replay_fixtures import etf_task
 from researchhelper.contracts import ContractError, fingerprint
 from researchhelper.output_schema import original_span_output_schema, original_span_prompt, decode_original_spans
 from researchhelper.reasoning import extractable_source_views, evidence_contract, expand_api_cell_selections, model_object, PHASE_FIELDS
@@ -43,11 +44,13 @@ class MixedOriginalSelectionTests(unittest.TestCase):
         before = fingerprint((self.task, self.views, self.wire))
         result = self.decode()
         self.assertEqual(len(result['evidence_specs']), 2)
-        self.assertIn('api_cell_selections', result['evidence_specs'][0])
+        api = result['evidence_specs'][0]
+        self.assertEqual(api['artifact_id'], self.views[0]['id'])
+        self.assertEqual(api['api_value_reference']['snapshot_hash'], self.views[0]['snapshot_hash'])
+        self.assertEqual(api['record_locator'], dict(table=0, row=0, field='close'))
         self.assertEqual(result['evidence_specs'][1]['value'], 9.1808)
         expanded = expand_api_cell_selections(self.task, result['evidence_specs'])
-        self.assertEqual(len(expanded), 2)
-        self.assertEqual(expanded[0]['record_locator']['field'], 'close')
+        self.assertEqual(expanded, result['evidence_specs'])
         self.assertEqual(expanded[1]['text'], self.fixture.nav_line['text'].rstrip('\r\n'))
         self.assertFalse(any('source_check' in spec or 'applicability_check' in spec for spec in expanded))
         self.assertEqual(before, fingerprint((self.task, self.views, self.wire)))
@@ -66,7 +69,7 @@ class MixedOriginalSelectionTests(unittest.TestCase):
         self.assertIsNone(original_span_output_schema(self.task, self.views[:1]))
 
     def test_raw_only_or_unknown_api_cannot_be_discarded_to_fit_batch(self):
-        raw = next(view for view in self.task['source_records'] if view['operation'] == 'date_sequence')
+        raw = next(view for view in self.task['source_records'] if view['operation'] == 'report_query')
         self.assertIsNone(original_span_output_schema(self.task, self.views + [dict(
             id=raw['id'], kind='api', snapshot_hash=raw['hash'], data=raw['snapshot'])]))
 
@@ -131,9 +134,7 @@ class MixedOriginalSelectionTests(unittest.TestCase):
 
 class DisclosureWindowTests(unittest.TestCase):
     def setUp(self):
-        fixtures.OriginalSpanSelectionTests.setUpClass()
-        self.task = copy.deepcopy(fixtures.OriginalSpanSelectionTests.saved)
-        self.addCleanup(fixtures.OriginalSpanSelectionTests.tearDownClass)
+        self.task = etf_task()
 
     def test_disclosure_contract_is_detached_and_preserves_actual_request_grammar(self):
         from researchhelper.evidence import data_request_contract, IFIND_REPORT_FIELDS
