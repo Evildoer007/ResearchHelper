@@ -10,7 +10,7 @@ from researchhelper.visual import render, research_figures
 from researchhelper.contracts import METHOD_REGISTRY
 
 
-SOURCE = ROOT / 'result/acceptance/one-sentence-research-rj9qwh4p/report.json'
+SOURCE = ROOT / 'result/acceptance/one-sentence-research-fclwbfts/report.json'
 
 
 class ClientText(HTMLParser):
@@ -55,24 +55,24 @@ class NavClientCopyTests(unittest.TestCase):
         self.assertIn(note, self.page)
         self.assertNotIn('不得填补盘中时刻', self.client)
         self.assertIn('不代表同刻可成交价差或套利机会', self.client)
-        self.assertIn('listed_etf_unit:159915.SZ', self.page)
+        self.assertIn('listed_etf_unit:510300.SH', self.page)
         self.assertNotIn('<details', self.page)
 
     def test_raw_values_calculation_and_math_are_preserved(self):
-        for value in (3.182, 3.1769):
+        for value in (4.185, 4.1856):
             self.assertIn("data-raw-value='" + str(value) + "'", self.page)
-        self.assertIn('0.16%', self.client)
+        self.assertIn('-0.0143%', self.client)
         self.assertIn('<mfrac>', self.page)
         self.assertEqual(self.content['calculations'], self.before['calculations'])
 
     def test_renderer_does_not_rewrite_machine_context_or_duplicate_date_in_caption(self):
         figures = research_figures(self.content)
         figure = next(iter(figures.values()))
-        self.assertIn('listed_etf_unit:159915.SZ', figure['basis'])
+        self.assertIn('listed_etf_unit:510300.SH', figure['basis'])
         self.assertIn('CNY', figure['basis'])
-        self.assertEqual(figure['presentation'], 'table')
+        self.assertEqual(figure['presentation'], 'chart')
         context = self.page.split("<p class='figure-context'>", 1)[1].split('</p>', 1)[0]
-        self.assertEqual(context.count('2026-03-31'), 1)
+        self.assertEqual(context.count('2026-10-21'), 1)
 
 
 if __name__ == '__main__':
