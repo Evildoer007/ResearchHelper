@@ -151,6 +151,8 @@ def run_isolated(task, spec, started, timeout, record, worker_target, *, active=
             code = result.get("code", "unexpected_transport_failure")
             record["failure_code"] = code
             status = result.get("http_status")
+            if code == "duplicate_response_field":
+                raise TransportFailure(code, label + "响应包含重复字段，未采用该响应；已派发用量保留")
             raise TransportFailure(code, label + "连接或响应未完成；已派发用量保留，不自动重试或换源",
                 status if type(status) is int else None)
     finally:
