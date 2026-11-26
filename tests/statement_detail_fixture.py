@@ -6,6 +6,7 @@ from pathlib import Path
 
 from researchhelper.contracts import fingerprint
 from researchhelper.material_parser import MaterialParser
+from researchhelper.pdf_material import EXTRACT_VERSION
 
 ROOT=Path(__file__).resolve().parents[1]
 SOURCE=ROOT/'result/acceptance/one-sentence-research-8s4to77o/task.json'
@@ -21,7 +22,7 @@ def replay_statement_details():
         raw=base64.b64decode(old['original_base64'],validate=True)
         parsed=MaterialParser().parse(old['name'],raw)
         if parsed['status']!='已解析':raise AssertionError(parsed.get('parse_runtime'))
-        assert parsed['hash']==old['hash'] and parsed['extract_version']=='pdf-tables-6'
+        assert parsed['hash']==old['hash'] and parsed['extract_version']==EXTRACT_VERSION
         runtime=parsed.pop('parse_runtime');parsed.pop('obtained_at',None)
         parsed['original_base64']=old['original_base64']
         record['snapshot']['material']=parsed
