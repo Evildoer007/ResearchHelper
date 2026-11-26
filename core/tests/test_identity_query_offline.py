@@ -34,9 +34,10 @@ class IdentityQueryTests(unittest.TestCase):
                 validate_ifind_identity_request(task, parameters)
 
     def test_business_failure_retains_numeric_code_without_private_error_text_or_retry(self):
-        root = Path(__file__).resolve().parents[1]
+        root = Path(__file__).resolve().parents[2]
         with tempfile.TemporaryDirectory(prefix='identity-diagnostic-', dir=root / 'result/acceptance') as folder:
             agent = ResearchAgent(ResearchArchive(folder), root, offline=False)
+            self.addCleanup(agent.close_runtime)
             agent.collector.journal = None
             task = agent.create('分析腾讯控股', objects=['腾讯控股'])
             for code in [-4102, '-4102', 'PRIVATE_TOKEN', True]:
