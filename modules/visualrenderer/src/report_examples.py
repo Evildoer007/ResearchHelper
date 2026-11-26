@@ -168,7 +168,7 @@ def render_example(key, resources):
     item = catalog[key]
     original = (data_directory / item['source_html']).read_text()
     # Already-rendered editions in a release remain byte-stable when served.
-    if any('data-example-reader="' + version + '"' in original for version in ('single-page-1', 'single-page-2')):
+    if any('data-example-reader="' + version + '"' in original for version in ('single-page-1', 'single-page-2', 'single-page-3')):
         return original
     bounds = _MainBody(original)
     complete = reading_appendix(key, original[bounds.start:bounds.end])
@@ -218,7 +218,8 @@ def render_example(key, resources):
         if key == 'semi' and index == 1:
             data_notes.append('原材料只明确标注2026E收入终值，未披露中间年份的精确点位。')
         dense = numeric and len(figure['categories']) > 3 and len(figure['series']) > 1 and figure.get('orientation') != 'vertical'
-        figure_class = 'chart-dense' if dense else 'chart-intervals' if figure.get('presentation') == 'intervals' else ''
+        figure_class = ('chart-dense' if dense else 'chart-intervals' if figure.get('presentation') == 'intervals'
+                        else 'chart-timeline' if figure.get('kind') == 'timeline' else '')
         if figure.get('samples'):
             figure_class += ' chart-samples'
         caption = '图' + str(index + 1) + ' ' + figure['title']
@@ -256,7 +257,7 @@ def render_example(key, resources):
         # Keep the complete narrative in one semantic article. Screen and print
         # can place it differently without splitting or shortening its content.
         argument += support+'</div></article>'
-        blocks.append('<section class="example-block" data-argument="'+str(index)+'">'+argument+charts+'</section>')
+        blocks.append('<section class="example-block" id="logic-'+str(index+1)+'" tabindex="-1" data-argument="'+str(index)+'">'+argument+charts+'</section>')
     css = (frontend_directory / 'report.css').read_text() + '\n' + (frontend_directory / 'report-examples.css').read_text()
     vendor = (resource_directory(resources, 'vendor') / 'echarts.min.js').read_text()
     script = (frontend_directory / 'report-examples.js').read_text()
@@ -264,11 +265,19 @@ def render_example(key, resources):
     source_line = (item['sourceNote'].split('出品机构', 1)[0].strip() + '历史案例，不构成投资建议。'
                    if key == 'semi' else item['sourceNote'])
     inspection_records.append('<section id="history-source" data-inspection-title="'+escape(item['shortTitle'])+'"><p>'+escape(item['sourceNote'])+'</p><div class="archived-content">'+complete+'</div></section>')
-    return ('<!doctype html><html lang="zh-CN" data-example-reader="single-page-2"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+    # The navigation is outside the A4 paper and never enters the customer print.
+    sections = [('conclusion', '核心结论')] + [
+        ('logic-' + str(index + 1), '策略逻辑' + str(index + 1))
+        for index in range(len(item['logics']))] + [('risk', '风险提示')]
+    navigation = '<aside class="example-toc" aria-label="报告目录"><nav>' + ''.join(
+        '<a href="#' + ident + '">' + str(index + 1) + '. ' + label + '</a>'
+        for index, (ident, label) in enumerate(sections)) + '</nav></aside>'
+    return ('<!doctype html><html lang="zh-CN" data-example-reader="single-page-3"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             '<meta name="rh-source-key" content="'+escape(key)+'"><meta name="rh-history-boundary" content="public-source-1"><title>'+escape(item['shortTitle'])+'</title><style>'+css+'</style></head><body>'
-            '<main class="single-page-paper example-paper"><header class="report-header"><h1>'+escape(item['shortTitle'])+'</h1><p class="report-meta">'+escape(item['date'])+'<span>历史案例，非实时研究</span></p></header>'
-            '<section class="example-conclusion"><h2>核心结论</h2><p>'+escape(item['conclusion'])+'</p></section>'
+            '<a class="example-skip" href="#report-body">阅读报告</a><div class="example-reader">'+navigation+
+            '<main id="report-body" tabindex="-1" class="single-page-paper example-paper"><header class="report-header"><h1>'+escape(item['shortTitle'])+'</h1><p class="report-meta">'+escape(item['date'])+'<span>历史案例，非实时研究</span></p></header>'
+            '<section class="example-conclusion" id="conclusion" tabindex="-1"><h2>核心结论</h2><p>'+escape(item['conclusion'])+'</p></section>'
             +''.join(blocks)+
-            '<footer class="example-risk"><p>'+escape(item['risk'])+'</p><p class="chart-note">'+inspection_link('history-source', source_line, '查看历史报告的来源与完整公开底稿')+'</p></footer></main>'
+            '<footer class="example-risk" id="risk" tabindex="-1"><p>'+escape(item['risk'])+'</p><p class="chart-note">'+inspection_link('history-source', source_line, '查看历史报告的来源与完整公开底稿')+'</p></footer></main></div>'
             + inspection_surface(inspection_records)
             + '<script>'+vendor+'</script><script>window.RH_EXAMPLE_FIGURES='+data+';</script><script>'+script+INSPECTION_SCRIPT+'</script></body></html>')
