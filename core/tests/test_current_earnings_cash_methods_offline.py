@@ -19,7 +19,10 @@ CATALOGUE = {
     'rh_k_gross_margin', 'rh_k_cash_profit', 'rh_k_rate_transmission',
     'rh_k_index_structure', 'rh_k_etf_exposure', 'rh_k_net_margin',
     'rh_k_cash_profit_ratio', 'rh_k_bank_interest_metrics', 'rh_k_bank_rate_repricing',
-    'rh_k_index_change', 'rh_k_etf_measures',
+    'rh_k_index_change', 'rh_k_etf_measures', 'rh_k_cpi_reading',
+    'rh_k_management_custody_fee_summary', 'rh_k_inflation_transmission',
+    'rh_k_daily_nav_premium', 'rh_k_annual_fee_difference', 'rh_k_price_return_measures',
+    'rh_k_pmi_diffusion', 'rh_k_etf_premium_measures',
 }
 
 
