@@ -16,73 +16,100 @@
   contextSplitter.setAttribute('aria-label','调整交付栏宽度');
   const historyToggle = shell.querySelector('[data-action="tasks"]');
   const mobile = matchMedia('(max-width:700px)');
-  const compactReport = matchMedia('(max-width:1100px)');
-  const minimum = 197, maximum = 440, fallback = 260;
+  const compactReport = matchMedia('(max-width:1220px)');
+  const minimum = 197, maximum = 440;
+  const fallback = Number.parseFloat(getComputedStyle(shell).getPropertyValue('--rail-width'));
   const namespace = 'researchhelper.workspace.';
   const stored = (key) => { try { return localStorage.getItem(namespace + key); } catch { return null; } };
   const save = (key, value) => { try { localStorage.setItem(namespace + key, String(value)); } catch { /* optional layout preference */ } };
   const storedWidth = Number(stored('rail'));
-  let preferredWidth = Number.isFinite(storedWidth) && storedWidth >= minimum ? Math.min(maximum, storedWidth) : fallback;
+  let preferredRail = Number.isFinite(storedWidth) && storedWidth > 0
+    ? Math.max(minimum, Math.min(maximum, storedWidth)) : fallback;
   let stopDrag = null;
   let stopReportDrag = null;
   const storedReport = Number(stored('report'));
   let preferredReport = Number.isFinite(storedReport) && storedReport >= 280 ? Math.min(480, storedReport) : 332;
   let lastNativeCollapsed = null;
+  const accountNavigationKeys = new Set(['Tab','Enter',' ','Escape','ArrowDown','ArrowUp','Home','End']);
   const items = () => Array.from(menu.querySelectorAll('[role="menuitem"]')).filter(item => !item.hidden && !item.disabled);
+  const setAccountInput = input => root.toggleAttribute('data-account-pointer', input === 'pointer');
+  const focusAccountControl = element => element?.focus({preventScroll:true});
   const focusItem = (position) => {
     const available = items();
     if (!available.length) return;
     const index = available.indexOf(document.activeElement);
-    (position === 'first' ? available[0] : position === 'last' ? available.at(-1) : available[(index + position + available.length) % available.length]).focus();
+    const next = position === 'first' ? available[0] : position === 'last' ? available.at(-1) : available[(index + position + available.length) % available.length];
+    focusAccountControl(next);
   };
   const closeAccountMenu = (restoreFocus = false) => {
     menu.hidden = true;
     toggle.setAttribute('aria-expanded', 'false');
     rail.dataset.accountMenuOpen = 'false';
-    if (restoreFocus) toggle.focus();
+    if (restoreFocus) focusAccountControl(toggle);
   };
-  const openAccountMenu = (position = 'first') => {
+  const openAccountMenu = position => {
     menu.hidden = false;
     toggle.setAttribute('aria-expanded', 'true');
     rail.dataset.accountMenuOpen = 'true';
-    focusItem(position);
+    if (position) focusItem(position);
   };
-  toggle.addEventListener('click', () => menu.hidden ? openAccountMenu() : closeAccountMenu());
+  toggle.addEventListener('click', event => {
+    const pointer = event.detail > 0;
+    setAccountInput(pointer ? 'pointer' : 'keyboard');
+    if (pointer) focusAccountControl(toggle);
+    if (menu.hidden) openAccountMenu(pointer ? null : 'first');
+    else closeAccountMenu();
+  });
   toggle.addEventListener('keydown', event => {
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
+    setAccountInput('keyboard');
     openAccountMenu(['ArrowUp', 'End'].includes(event.key) ? 'last' : 'first');
   });
   menu.addEventListener('click', event => {
-    if (event.target.closest('[role="menuitem"]:not([disabled])')) closeAccountMenu(true);
+    const item = event.target.closest('[role="menuitem"]:not(:disabled):not([hidden])');
+    if (!item || !menu.contains(item)) return;
+    setAccountInput(event.detail > 0 ? 'pointer' : 'keyboard');
+    closeAccountMenu(true);
   }, {capture: true});
   document.addEventListener('pointerdown', event => {
-    if (!root.contains(event.target)) closeAccountMenu();
+    setAccountInput('pointer');
+    if (!menu.hidden && !toggle.contains(event.target) && !menu.contains(event.target)) closeAccountMenu();
   });
   document.addEventListener('keydown', event => {
-    if (menu.hidden) return;
+    if (accountNavigationKeys.has(event.key)) setAccountInput('keyboard');
+    if (menu.hidden || event.defaultPrevented) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       closeAccountMenu(true);
     } else if (menu.contains(event.target) && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
       focusItem(event.key === 'Home' ? 'first' : event.key === 'End' ? 'last' : event.key === 'ArrowDown' ? 1 : -1);
-    } else if (event.key === 'Tab') closeAccountMenu();
+    } else if (event.key === 'Tab') {
+      // Let the browser continue traversal from the persistent trigger.
+      closeAccountMenu(menu.contains(event.target));
+    }
   });
   const maximumFor = () => {
-    const contextWidth = shell.dataset.reportOpen === 'true' && innerWidth > 1100
+    const reportOpen = shell.dataset.reportOpen === 'true';
+    const contextWidth = reportOpen && !compactReport.matches
       ? Number.parseFloat(getComputedStyle(shell).getPropertyValue('--report-width')) || 332 : 0;
-    return Math.max(minimum, Math.min(maximum, Math.floor(shell.getBoundingClientRect().width / coordinateScale() - 560 - 8 - contextWidth)));
+    const splitterWidth = reportOpen ? 16 : 8;
+    return Math.max(minimum, Math.min(maximum, Math.floor(shell.getBoundingClientRect().width / coordinateScale() - 560 - splitterWidth - contextWidth)));
   };
   const readWidth = () => Number.parseFloat(getComputedStyle(shell).getPropertyValue('--rail-width')) || fallback;
-  const applyWidth = (value, persist = false) => {
+  const applyWidth = value => {
     const limit = maximumFor();
     const width = Math.max(minimum, Math.min(limit, value));
     shell.style.setProperty('--rail-width', width + 'px');
     splitter.setAttribute('aria-valuenow', String(Math.round(width)));
     splitter.setAttribute('aria-valuemin', String(minimum));
     splitter.setAttribute('aria-valuemax', String(limit));
-    if (persist) { preferredWidth = width; save('rail', Math.round(width)); }
+    return width;
+  };
+  const saveRailWidth = width => {
+    preferredRail = Math.round(width);
+    save('rail', preferredRail);
   };
   const readReportWidth = () => Number.parseFloat(getComputedStyle(shell).getPropertyValue('--report-width')) || 332;
   const reportMaximum = () => {
@@ -110,8 +137,9 @@
     contextSplitter.tabIndex = reportResizable ? 0 : -1;
     contextSplitter.setAttribute('aria-hidden',String(!reportResizable));
     if (!reportResizable) stopReportDrag?.();
+    // The viewport may temporarily narrow the rail. Keep the user's chosen width.
+    if (!stopDrag) applyWidth(preferredRail);
     applyReportWidth(preferredReport);
-    applyWidth(preferredWidth);
     if (location.protocol === 'http:' && location.pathname === '/' && !mobile.matches && lastNativeCollapsed !== collapsed) {
       const bridge = window.webkit?.messageHandlers?.researchhelper;
       if (bridge) {
@@ -135,15 +163,20 @@
     const move = next => { if (next.pointerId === pointer) applyWidth(startWidth + (next.clientX - startX) / scale); };
     const stop = () => {
       shell.dataset.resizing = 'false';
-      preferredWidth = readWidth(); save('rail', Math.round(preferredWidth));
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', finish);
       window.removeEventListener('pointercancel', finish);
       window.removeEventListener('blur', stop);
       if (splitter.hasPointerCapture?.(pointer)) splitter.releasePointerCapture(pointer);
       stopDrag = null;
+      applyWidth(preferredRail);
     };
-    const finish = next => { if (next.pointerId === pointer) stop(); };
+    const finish = next => {
+      if (next.pointerId !== pointer) return;
+      const width = readWidth();
+      if (next.type === 'pointerup' && width !== startWidth) saveRailWidth(width);
+      stop();
+    };
     stopDrag = stop;
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', finish);
@@ -152,10 +185,12 @@
   });
   splitter.addEventListener('keydown', event => {
     if (mobile.matches || shell.dataset.railCollapsed === 'true') return;
-    const step = event.shiftKey ? 40 : 16;
-    const next = {ArrowLeft: readWidth() - step, ArrowRight: readWidth() + step, Home: minimum, End: maximumFor()};
+    const width = readWidth(), step = event.shiftKey ? 40 : 16;
+    const next = {ArrowLeft: width - step, ArrowRight: width + step, Home: minimum, End: maximumFor()};
     if (!(event.key in next)) return;
-    event.preventDefault(); applyWidth(next[event.key], true);
+    event.preventDefault();
+    const resized = applyWidth(next[event.key]);
+    if (resized !== width) saveRailWidth(resized);
   });
   // OH report-library separator, independent preference and no research write.
   contextSplitter.addEventListener('pointerdown', event => {
@@ -275,43 +310,68 @@
   shell.dataset.railCollapsed = String(stored('railCollapsed') === 'true');
   syncRail();
   requestAnimationFrame(() => requestAnimationFrame(() => { shell.dataset.layoutReady = 'true'; }));
-  let workMenu=null;
-  const menuItems=menu=>[...menu.querySelectorAll('[role="menuitem"]:not(:disabled)')];
-  function closeWorkMenu(restore=false){
-    if(!workMenu)return;
-    const menu=workMenu;workMenu=null;
-    menu.querySelector('[role="menu"]').hidden=true;
-    const button=menu.querySelector('[data-work-menu-toggle]');button.setAttribute('aria-expanded','false');
-    if(restore&&button.isConnected)button.focus({preventScroll:true});
+  const activeWorkTrigger = () => shell.querySelector('[data-work-menu-toggle][aria-expanded="true"]');
+  const workMenuItems = menu => [...menu.querySelectorAll('[role="menuitem"]:not(:disabled):not([hidden])')];
+  function closeWorkMenu(restoreFocus = false) {
+    const trigger = activeWorkTrigger();
+    if (!trigger) return;
+    trigger.closest('[data-work-menu]').querySelector('[role="menu"]').hidden = true;
+    trigger.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) trigger.focus({preventScroll: true});
   }
-  function openWorkMenu(menu,focus=false){
-    closeWorkMenu();workMenu=menu;
-    menu.querySelector('[role="menu"]').hidden=false;
-    menu.querySelector('[data-work-menu-toggle]').setAttribute('aria-expanded','true');
-    if(focus)menuItems(menu)[0]?.focus({preventScroll:true});
+  function openWorkMenu(trigger, position) {
+    closeWorkMenu();
+    const menu = trigger.closest('[data-work-menu]').querySelector('[role="menu"]');
+    menu.hidden = false;
+    trigger.setAttribute('aria-expanded', 'true');
+    const items = workMenuItems(menu);
+    const destination = position === 'first' ? items[0] : position === 'last' ? items.at(-1) : trigger;
+    (destination || trigger).focus({preventScroll: true});
   }
-  document.addEventListener('click',event=>{
-    const trigger=event.target.closest('[data-work-menu-toggle]');
-    if(trigger){const menu=trigger.closest('[data-work-menu]');if(workMenu===menu)closeWorkMenu();else openWorkMenu(menu);return;}
-    if(event.target.closest('[data-work-menu] [role="menuitem"]')){closeWorkMenu(true);return;}
-    if(workMenu&&!workMenu.contains(event.target))closeWorkMenu();
-  });
-  document.addEventListener('keydown',event=>{
-    const trigger=event.target.closest('[data-work-menu-toggle]');
-    if(trigger&&['ArrowDown','ArrowUp'].includes(event.key)){
-      event.preventDefault();openWorkMenu(trigger.closest('[data-work-menu]'),true);
-      if(event.key==='ArrowUp')menuItems(workMenu).at(-1)?.focus();return;
+  document.addEventListener('click', event => {
+    const trigger = event.target.closest('[data-work-menu-toggle]');
+    const active = activeWorkTrigger();
+    if (trigger) {
+      if (trigger === active) closeWorkMenu(true);
+      else openWorkMenu(trigger, event.detail > 0 ? null : 'first');
+    } else if (active && active.closest('[data-work-menu]').contains(event.target.closest('[role="menuitem"]'))) {
+      closeWorkMenu(true);
     }
-    if(!workMenu)return;
-    if(event.key==='Escape'){event.preventDefault();closeWorkMenu(true);return;}
-    if(event.key==='Tab'){closeWorkMenu(true);return;}
-    if(!['ArrowDown','ArrowUp','Home','End'].includes(event.key))return;
-    event.preventDefault();const items=menuItems(workMenu),index=items.indexOf(document.activeElement);
-    const next=event.key==='Home'?0:event.key==='End'?items.length-1:(index+(event.key==='ArrowDown'?1:-1)+items.length)%items.length;
-    items[next]?.focus();
+  }, {capture: true});
+  for (const eventType of ['pointerdown', 'focusin']) {
+    document.addEventListener(eventType, event => {
+      const active = activeWorkTrigger();
+      if (active && !active.closest('[data-work-menu]').contains(event.target)) closeWorkMenu();
+    });
+  }
+  const menuNavigation = {ArrowDown: 1, ArrowUp: -1, Home: 0, End: -1};
+  document.addEventListener('keydown', event => {
+    if (event.defaultPrevented) return;
+    const trigger = event.target.closest('[data-work-menu-toggle]');
+    const navigationKey = Object.hasOwn(menuNavigation, event.key);
+    if (trigger && navigationKey) {
+      event.preventDefault();
+      openWorkMenu(trigger, ['ArrowUp', 'End'].includes(event.key) ? 'last' : 'first');
+      return;
+    }
+    const menu = activeWorkTrigger()?.closest('[data-work-menu]');
+    if (!menu?.contains(event.target)) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeWorkMenu(true);
+    } else if (event.key === 'Tab') {
+      closeWorkMenu(true);
+    } else if (navigationKey) {
+      event.preventDefault();
+      const items = workMenuItems(menu);
+      const index = items.indexOf(document.activeElement);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+        : (index + menuNavigation[event.key] + items.length) % items.length;
+      items[next]?.focus({preventScroll: true});
+    }
   });
   window.RHWorkspaceControls = {
-    setRailCollapsed, closeAccountMenu, syncRail, syncAssistant, syncViewIndicator,
+    compactReport, setRailCollapsed, closeAccountMenu, closeWorkMenu, setAccountInput, syncRail, syncAssistant, syncViewIndicator,
     setAccount(account, authenticated) {
       root.querySelectorAll('[data-account-label], [data-account-menu-label]').forEach(label => { label.textContent = account || '离线研究'; });
       root.querySelectorAll('[data-auth-required]').forEach(item => { item.hidden = !authenticated; });
