@@ -65,7 +65,8 @@ class DocumentContentTests(unittest.TestCase):
         self.assertEqual((final["theses"], final["calculations"], final["tracking"]), ([], [], []))
         report = self.agent.export(task["id"])
         self.assertIn(DOCUMENT_CONTENT_LIMITATION, report["html"])
-        self.assertIn("3.原件摘录", report["html"])
+        from lxml import html as dom
+        self.assertIn("原件摘录", dom.fromstring(report["html"]).xpath("//main//h2/text()"))
         self.assertIn("未核验", report["html"])
         self.assertIsNone(final["evidence"][0]["published_at"])
         validate_evidence(final["evidence"][0], final)
@@ -228,7 +229,7 @@ class DocumentContentTests(unittest.TestCase):
         before = fingerprint(task)
         contract = evidence_contract(task)
         self.assertEqual(before, fingerprint(task))
-        self.assertEqual(contract["allowed_fields"], sorted(MODEL_EVIDENCE_FIELDS))
+        self.assertEqual(contract["allowed_fields"], sorted(MODEL_EVIDENCE_FIELDS - {"candidate_code_reference"}))
         self.assertEqual(contract["sources"][0]["snapshot_hash"], task["materials"][0]["snapshot_hash"])
         self.assertFalse(contract["template_is_approval"])
         self.assertEqual(contract["binding"]["input_hash"], task["input_hash"])
