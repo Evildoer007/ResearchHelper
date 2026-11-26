@@ -3,25 +3,61 @@ import copy
 import json
 from pathlib import Path
 import socket
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock,patch
 
+from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError,charge,fingerprint
 from researchhelper.engine import ResearchAgent
-from researchhelper.model import ModelCompletionError
+from researchhelper.model import ModelCompletionError, ModelService, ModelSettings
+from researchhelper.planning import question_specs
 from researchhelper.reasoning import planning_digest
 
 ROOT=Path(__file__).resolve().parents[1]
-RETAINED=ROOT/'result/acceptance/one-sentence-research-vm0gp5kr/task.json'
 
 
 class CompletedPlanningFormatRecoveryTests(unittest.TestCase):
     def setUp(self):
-        self.original=RETAINED.read_bytes();self.task=json.loads(self.original)
-        self.task.update(status='运行中',planning_submission_recovery_version=1)
-        self.task.setdefault('reasoning_state',{})
-        self.agent=ResearchAgent.__new__(ResearchAgent)
+        guard = patch.object(socket.socket, 'connect', side_effect=AssertionError('No external calls'))
+        guard.start()
+        self.addCleanup(guard.stop)
+        folder = TemporaryDirectory(prefix='rh-plan-format-')
+        self.addCleanup(folder.cleanup)
+        self.agent = ResearchAgent(ResearchArchive(folder.name), ROOT, offline=True, require_argument_support=True)
+        self.addCleanup(self.agent.close_runtime)
+        self.task = self.agent.create('核对510500.SH在2026年9月28日的收盘价。', entry='ETF',
+                                     objects=['510500.SH'], research_mode='current')
+        self.task.update(status='运行中', batch=1, reasoning_state={})
+        self.agent._adopt_method_knowledge(self.task)
+        parameters = dict(codes='510500.SH', indicators='close', startdate='2026-09-28', enddate='2026-09-28',
+                          functionpara=dict(Currency='RMB', CPS='1', Fill='Omit'))
+        self.valid_proposal = dict(questions=question_specs(self.task), calculations=[], data_requests=[
+            dict(id='close_price', source='ifind', operation='cmd_history_quotation',
+                 parameters=parameters, question_ids=['q1'])])
+
+        # Run the real structured decoder on a completed Responses envelope.
+        # Only the provider bytes are synthetic, so the dispatch hash and safe
+        # structural diagnostic come from the same path used by archived tasks.
+        wire = dict(version=3, main_question=dict(self.valid_proposal['questions'][0], extra='DO_NOT_KEEP'),
+                    additional_questions=[], data_requests=[], calculations=[])
+        response = dict(object='response', status='completed', error=None, incomplete_details=None, output=[
+            dict(type='message', role='assistant', status='completed',
+                 content=[dict(type='output_text', text=json.dumps(wire))])])
+        settings = ModelSettings(folder.name)
+        settings.save(dict(endpoint='https://api.deepseek.com/responses', model='deepseek-flash',
+                           api_key='RH_FIXTURE_NOT_A_KEY'))
+        service = ModelService(settings, offline=False)
+        def completed_response(task, request, started, timeout, record):
+            record.update(response_body_complete=True, synthetic_test_double=True)
+            return json.dumps(response).encode()
+
+        with patch.object(service, '_request_bytes', side_effect=completed_response):
+            with self.assertRaises(ModelCompletionError):
+                service.reason_structured_plan(self.task, [])
+        self.assertEqual(self.task['ledger']['dispatches'][-1]['structured_output_diagnostic']['schema_issues'],
+                         [dict(code='unknown_fields', path='$.main_question')])
         self.agent.model=SimpleNamespace()
         self.agent._active=Mock(return_value=self.task)
         self.agent._save_model_checkpoint=Mock()
@@ -31,11 +67,8 @@ class CompletedPlanningFormatRecoveryTests(unittest.TestCase):
         self.index=len(self.task['ledger']['dispatches'])-1
         self.limits=copy.deepcopy(self.task['ledger']['limits'])
         self.proposal=dict(questions=[],data_requests=[],calculations=[])
-        guard=patch.object(socket.socket,'connect',side_effect=AssertionError('No external calls'))
-        guard.start();self.addCleanup(guard.stop)
 
     def tearDown(self):
-        self.assertEqual(RETAINED.read_bytes(),self.original)
         self.assertEqual(self.task['ledger']['limits'],self.limits)
 
     def submit(self,model,task,phase,payload,fields):
@@ -88,7 +121,7 @@ class CompletedPlanningFormatRecoveryTests(unittest.TestCase):
     def test_semantic_enum_pattern_and_resource_errors_do_not_gain_retry(self):
         event=self.task['ledger']['dispatches'][-1]
         for code in ('enum_mismatch','pattern_mismatch','array_limit','bound_mismatch','shape_limit'):
-            event['structured_output_diagnostic']['schema_issues']=[dict(code=code,path='$.questions[*]')]
+            event['structured_output_diagnostic']['schema_issues']=[dict(code=code,path='$.main_question')]
             with self.subTest(code=code),patch('researchhelper.engine.model_object') as call:
                 self.assertIsNone(self.recover());call.assert_not_called()
 
@@ -144,14 +177,13 @@ class CompletedPlanningFormatRecoveryTests(unittest.TestCase):
 
     def test_diagnostic_accepts_no_private_unknown_field_names_or_values(self):
         event=self.task['ledger']['dispatches'][-1]
-        event['structured_output_diagnostic']['schema_issues']=[dict(code='unknown_fields',path='$.questions[*]',value='PRIVATE')]
+        event['structured_output_diagnostic']['schema_issues']=[dict(code='unknown_fields',path='$.main_question',value='PRIVATE')]
         with patch('researchhelper.engine.model_object') as call:
             self.assertIsNone(self.recover());call.assert_not_called()
 
     def prepare_call(self,*,second_invalid=False,first_valid=False):
         """Use the actual ordinary planner and validator, not a fake adoption."""
-        retained=json.loads((ROOT/'result/acceptance/one-sentence-research-3s5f7b02/task.json').read_text())
-        proposed=copy.deepcopy(retained['reasoning_state']['plan']['proposed'])
+        proposed=copy.deepcopy(self.valid_proposal)
         event=copy.deepcopy(self.task['ledger']['dispatches'][-1])
         self.task['ledger']['used']['model_calls']=0
         self.task['ledger']['dispatches']=[]
@@ -214,7 +246,7 @@ class CompletedPlanningFormatRecoveryTests(unittest.TestCase):
         model_object(author,self.task,'plan',{}, {'questions','data_requests','calculations'})
         body=json.loads(author.messages[1]['content'])
         self.assertEqual(body['planning_format_feedback']['schema_issues'],[
-            dict(code='unknown_fields',path='$.questions[*]')])
+            dict(code='unknown_fields',path='$.main_question')])
         self.assertIn('上次规划响应已完整返回',author.messages[0]['content'])
         self.assertNotIn('proposed_specs',body)
 
@@ -230,9 +262,8 @@ class CompletedPlanningFormatRecoveryTests(unittest.TestCase):
         model.reason_structured_plan.assert_not_called()
 
     def test_new_formal_task_has_one_slot_but_document_and_fixture_do_not(self):
-        import tempfile
         from researchhelper.archive import ResearchArchive
-        with tempfile.TemporaryDirectory(prefix='planning-recovery-create-',dir=ROOT/'result/acceptance') as folder:
+        with TemporaryDirectory(prefix='planning-recovery-create-') as folder:
             agent=ResearchAgent(ResearchArchive(Path(folder)/'store'),ROOT,offline=True,require_argument_support=True)
             try:
                 self.assertEqual(agent.create('研究基金')['planning_submission_recovery_version'],1)
