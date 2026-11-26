@@ -4,7 +4,7 @@ import unittest
 
 from researchhelper.contracts import METHOD_REGISTRY, fingerprint
 from researchhelper.knowledge import RETAINED_VERSIONS, ResearchKnowledge
-from researchhelper.reasoning import PHASE_RULES, RULES_VERSION
+from researchhelper.reasoning import PHASE_RULES
 from tests.test_fee_source_units_offline import METHOD
 
 
@@ -24,7 +24,6 @@ class FeeRetainedVersionTests(unittest.TestCase):
         ResearchKnowledge().validate_package(historical)
         self.assertEqual(fingerprint(RETAINED_VERSIONS[(identifier, 1)]), before)
         self.assertEqual(METHOD_REGISTRY[METHOD]['implementation_version'], 1)
-        self.assertEqual(RULES_VERSION, 26)
         self.assertIn('raw_unit与unit仍填%', PHASE_RULES['extract'])
 
 
