@@ -1,5 +1,6 @@
-"""Real three-original capacity regression; closed research stays immutable."""
+"""Three full official originals through the wire contracts using offline fixtures."""
 import copy
+from functools import lru_cache
 import json
 import socket
 import tempfile
@@ -7,8 +8,12 @@ import unittest
 from unittest.mock import patch
 
 from tests import ROOT
+from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import ContractError, canonical, fingerprint
+from researchhelper.engine import ResearchAgent
+from researchhelper.evidence import EvidenceCollector
 from researchhelper.model import ModelSettings, ModelService
+from researchhelper.official_sources import release_choices
 from researchhelper.output_schema import (original_span_output_schema, original_span_prompt,
     decode_original_spans, _original_number_tokens)
 from researchhelper.financial_sources import original_line_index
@@ -16,14 +21,64 @@ from researchhelper.planning import input_fingerprint, question_specs
 from researchhelper.reasoning import (evidence_contract, extractable_source_views,
     model_object, PHASE_FIELDS, MAX_CONTEXT_CHARACTERS)
 
-RETAINED = ROOT / 'result/acceptance/one-sentence-research-heof9ywh/task.json'
+@lru_cache(maxsize=1)
+def original_capacity_fixture():
+    """Register complete, distinct HTML originals through the real adapter.
+
+    Keep the older wire policies these regression tests exercise. The sample
+    uses simulated transport and needs no past research or credentials.
+    """
+    question = '核对三份合成采购经理指数材料中的读数和变化'
+    questions = [
+        dict(id='q1', question='本期制造业PMI是什么', kind='fact',
+             evidence_needs=['本期制造业PMI读数', '明确统计月份']),
+        dict(id='q2', question='如何区分读数和变动', kind='mechanism',
+             evidence_needs=['相较上期的变动', '分项读数']),
+    ]
+    publications = {}
+    for index, category in enumerate(('制造业', '非制造业', '综合'), 1):
+        url = f'https://www.stats.gov.cn/sj/zxfbhjd/202609/t20260930_{8000+index}.html'
+        title = f'2026年9月份{category}合成统计原件'
+        paragraphs = [f'<h1>{title}</h1>',
+                      f'<p>合成测试读数：{category}采购经理指数为50.{index}%，比上月上升0.2个百分点。</p>']
+        for row in range(88):
+            digits = [f'{41+(column+row)%18}.{column%10}%' for column in range(12)]
+            paragraphs.append(f'<p>合成序列样本{row+1}，分组读数依次为'+'、'.join(digits)+'。</p>')
+        publications[url] = (title, ('<html><body>'+''.join(paragraphs)+'</body></html>').encode())
+    catalogue = ''.join(f'<a href="{url}">{title}</a>' for url, (title, _) in publications.items()).encode()
+
+    def response(task, url, started, timeout, event, **kwargs):
+        event.update(transport_isolated=True, network_request_started=True, network_worker_reaped=True)
+        return catalogue if url.endswith('/zxfbhjd/') else publications[url][1]
+
+    with tempfile.TemporaryDirectory(prefix='multi-original-fixture-', dir=ROOT/'result/acceptance') as folder:
+        agent = ResearchAgent(ResearchArchive(folder), ROOT, offline=True, require_argument_support=True)
+        try:
+            task = agent.create(question, entry='宏观', intent='解释变化', objects=['中国制造业PMI'],
+                                research_mode='current', questions=questions)
+            policies = {'official_channels_version', 'statistical_period_version',
+                        'original_span_selection_version', 'original_number_reference_version',
+                        'general_original_selection_version', 'original_quantity_qualifier_version'}
+            task = {key: value for key, value in task.items() if not key.endswith('_version') or key in policies}
+            task['input_hash'] = input_fingerprint(task)
+            collector = EvidenceCollector(offline=False)
+            with patch.object(socket.socket, 'connect', side_effect=AssertionError('Offline originals')), \
+                 patch('researchhelper.source_transport.official_html', side_effect=response):
+                task['source_records'].append(collector.external(task, 'official', 'release_catalog',
+                    dict(channel='nbs_release', page='0'), {}))
+                for choice in release_choices(task):
+                    task['source_records'].append(collector.external(task, 'official', 'release_original',
+                        {key: choice[key] for key in ('catalog_id', 'release_id')}, {}))
+            return task
+        finally:
+            agent.close_runtime()
 
 
 class MultiOriginalCapacityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.protected = RETAINED.read_bytes()
-        cls.task = json.loads(cls.protected)
+        cls.protected = fingerprint(original_capacity_fixture())
+        cls.task = copy.deepcopy(original_capacity_fixture())
         cls.task['general_original_selection_version'] = 2
         cls.task['input_hash'] = input_fingerprint(cls.task)
         cls.views = extractable_source_views(cls.task)
@@ -38,8 +93,8 @@ class MultiOriginalCapacityTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        if RETAINED.read_bytes() != cls.protected:
-            raise AssertionError('Closed live study changed')
+        if fingerprint(original_capacity_fixture()) != cls.protected:
+            raise AssertionError('Original fixture changed')
 
     def setUp(self):
         guard = patch.object(socket.socket, 'connect', side_effect=AssertionError('No network'))
