@@ -51,7 +51,8 @@ class DraftRequestSerialization(unittest.TestCase):
 
     def test_bad_optional_request_does_not_discard_good_independent_request(self):
         task=copy.deepcopy(TASK);accepted=[]
-        def receive(task,requests):
+        def receive(task,requests,*,first_report=False):
+            self.assertTrue(first_report)
             for request in requests:
                 validate_market_request(task,'ifind','cmd_history_quotation',request['parameters'])
                 accepted.append(request)
