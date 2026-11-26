@@ -41,7 +41,8 @@ class SkillFollowupContextTests(unittest.TestCase):
         context = tools["evidence"]["research_scope"]["conversation_context"]
         self.assertEqual(context["parent_binding"]["task_id"], parent["id"])
         self.assertIn("600036.SH", context["previous_question"]["text"])
-        self.assertEqual(tools["analysis"]["research_scope"]["conversation_context"], context)
+        self.assertNotIn("previous_answer", context)
+        self.assertEqual(tools["analysis"]["research_scope"]["conversation_context"], child['conversation_context'])
         self.assertEqual(self.session.status(parent["id"]), old)
         self.assertEqual(self.session.archive.report(parent["id"], 1), frozen)
         reopened = MODULE.Session(self.session.project)
