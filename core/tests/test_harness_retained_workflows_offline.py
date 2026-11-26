@@ -7,14 +7,20 @@ import base64
 import copy
 import html
 import unittest
+from unittest.mock import patch
 
+from lxml import html as dom
+from researchhelper.argument_support import make_record
 from researchhelper.contracts import ContractError, DOCUMENT_CONTENT_LIMITATION, budget, fingerprint, validate_evidence
 from researchhelper.reasoning import evidence_contract, validate_supplement
+from researchhelper.reports import render
+from tests import ROOT
 from tests import test_autonomous_supplement_contracts_offline as supplement
 from tests import test_document_content_offline as documents
 from tests import test_question_plan_interfaces_offline as interfaces
 from tests import test_publication_guard_workflow_compat_offline as workflow
 from tests import test_version_review_offline as versions
+from tests.test_argument_support_workflow import assessed
 
 
 class RetainedHarnessWorkflowTests(unittest.TestCase):
@@ -71,19 +77,29 @@ class RetainedHarnessWorkflowTests(unittest.TestCase):
         report = fixture.agent.export(done['id'])
         for text in (DOCUMENT_CONTENT_LIMITATION, '原件摘录', '未核验', done['evidence'][0]['text']):
             self.assertIn(html.escape(text, quote=True), report['html'])
-        self.assertNotIn('<nav', report['html'])
+        paper = dom.document_fromstring(report['html'])
+        self.assertTrue(paper.xpath('//nav//a[@href="#facts"]'))
+        self.assertFalse(paper.xpath('//main//nav'))
         self.assertEqual(fixture.agent.export(done['id']), report)
 
-    def test_version_review_keeps_both_conditions_without_a_directory(self):
+    def test_detailed_version_review_keeps_both_judgments_and_conditions(self):
         fixture = self.fixture(versions.VersionReviewTests)
         before = fixture.complete(dict(versions.RULE, benchmark='<原条件>'))
         frozen = copy.deepcopy(fixture.agent.archive.report(before['id'], before['version']))
         after = fixture.update(before)
         report = fixture.agent.export(after['id'])
+        detailed = render(report['content'], ROOT, report_profile='detailed')
+        detail_paper = dom.document_fromstring(detailed)
+        comparison = detail_paper.xpath('//main//section[@id="changes"]')[0].text_content()
         for text in ('版本1判断', '版本2判断', '原版适用资格解释', '本版适用资格解释',
-                     '下一次主动更新', '&lt;原条件&gt;'):
-            self.assertIn(text, report['html'])
-        self.assertNotIn('<nav', report['html'])
+                     '下一次主动更新', '<原条件>', '尚待复核'):
+            self.assertIn(text, comparison)
+        self.assertIn('本版资格条款', detail_paper.xpath('//main//section[@id="risk"]')[0].text_content())
+        self.assertIn('&lt;原条件&gt;', detailed)
+        self.assertTrue(detail_paper.xpath('//nav//a[@href="#changes"]'))
+        standard = dom.document_fromstring(report['html'])
+        self.assertNotIn('原版适用资格解释', standard.xpath('//main')[0].text_content())
+        self.assertTrue(standard.xpath('//main//a[@href="#version-original-conditions"]'))
         self.assertEqual(fingerprint(report['content']), after['delivery']['digest'])
         self.assertEqual(fixture.agent.archive.report(before['id'], before['version']), frozen)
 
@@ -122,10 +138,18 @@ class RetainedHarnessWorkflowTests(unittest.TestCase):
             'review': {'question_ids': ['q1'], 'allowed_natures': ['合同政策条款'],
                 'conditions': ['只核对本原件条款日期'], 'reason': '原件与研究问题相符',
                 'evidence_need_ids': {'q1': needs}}}
-        fixture.post(route+'/start', {'host_result': {'evidence_specs': [spec],
-            'answers': {'q1': {'answer': '2026年7月19日生效。', 'refs': ['local']}}}})
-        worker = fixture.server.agent.workers[task['id']]
-        worker.join(10)
+        agent = fixture.server.agent
+
+        def review(current, proposal, selected):
+            self.assertEqual(set(selected), {'q1'})
+            _, result = assessed(current, proposal)
+            current.setdefault('argument_support_reviews', []).append(make_record(current, proposal, result, actor='host'))
+
+        with patch.object(agent, '_prepare_argument_review', side_effect=review):
+            fixture.post(route+'/start', {'host_result': {'evidence_specs': [spec],
+                'answers': {'q1': {'answer': '2026年7月19日生效。', 'refs': ['local']}}}})
+            worker = agent.workers[task['id']]
+            worker.join(10)
         self.assertFalse(worker.is_alive())
         done = fixture.server.agent.archive.get(task['id'])
         self.assertEqual(done['status'], '已完成', done.get('error'))
@@ -135,4 +159,5 @@ class RetainedHarnessWorkflowTests(unittest.TestCase):
         self.assertEqual(done['ledger']['used']['data_requests'], 0)
         self.assertEqual(done['evidence'][0]['source_receipt']['component'], 'EvidenceCollector')
         self.assertEqual(done['evidence'][0]['applicability_receipt']['component'], 'ResearchAnalyzer')
+        self.assertEqual(len(done['argument_support_reviews']), 1)
         self.assertEqual(fixture.server.agent.export(done['id'])['content']['questions'], done['questions'])
