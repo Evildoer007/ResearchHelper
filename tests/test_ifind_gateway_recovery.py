@@ -75,12 +75,15 @@ class IFindGatewayRecoveryTests(unittest.TestCase):
         self.assertEqual(self.task['ledger']['used']['data_requests'], 2)
 
     def test_other_http_statuses_never_retry_or_expose_body(self):
+        categories = {401: 'authentication_failed', 403: 'permission_denied', 429: 'rate_limited'}
         for status in (400, 401, 403, 429, 500, 504):
             before = len(self.calls)
             with self.subTest(status=status), self.assertRaises(ContractError) as error:
                 self.query([status, dict(errorcode=0, tables=[])])
             self.assertEqual(len(self.calls), before+1)
             self.assertNotIn('LOCAL_PRIVATE', str(error.exception))
+            self.assertEqual(self.task['ledger']['dispatches'][-1].get('supplier_rejection_category'),
+                             categories.get(status))
             # Independent request range for the next fixture; never clears a ledger.
             self.params['beginrDate'] = '2026-01-%02d' % (status % 20 + 1)
 
