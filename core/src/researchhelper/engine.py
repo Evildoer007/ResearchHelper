@@ -11,28 +11,32 @@ import time
 import uuid
 from pathlib import Path
 
-from .archive import ResearchArchive
+from .archive import ArchiveRecordError, ResearchArchive
 from .analyzer import ResearchAnalyzer
 from .cases import CUTOFF, get_case
-from .contracts import (ContractError, MethodNotApplicable, DOCUMENT_CONTENT_INTENT, DOCUMENT_CONTENT_SCOPE, DOCUMENT_CONTENT_LIMITATION,
+from .contracts import (ContractError, ExecutionTimeExhausted, FollowupParentChanged, MINIMUM_SAVE_SECONDS, MethodNotApplicable,
+                        DOCUMENT_CONTENT_INTENT, DOCUMENT_CONTENT_SCOPE, DOCUMENT_CONTENT_LIMITATION,
                         document_content_answer, missing_document_requirements, missing_evidence_requirements, evidence_requirements,
                         ENTRIES, INTENTS, METHOD_REGISTRY, FINANCIAL_PERIOD_METHODS, budget, calculate, calculation_dependency_hash, canonical,
-                        charge, context, dependency_versions, fingerprint, module_result, now, request, supplement, timepoint,
+                        charge, context, dependency_versions, fingerprint, module_result, now, recovery_time_block, request, supplement, timepoint,
                         tracking_record, validate_tracking, validate_evidence, validate_request, validate_result)
 from .evidence import (EvidenceCollector, FILING_REQUEST_REGISTRY, business_payload, candidate_evidence, data_request_contract,
                        extract_material, filing_record, material_record, snapshot_record,
                        validate_filing_original_request, validate_ifind_report_request,
-                       available_security_codes, identity_resolutions)
+                       available_security_codes, identity_resolutions, original_download_recovery)
 from .evidence import filing_candidate_choices, record_request_purpose
 from .evidence import (FIELD_REGISTRY, reference_groups, current_snapshot_reference, api_calculation_context_contract,
-                       expand_api_cell_selections, API_CELL_CHOICE_COVERAGE_VERSION, current_query_reference)
+                       expand_api_cell_selections, API_CELL_CHOICE_COVERAGE_VERSION, current_query_reference, CURRENT_MARKET_OBSERVATION_VERSION)
 from .financial_sources import FINANCIAL_METRIC_BINDING_VERSION, expand_financial_value_references, IFIND_METADATA_REGISTRY
-from .knowledge import ResearchKnowledge
+from .knowledge import DRAFT_DEFINITION_POLICY, GENERAL_DEFINITION_SCOPE, ResearchKnowledge, definition_only
 from .numeric_integrity import bind_numeric_statement
 from . import judgment_review
 from . import argument_support
-from .model import ModelCompletionError, analysis_completion_failure
+from .model import ModelCompletionError, ModelService, analysis_completion_failure
+from .transport import TransportFailure
 from .planning import DIRECT_KINDS, build_plan, research_brief, validate_question_revision, validate_definition_actions, conversation_context, input_fingerprint, normalize_questions, plan_preservation_contract, question_specs, question_contract, thesis_obligations
+from .planning import (CONVERSATION_CONTEXT_LIMIT, CONVERSATION_CONTEXT_VERSION, CONVERSATION_ROUND_LIMIT,
+                       conversation_excerpt, declared_research_cutoff)
 from .reasoning import (model_object, validate_analysis_output, validate_analysis_execution, analysis_execution_contract, analysis_numeric_review, calculation_input_requirements, QueryReferenceFormatError, NumericSegmentFormatError, ModelJSONFormatError,
                         original_sources, planning_digest, source_views, extractable_source_views, evidence_contract, analysis_contract, calculation_plan_contract,
                         SUPPLEMENT_FIELDS, API_EXTRACTION_GUIDANCE_VERSION, CALCULATION_BINDING_PROMPT_VERSION,
@@ -43,9 +47,268 @@ from .reasoning import (model_object, validate_analysis_output, validate_analysi
 from .source_reader import (binding as reading_binding, catalog as source_catalog, context_sources,
                             read as read_sources, validate_reading, validate_read_specs, retained_reading, ReadingSelectionError,
                             reader_version_for, registered_reading_requests)
+from .subject_scope import (SUBJECT_SWITCH, carried_exclusions, object_mentions as _object_mentions,
+                            scope_question, stated_subject_scope, subject_allowed, subject_key)
 
 
-from .layout import default_resource_root
+from .layout import default_resource_root, require_report_resources
+
+
+_ARGUMENT_GAP_TEXT = {
+    'argument_review_pending': '论证复核未完成，未采用未经复核的研究回答与判断。',
+    'argument_answer_withheld': '本问题的回答未通过论证复核，未采用该陈述；原始资料与登记计算保留。',
+    'argument_claims_withheld': '部分陈述缺少足够依据，未采用对应回答或论点；已核验原值和计算保留。',
+}
+_ORDINAL = r'([0-9]{1,2}|[一二两三四五六七八九十]{1,3})(?![0-9一二两三四五六七八九十百千万])'
+_ROUND_REFERENCE = re.compile(r'第\s*' + _ORDINAL + r'\s*轮(?!融资|补证|实验|比赛|谈判)')
+_ROUND_SUBJECT_REFERENCE = re.compile(
+    r'^\s*(?:(?:那么|请|那|先)\s*){0,3}(?:切回|回到|改回|改看|换回|换成|沿用|重新研究|继续研究|再看|只看|研究|用)\s*'
+    r'第\s*' + _ORDINAL + r'\s*轮\s*(?:的|[里中]的?)?\s*(?:那(?:只|个|家)|两(?:只|个))?'
+    r'(?:研究标的|研究对象|标的|对象|个股|股票|公司|基金|ETF|指数|指标)'
+    r'(?=\s*(?:$|[，,。；;！？?!、：:的在于]|\d))')
+_LOGIC_REFERENCE = re.compile(r'(?:策略逻辑|逻辑|策略)\s*(?:第\s*)?' + _ORDINAL
+                              + r'|第\s*' + _ORDINAL + r'\s*条(?:策略逻辑|逻辑|策略)')
+_ROUND_JOINER = re.compile(r'[\s、，,]*(?:(?:以及|和|与|及|或|对比|相比)\s*)?')
+_FOCUSED_ROUND_LIMIT = 3
+_FOCUSED_LOGIC_LIMIT = 3
+_COMPARISON_WORDS = re.compile(r'比较|对比|相比|对照')
+_COMPARISON_SIDES = ('前者', '后者')
+_COMPARISON_FOLLOWUP = re.compile(
+    r'(?:(?:那么|那|请问|请|再|先|接着|继续|只|仅|单独|改看|核对|比较|对比|对照|研究|分析|看看|看|把|将)[\s，,]*){0,6}')
+_COMPARISON_SUBJECT_JOIN = r'(?:以及|与|和|及|或|、|相较于?|相对于?|对比|对照|相比)'
+_SAME_SUBJECT = re.compile(r'^(?:它|其|该|上述|这只|这个指标|同一(?:标的|对象|证券|指数|公司|基金|指标))')
+_SUBJECT_REFERENCE = re.compile(
+    r'(?<!其)它|该(?:股|公司|基金|对象|指标)|前者|后者|两者|二者|上述|这(?:只|家|些|两|个(?:标的|对象|指数|指标))|那两|'
+    r'(?:之前|原(?:来)?)的?(?:那只|那两只|标的|对象|个股|公司|基金|ETF|指数|指标)|同一(?:标的|对象|公司|基金|指标)')
+_PLURAL_REFERENCE = re.compile(r'两者|二者|(?:这|那|上述)两')
+_OBSERVATION_WINDOW_EDIT = re.compile(
+    r'(?:把|将)?(?:(?:观察|行情|统计|数据|日期)?区间|日期范围|数据期间|报告期)'
+    r'\s*(?:改到|改成|改为|换成|换为|设为)\s*(.+)')
+_OBSERVATION_REVISION = re.compile(r'(?:改成|改为|改到|换到|再看|只看|仅看|按)\s*(.+)')
+_OBSERVATION_READ = re.compile(r'^(?:想|再|仅|只|接着|继续)?\s*(?:看看?|查看|查询|核对|比较|对照)\s*')
+_OBSERVATION_FIELD = re.compile(
+    r'(?:(?:开盘|最高|最低|收盘)(?:价|点位)?|涨跌幅|成交量|成交额|(?:单位)?净值|营业收入|营收|'
+    r'营业成本|归母净利润|净利润|经营(?:活动)?现金流|市盈率|市净率|指标(?:值|读数)?|读数)'
+    r'(?=$|\s|[的、和与及]|变化|走势|数据|读数|水平|表现)')
+_SHORT_WINDOW_END = re.compile(r'\s*(?:至|到|[—–~～-])\s*(?:[0-9]{1,2}月)?[0-9]{1,2}日')
+_MONTH_DAY = re.compile(r'(?:1[0-2]|0?[1-9])月(?:3[01]|[12][0-9]|0?[1-9])日')
+_MONTH = re.compile(r'(?:1[0-2]|0?[1-9])月')
+_INDICATOR_REFERENT = re.compile(r'^(?:这个|该|同一)指标(?:在)?')
+
+
+def _prior_name_queries(previous, inherited, identifiers):
+    """Recover user literals from accepted lookups, separate from provider codes."""
+    from .evidence import identity_candidates
+
+    stored = inherited.get('security_name_queries')
+    saved = [name for name in (stored if isinstance(stored, list) else [])
+             if isinstance(name, str) and 2 <= len(name) <= 80]
+    active = [name for name in saved if name in previous['objects']]
+    queries = list(dict.fromkeys(item['query'] for item in identity_candidates(previous)
+                                 if not _object_mentions(item['query'], previous)
+                                 and set(item['exact_lookup_codes']).isdisjoint(identifiers)))
+    return list(dict.fromkeys(queries + active))[:6] if queries else saved
+
+
+def _distinct_comparison_pair(identifiers):
+    # Padded and unpadded forms of a Hong Kong number refer to one object.
+    def identity(identifier):
+        number, separator, market = identifier.partition('.')
+        return (int(number), market) if separator and number.isascii() and number.isdecimal() else identifier
+
+    return len(identifiers) == 2 and len({identity(item) for item in identifiers}) == 2
+
+
+def _comparison_order(question, identifiers, task, names=()):
+    if not _distinct_comparison_pair(identifiers) or not _COMPARISON_WORDS.search(question):
+        return []
+    mentions = {}
+    for identifier, start, end in _object_mentions(question, task, names):
+        mentions.setdefault(identifier, (start, end))
+    if set(mentions) != set(identifiers):
+        return []
+    left, right = mentions
+    between = question[mentions[left][1]:mentions[right][0]]
+    if re.search(r'[。！？；;!?，,]', between) or not re.search(r'与|和|及|、|比|相对|对照', between):
+        return []
+    return list(mentions)
+
+
+def _comparison_side(message):
+    from .market_calendar import _market_date_mention
+
+    mentioned = [term for term in _COMPARISON_SIDES if term in message]
+    if len(mentioned) != 1:
+        return None
+    term = mentioned[0]
+    prefix = message.partition(term)[0]
+    if (dates := _market_date_mention(prefix)) and dates.start() == 0:
+        prefix = prefix[dates.end():].lstrip(' ，,')
+    # The referent must introduce the new request. A local comparison between
+    # two metrics elsewhere in the sentence does not change the subject.
+    return term if len(prefix) <= 24 and _COMPARISON_FOLLOWUP.fullmatch(prefix) else None
+
+
+def _comparison_requests(previous, inherited, objects, names=()):
+    """Retain the user's observation conditions while narrowing the subjects."""
+    older = inherited.get('comparison_requests')
+    candidates = [dict(text=scope_question(previous)), inherited.get('topic')]
+    if isinstance(older, list):
+        candidates.extend(older[:3])
+    active = {subject_key(value) for value in objects}
+    result, seen = [], set()
+    for candidate in candidates:
+        if not isinstance(candidate, dict) or not isinstance(candidate.get('text'), str):
+            continue
+        text = candidate['text']
+        for identifier, start, end in reversed(_object_mentions(text, previous, names)):
+            if subject_key(identifier) not in active:
+                text = text[:start] + '另一对象' + text[end:]
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        entry = conversation_excerpt(text, 600, include_hash=False)
+        entry['omitted_characters'] += candidate.get('omitted_characters', 0)
+        result.append(entry)
+        if len(result) == 3:
+            break
+    return result
+
+
+def _single_previous_object(message, current_identifiers, prior_identifiers):
+    """A named leg can narrow a comparison while a second named subject keeps it open."""
+    if len(current_identifiers) != 1 or len(prior_identifiers) < 2 or current_identifiers[0] not in prior_identifiers:
+        return None
+    selected = current_identifiers[0]
+    before, _, after = message.partition(selected)
+    if (re.match(_COMPARISON_SUBJECT_JOIN, after.lstrip())
+            or re.search(_COMPARISON_SUBJECT_JOIN + r'\s*$', before)
+            or re.search(r'比如|例如|举例|等(?:证券|资产|标的|个股|基金|指数)', message)):
+        return None
+    return selected
+
+
+def _observation_window_edit(message, codes, side):
+    """Retain an explicit user change to the observation window as written."""
+    from .numeric_integrity import _draft_periods
+
+    clauses = [clause.strip() for clause in re.split(r'[，,。；;！？?!\n]', message) if clause.strip()]
+    if not clauses:
+        return None
+    clause = next((item for item in clauses if _OBSERVATION_WINDOW_EDIT.match(item.removeprefix('请').lstrip())), clauses[0])
+    command = clause.removeprefix('请').lstrip()
+    labelled = _OBSERVATION_WINDOW_EDIT.match(command)
+    change = labelled or SUBJECT_SWITCH.match(command) or _OBSERVATION_REVISION.match(command)
+    selection = change.group(1).strip() if change else _OBSERVATION_READ.sub('', command, count=1)
+    if len(codes) == 1:
+        prefix, found, remainder = selection.partition(codes[0])
+        if found and prefix.strip().casefold() in ('', 'etf'):
+            selection = remainder.lstrip()
+    if side:
+        selection = selection.removeprefix(side).lstrip()
+    selection = _INDICATOR_REFERENT.sub('', selection, count=1).lstrip()
+    selection = _SAME_SUBJECT.sub('', selection, count=1).lstrip()
+    selection = selection.removeprefix('的').lstrip().removeprefix('在').lstrip()
+    periods = _draft_periods(selection)
+    if not periods or periods[0][0] != 0:
+        day = _MONTH_DAY.match(selection) or _MONTH.match(selection)
+        if not day:
+            return None
+        period_end = day.end()
+    else:
+        if any(not re.fullmatch(r'[\s、至到和与及—–~～-]+', selection[left[1]:right[0]])
+               for left, right in zip(periods, periods[1:])):
+            return None
+        period_end = periods[-1][1]
+    tail = _SHORT_WINDOW_END.sub('', selection[period_end:], count=1).strip().removesuffix('呢')
+    if labelled or (change and not tail) or _OBSERVATION_FIELD.match(tail.removeprefix('的').lstrip()):
+        return clause
+    return None
+
+
+def _field_only_followup(message):
+    clause = message.rstrip('。！？?! ').removesuffix('呢').strip().removeprefix('请').lstrip()
+    return _OBSERVATION_FIELD.fullmatch(_OBSERVATION_READ.sub('', clause, count=1)) is not None
+
+
+def _reference_ordinal(value):
+    if value.isdecimal():
+        return int(value)
+    digits = dict(zip('一二三四五六七八九', range(1, 10)))
+    digits['两'] = 2
+    if value.count('十') == 1:
+        tens, units = value.split('十')
+        if (not tens or tens in digits) and (not units or units in digits):
+            return digits.get(tens, 1) * 10 + digits.get(units, 0)
+    return digits.get(value, 0)
+
+
+def _conversation_binding(task):
+    return dict(task_id=task['id'], research_version=task['version'], input_hash=task['input_hash'],
+                delivery_digest=(task.get('delivery') or {}).get('digest'))
+
+
+def _conversation_references(message):
+    def logic_indices(phrase):
+        return list(dict.fromkeys(_reference_ordinal(match.group(1) or match.group(2))
+                                  for match in _LOGIC_REFERENCE.finditer(phrase)))
+
+    rounds = list(_ROUND_REFERENCE.finditer(message))
+    if not rounds:
+        indices = logic_indices(message)
+        return [(None, indices)] if indices else []
+    if len(rounds) == 1:
+        return [(_reference_ordinal(rounds[0].group(1)), logic_indices(message))]
+
+    end = len(message)
+    indices = []
+    selections = []
+    for match in reversed(rounds):
+        phrase = message[match.end():end]
+        # “第1轮和第3轮的第2条逻辑” shares the trailing selector. A
+        # complete clause such as “第1轮的结论” has its own selection.
+        if not _ROUND_JOINER.fullmatch(phrase):
+            indices = logic_indices(phrase)
+        selections.append((_reference_ordinal(match.group(1)), indices))
+        end = match.start()
+    grouped = {}
+    for ordinal, selected in reversed(selections):
+        grouped.setdefault(ordinal, {}).update(dict.fromkeys(selected))
+    return [(ordinal, list(selected)) for ordinal, selected in grouped.items()]
+
+
+def _fit_conversation_metrics(context):
+    """Keep original excerpts and round locators ahead of optional field hints."""
+    if len(canonical(context)) <= CONVERSATION_CONTEXT_LIMIT:
+        return
+    focus = context['focus']
+    logics = [logic for item in focus.get('references', [focus])
+              for logic in item.get('logics', []) if logic.get('observed_metrics')]
+    while logics and len(canonical(context)) > CONVERSATION_CONTEXT_LIMIT:
+        # Trim the largest group first so one logic cannot crowd out the rest.
+        logic = max(reversed(logics), key=lambda row: len(row['observed_metrics']))
+        logic['observed_metrics'].pop()
+        if not logic['observed_metrics']:
+            del logic['observed_metrics']
+            logics.remove(logic)
+
+
+class _ExecutionTimer:
+    def __init__(self, started, used_seconds):
+        self.started = started
+        self.used_seconds = used_seconds
+
+    def unrecorded(self, ledger):
+        # Provider timings already in the ledger are part of this wall interval.
+        elapsed = time.monotonic() - self.started
+        recorded = max(0, ledger["used"]["seconds"] - self.used_seconds)
+        return max(0, elapsed - recorded)
+
+    def record(self, ledger):
+        ledger["used"]["seconds"] += self.unrecorded(ledger)
+
+    def charge(self, ledger, *, delivery=False, minimum=0):
+        charge(ledger, "seconds", max(minimum, self.unrecorded(ledger)), delivery=delivery)
 
 
 class ResearchAgent:
@@ -87,19 +350,34 @@ class ResearchAgent:
             from .source_transport import IsolatedEvidenceCollector
             self.collector = IsolatedEvidenceCollector(offline=offline, journal=self._journal, active=self._check_run_control)
         self.collector.original_keeper = self.archive.retain_original
+        self.collector.query_journal = lambda task, record: self._journal(task, query_response=record)
 
     def _begin_run_control(self, ident, version, batch):
         with self.control_lock:
             for key in list(self.run_controls):
                 if key[0] == ident:
                     self.run_controls.pop(key).set()
-            self.run_controls[(ident, version, batch)] = threading.Event()
+            control = threading.Event()
+            if self.runtime_closed:
+                control.set()
+            self.run_controls[(ident, version, batch)] = control
 
     def _finish_run_control(self, ident, version, batch):
         with self.control_lock:
             control = self.run_controls.pop((ident, version, batch), None)
             if control is not None:
                 control.set()
+
+    def run_pending(self, ident=None):
+        """Include synchronous runs and cancelled batches still settling."""
+        with self.lock:
+            with self.control_lock:
+                if any(ident is None or key[0] == ident for key in self.run_controls):
+                    return True
+            if ident is None:
+                return any(worker.is_alive() for worker in self.workers.values())
+            worker = self.workers.get(ident)
+            return worker is not None and worker.is_alive()
 
     def _check_run_control(self, task):
         """Non-I/O transport guard; archive validation still gates adoption."""
@@ -115,20 +393,26 @@ class ResearchAgent:
         normal failure path. The caller retains its Store lease until they exit.
         Skill sessions need not close the shared engine between host steps.
         """
-        with self.lock:
+        # An admitted archive write can hold self.lock. Stop transports
+        # before waiting for that write or snapshotting the worker handles.
+        with self.control_lock:
             self.runtime_closed = True
-            with self.control_lock:
-                for signal in self.run_controls.values():
-                    signal.set()
+            for control in self.run_controls.values():
+                control.set()
+        with self.lock:
             return tuple(self.workers.values())
 
-    def _journal(self, task):
+    def _journal(self, task, *, query_response=None):
         """Persist spent dispatches without overwriting a concurrent cancellation."""
         with self.lock:
             fresh = self._get(task["id"])
             if fresh["version"] != task["version"] or fresh["batch"] != task["batch"]:
                 raise ContractError("请求所属执行批次已过期")
             limited = False
+            stopped = self.runtime_closed or fresh["status"] != "运行中"
+            if not stopped and query_response is not None and fresh.get("input_hash") == task.get("input_hash"):
+                if self._checkpoint_query_response(task, query_response) and query_response["operation"] == "get_thscode":
+                    fresh["identity_state"] = task["identity_state"]
             events = task["ledger"]["dispatches"]
             persisted_count = len(fresh["ledger"]["dispatches"])
             # The collector journals a proposed dispatch before touching the
@@ -136,8 +420,17 @@ class ResearchAgent:
             # limit when the user resumes a discarded, known-returned response.
             for index in range(len(events) - 1, persisted_count - 1, -1):
                 event = events[index]
+                kind = event.get("kind")
+                if event.get("status") != "已派发" or kind not in ("data_requests", "model_calls"):
+                    continue
+                if stopped and event.get("batch") == task["batch"] and event.get("network_request_started") is not True:
+                    # The new entry has never passed the pre-dispatch journal.
+                    # A durable entry can have an unknown transport outcome.
+                    events.pop(index)
+                    task["ledger"]["used"][kind] -= 1
+                    continue
                 digest = event.get("fingerprint")
-                if event.get("kind") != "data_requests" or event.get("status") != "已派发" or digest not in task.get("source_attempts", {}):
+                if kind != "data_requests" or digest not in task.get("source_attempts", {}):
                     continue
                 prior_count = sum(e.get("kind") == "data_requests" and e.get("fingerprint") == digest for e in events[:index])
                 if prior_count >= 3:
@@ -160,18 +453,129 @@ class ResearchAgent:
                 fresh["source_records"] = list(records.values())
             if "source_attempts" in task:
                 fresh["source_attempts"] = copy.deepcopy(task["source_attempts"])
+            if task.get('official_response_checkpoints'):
+                from .announcement_sources import response_checkpoint_payload
+                retained=fresh.setdefault('official_response_checkpoints',[])
+                if not isinstance(retained,list):retained=[]
+                known=set()
+                for checkpoint in retained:
+                    try:response_checkpoint_payload(task,checkpoint)
+                    except ContractError:continue
+                    known.add(checkpoint['id'])
+                proposed=task['official_response_checkpoints']
+                for checkpoint in proposed if isinstance(proposed,list) else []:
+                    try:response_checkpoint_payload(task,checkpoint)
+                    except ContractError:continue
+                    if checkpoint['id'] not in known:
+                        retained.append(copy.deepcopy(checkpoint));known.add(checkpoint['id'])
+                fresh['official_response_checkpoints']=retained
             self.archive.save(fresh)
             task["revision"] = fresh["revision"]
             if limited:
                 raise ContractError("同一请求跨恢复已达到三次派发上限，未发送新的请求")
-            if fresh["status"] != "运行中":
+            if stopped:
                 raise ContractError("任务已停止，保留已派发用量但拒绝结果")
 
-    def create(self, question, entry="混合", intent="综合研究", objects=None, cutoff=None, limits=None, fixture=None, parent=None, questions=None, research_mode=None):
-        task = self._prepare_task(question, entry, intent, objects, cutoff, limits, fixture, parent, questions, research_mode)
+    @staticmethod
+    def _retain_acquired_source(task, record, need, attempt):
+        ident, selected = need["id"], need["question_ids"]
+        record.update(data_need_ids=[ident], question_ids=list(selected),
+                      selection_reason=need.get("selection_reason", "优先iFinD"))
+        record_request_purpose(record, need, selected)
+        records = task.setdefault("source_records", [])
+        existing = next((item for item in records if item["id"] == record["id"]), None)
+        if existing is None:
+            records.append(record)
+        else:
+            existing.update(record)
+        attempt["status"] = "已留存"
+        attempt.pop("pending_purpose", None)
+        if record["operation"] == "get_thscode":
+            mappings = identity_resolutions(task)
+            task["identity_state"] = "；".join(
+                str(item.get("query", "输入")) + "：" + item["status"] +
+                ("→" + ",".join(item["codes"]) if item["status"] == "代码映射已核验" else "") for item in mappings)
+            if any(item["status"] == "代码映射已核验" for item in mappings):
+                task["identity_state"] += "；证券类型、业务暴露及历史身份仍需另行核验"
+
+    def _checkpoint_query_response(self, task, record):
+        """Commit an isolated query response with its own final dispatch event."""
+        attempt = task.get("source_attempts", {}).get(record["request_hash"], {})
+        need = attempt.get("pending_purpose")
+        if (not need or attempt.get("status") != "待响应" or attempt.get("batch") != task["batch"]
+                or record.get("acquisition", {}).get("batch") != task["batch"]
+                or (attempt.get("source"), attempt.get("operation")) != (record["source"], record["operation"])):
+            return False
+        if record["operation"] == "get_trade_dates":
+            from .evidence import calendar_query_reference
+
+            reference = calendar_query_reference(task, record)
+        else:
+            reference = current_query_reference(task, record)
+        if not reference:
+            return False
+        self._retain_acquired_source(task, record, need, attempt)
+        return True
+
+    @staticmethod
+    def _apply_official_source_policies(task):
+        """Current channels apply to new studies and explicit new versions only."""
+        from .etf_comparison import HOLDING_POLICY
+        from .event_market import (MAINLAND_POLICY, POLICY as HK_EVENT_POLICY, READING_POLICY as EVENT_READING_POLICY,
+                                   READING_VERSION as EVENT_READING_VERSION)
+        from .financial_sources import PEER_PROFIT_DETAIL_VERSION, PEER_PROFIT_POLICY
+        from .index_sources import BROKER_READING_POLICY
+        from .lpr_rates import POLICY as LPR_POLICY
+        from .miit_releases import POLICY as MIIT_POLICY
+        from .monthly_statistics import POLICY as MONTHLY_STATISTICS_POLICY, VERSION as MONTHLY_STATISTICS_VERSION
+        from .nfra_bank_statistics import POLICY as NFRA_STATISTICS_POLICY
+        from .stock_quality import (COMPANY_SCOPE_VERSION, OPEN_COMPANY_POLICY, POLICY as STOCK_QUALITY_POLICY,
+                                    QUALITY_BRIDGE_VERSION, STRATEGY_POLICY as STOCK_STRATEGY_POLICY)
+        from .stock_quality_readout import PUBLICATION_POLICY as STOCK_PUBLICATION_POLICY
+        from .treasury_rates import POLICY as H15_POLICY
+
+        task[HK_EVENT_POLICY] = 1
+        task[EVENT_READING_POLICY] = EVENT_READING_VERSION
+        task[H15_POLICY] = 1
+        task[LPR_POLICY] = 1
+        task[NFRA_STATISTICS_POLICY] = 1
+        task[BROKER_READING_POLICY] = 1
+        task[MAINLAND_POLICY] = 1
+        task[MIIT_POLICY] = 1
+        task[MONTHLY_STATISTICS_POLICY] = MONTHLY_STATISTICS_VERSION
+        task[STOCK_QUALITY_POLICY] = QUALITY_BRIDGE_VERSION
+        task[STOCK_PUBLICATION_POLICY] = 1
+        task[STOCK_STRATEGY_POLICY] = 1
+        task[OPEN_COMPANY_POLICY] = COMPANY_SCOPE_VERSION
+        task[PEER_PROFIT_POLICY] = PEER_PROFIT_DETAIL_VERSION
+        task[HOLDING_POLICY] = 1
+        task.update(official_source_expansion_version=1, official_channels_version=1,
+            official_etf_pcf_version=2, official_etf_listing_version=1, official_etf_trading_version=1,
+            official_catalogue_pagination_version=1,
+            official_policy_channels_version=1, official_temporal_contract_version=1,
+            official_index_sources_version=1, official_selection_reference_version=1)
+
+    def create(self, question, entry="混合", intent="综合研究", objects=None, cutoff=None, limits=None, fixture=None,
+               parent=None, questions=None, research_mode=None, *, owner_account=None, submission=None, admission=None):
+        task = self._prepare_task(question, entry, intent, objects, cutoff, limits, fixture, parent, questions, research_mode,
+                                  submission=submission)
+        if owner_account is not None:
+            task["owner_account"] = owner_account
+        if admission is not None:
+            admission(task)
         return self.archive.save(task)
 
-    def _prepare_task(self, question, entry="混合", intent="综合研究", objects=None, cutoff=None, limits=None, fixture=None, parent=None, questions=None, research_mode=None):
+    def archive_backup(self, title, wire=None, *, owner_account=None, package=None, receipt=None):
+        task = self._prepare_task(title, parent="legacy-import")
+        if package is None:
+            task["legacy_backup_text"] = wire
+        else:
+            task["backup_package"] = receipt
+        if owner_account is not None:
+            task["owner_account"] = owner_account
+        return self.archive.save(task, backup_package=package)
+
+    def _prepare_task(self, question, entry="混合", intent="综合研究", objects=None, cutoff=None, limits=None, fixture=None, parent=None, questions=None, research_mode=None, *, submission=None, inherited_cutoff=False):
         """Build validated input without exposing an incomplete task in the archive."""
         if not isinstance(question, str) or not question.strip() or len(question) > 20000:
             raise ContractError("请输入有效研究问题，最长20000字")
@@ -181,6 +585,16 @@ class ResearchAgent:
             raise ContractError("研究时点模式未登记")
         if research_mode == "current" and cutoff is not None:
             raise ContractError("当前研究由内核登记启动时点；指定历史截止时点须使用historical模式")
+        if self.draft_first and not fixture and intent != DOCUMENT_CONTENT_INTENT:
+            specified = declared_research_cutoff(question)
+            if specified is not None:
+                if cutoff is not None and not inherited_cutoff and timepoint(cutoff) != timepoint(specified):
+                    raise ContractError('问题和研究设置中的截止时点不同，请统一后再发送。')
+                if cutoff is None or inherited_cutoff:
+                    cutoff = specified
+                research_mode = 'historical'
+            if research_mode == 'historical' and cutoff is None:
+                raise ContractError('历史时点研究需要明确的截止时点。')
         cutoff = cutoff or now()
         timepoint(cutoff)
         fixture_data = get_case(fixture) if fixture else None
@@ -193,7 +607,8 @@ class ResearchAgent:
         adopted = {"question": question.strip(), "entry": entry, "intent": intent, "objects": list(objects or []), "cutoff": cutoff}
         if research_mode is not None:
             adopted["research_mode"] = research_mode
-        task = dict(adopted, id="rh_" + uuid.uuid4().hex, version=1, batch=0, revision=0,
+        ident = submission["task_id"] if submission is not None else "rh_" + uuid.uuid4().hex
+        task = dict(adopted, id=ident, version=1, batch=0, revision=0,
                     original_input=copy.deepcopy(adopted), input_hash=fingerprint(adopted), status="待开始",
                     created_at=now(), fixture=fixture, synthetic=bool(fixture), parent=parent,
                     ledger=budget(limits), questions=[dict(item, status="待回答") for item in questions],
@@ -202,21 +617,19 @@ class ResearchAgent:
                     question_origin=question_origin,
                     calculation_specs=[fixture_data["calculation"]] if fixture_data and fixture_data.get("calculation") else [],
                     requested_theses=bool(fixture_data), data_need_specs=[])
+        if submission is not None:
+            task["chat_submission_hash"] = submission["input_hash"]
         task["original_input"]["questions"] = copy.deepcopy(questions)
         if not fixture:
             from .contracts import METHOD_CATALOGUE_VERSION
+            from .numeric_integrity import ORIGINAL_QUANTITY_QUALIFIER_POLICY, ORIGINAL_QUANTITY_QUALIFIER_VERSION
             task['method_catalogue_version'] = METHOD_CATALOGUE_VERSION
+            task[ORIGINAL_QUANTITY_QUALIFIER_POLICY] = ORIGINAL_QUANTITY_QUALIFIER_VERSION
             # An explicitly supplied legacy method remains an obligation.
             # Only an unplanned new study uses the source-aware fee catalogue.
             task['fee_method_catalogue_version'] = (1 if any(isinstance(item, dict)
                 and 'fee_difference_v1' in item.get('method_needs', []) for item in (questions or [])) else 2)
-            task['official_channels_version'] = 1
-            task['official_etf_pcf_version'] = 2
-            task['official_catalogue_pagination_version'] = 1
-            task['official_policy_channels_version'] = 1
-            task['official_temporal_contract_version'] = 1
-            task['official_index_sources_version'] = 1
-            task['official_selection_reference_version'] = 1
+            self._apply_official_source_policies(task)
         if self.require_argument_support and not fixture and intent != DOCUMENT_CONTENT_INTENT:
             task['argument_support_contract'] = argument_support.VERSION
             task['argument_reference_format'] = 2
@@ -409,6 +822,29 @@ class ResearchAgent:
             task['argument_submission_recovery_version'] = 1
         if self.draft_first and not fixture and intent != DOCUMENT_CONTENT_INTENT:
             self._apply_draft_policies(task)
+            if (question_origin == 'default' and parent is None
+                    and intent in ('综合研究', '解释变化', '比较对象')
+                    and (branches := self.knowledge.explicit_definition_branches(task))):
+                task['questions'] = [dict(row, status='待回答')
+                                     for row in normalize_questions(branches, task['question'], intent)]
+        if not fixture and intent != DOCUMENT_CONTENT_INTENT and (scope := stated_subject_scope(task, names=task['objects'])):
+            task['subject_scope'] = scope
+            task['objects'] = [item for item in task['objects'] if subject_allowed(task, item)]
+            task['original_input']['subject_scope'] = copy.deepcopy(scope)
+        if question_origin == 'default' and parent is None and len(task['questions']) == 1:
+            from .parallel_study import POLICY as PARALLEL_POLICY, planned_questions
+
+            if branches := planned_questions(task):
+                planned = normalize_questions(branches, task['question'], intent)
+                task['questions'] = [dict(row, status='待回答') for row in planned]
+                task['original_input']['questions'] = copy.deepcopy(planned)
+                task[PARALLEL_POLICY] = 1
+        from .evidence import filing_directory_scope
+        if question_origin == 'default' and filing_directory_scope(task) is not None:
+            questions = normalize_questions([dict(question=task['question'], kind='fact',
+                evidence_needs=['公告目录'], evidence_need_scopes={'公告目录': 'query_provenance'})], task['question'], intent)
+            task['questions'] = [dict(row, status='待回答') for row in questions]
+            task['original_input']['questions'] = copy.deepcopy(questions)
         task["input_hash"] = input_fingerprint(task)
         task["nodes"] = self.plan(task)
         task["thread_id"] = task["id"]
@@ -422,9 +858,65 @@ class ResearchAgent:
         Opening, cancelling or resuming a frozen version never calls this.
         Formal research keeps its original workflow and approval contracts.
         """
-        from .draft_sources import SCOPE_VERSION, VERSION
+        from .draft_sources import (SCOPE_VERSION, VERSION, CLIENT_COPY_VERSION,
+                                    DISCLOSURE_POLICY, EXCERPT_LOCATION_POLICY, EXCERPT_LOCATION_VERSION,
+                                    FINANCIAL_PERIOD_GAP_POLICY, FINANCIAL_PERIOD_GAP_VERSION,
+                                    HISTORICAL_ORIGINAL_POLICY)
+        from .economic_sources import (CATALOGUE_READOUT_POLICY, DIRECT_ECONOMIC_POLICY, DIRECT_ECONOMIC_VERSION,
+                                       DRAFT_PERIOD_POLICY, DRAFT_PERIOD_VERSION)
+        from .financial_sources import PEER_FINANCIAL_POLICY, STATED_FINANCIAL_POLICY, STATED_FINANCIAL_VERSION
+        from .financial_data import CASH_BRIDGE_POLICY
+        from .draft_filing_amounts import SEGMENT_COMPARISON_POLICY
+        from .index_sources import (DRAFT_WEIGHT_POLICY, DRAFT_WEIGHT_VERSION, INDUSTRY_SAMPLE_POLICY,
+                                    INDUSTRY_SAMPLE_VERSION)
+        from .market_calendar import (LATEST_SESSION_CALCULATION_POLICY, LATEST_SESSION_CALCULATION_VERSION, LIQUIDITY_POLICY,
+                                      NAMED_INDEX_MARKET_POLICY, NAMED_INDEX_MARKET_VERSION,
+                                      QUOTE_ENDPOINT_POLICY, QUOTE_ENDPOINT_VERSION)
+        from .market_series import (DRAFT_SERIES_WINDOW_POLICY, HISTORICAL_DAILY_POLICY, NAV_INTERVAL_POLICY,
+                                    NAV_INTERVAL_VERSION, NAV_SOURCE_POLICY,
+                                    OBSERVATION_POLICY, OBSERVATION_VERSION, STATED_LATEST_POLICY, STATED_LATEST_VERSION,
+                                    VALUATION_HISTORY_POLICY, VALUATION_HISTORY_VERSION,
+                                    VALUATION_ATTRIBUTION_POLICY, VALUATION_ATTRIBUTION_VERSION)
+        from .intraday_quotes import POLICY as INTRADAY_POLICY
+        from .planning import QUESTION_ARGUMENT_POLICY
+        from .publication_content import (DRAFT_EDITORIAL_POLICY, DRAFT_EDITORIAL_VERSION, DRAFT_READING_POLICY,
+                                          DRAFT_READING_VERSION)
+        from .tinyshare_sources import POLICY as TINYSHARE_POLICY, VERSION as TINYSHARE_VERSION
+        task[TINYSHARE_POLICY] = TINYSHARE_VERSION
+        task[OBSERVATION_POLICY] = OBSERVATION_VERSION
+        task[DISCLOSURE_POLICY] = 1
+        task[EXCERPT_LOCATION_POLICY] = EXCERPT_LOCATION_VERSION
+        task[FINANCIAL_PERIOD_GAP_POLICY] = FINANCIAL_PERIOD_GAP_VERSION
+        task[STATED_FINANCIAL_POLICY] = STATED_FINANCIAL_VERSION
+        task[PEER_FINANCIAL_POLICY] = 2
+        task[INDUSTRY_SAMPLE_POLICY] = INDUSTRY_SAMPLE_VERSION
+        task[CASH_BRIDGE_POLICY] = 1
+        task[SEGMENT_COMPARISON_POLICY] = 1
+        task[HISTORICAL_ORIGINAL_POLICY] = 1
+        task[DRAFT_PERIOD_POLICY] = DRAFT_PERIOD_VERSION
+        task[DIRECT_ECONOMIC_POLICY] = DIRECT_ECONOMIC_VERSION
+        task[CATALOGUE_READOUT_POLICY] = 1
+        task[DRAFT_WEIGHT_POLICY] = DRAFT_WEIGHT_VERSION
+        task[QUOTE_ENDPOINT_POLICY] = QUOTE_ENDPOINT_VERSION
+        task[INTRADAY_POLICY] = 1
+        task[LIQUIDITY_POLICY] = 1
+        task[NAMED_INDEX_MARKET_POLICY] = NAMED_INDEX_MARKET_VERSION
+        task[LATEST_SESSION_CALCULATION_POLICY] = LATEST_SESSION_CALCULATION_VERSION
+        task[NAV_INTERVAL_POLICY] = NAV_INTERVAL_VERSION
+        task[NAV_SOURCE_POLICY] = 1
+        task[STATED_LATEST_POLICY] = STATED_LATEST_VERSION
+        task[VALUATION_HISTORY_POLICY] = VALUATION_HISTORY_VERSION
+        task[VALUATION_ATTRIBUTION_POLICY] = VALUATION_ATTRIBUTION_VERSION
+        task[DRAFT_READING_POLICY] = DRAFT_READING_VERSION
+        task[DRAFT_EDITORIAL_POLICY] = DRAFT_EDITORIAL_VERSION
+        task[DRAFT_SERIES_WINDOW_POLICY] = 1
+        task[QUESTION_ARGUMENT_POLICY] = 1
+        task[DRAFT_DEFINITION_POLICY] = 1
+        if task.get('research_mode') == 'historical':
+            task[HISTORICAL_DAILY_POLICY] = 1
         task.update(draft_first_version=1, draft_quote_scope_version=SCOPE_VERSION, draft_source_reader_version=VERSION,
-                    draft_direct_scope_version=1, draft_question_scope_version=2,
+                    draft_direct_scope_version=1, draft_question_scope_version=2, draft_tracking_version=1, draft_comparison_version=1,
+                    draft_client_copy_version=CLIENT_COPY_VERSION,
                     hk_code_alias_version=1)
 
     @staticmethod
@@ -433,137 +925,444 @@ class ResearchAgent:
                 "task_id": task["id"], "version": task["version"], "synthetic": task["synthetic"]}
 
     @staticmethod
-    def _draft_conversation_answer(previous, message):
+    def _draft_conversation_answer(previous):
         """Quote the displayed draft for reference resolution, never evidence."""
         paper = previous.get('draft_report')
         if not isinstance(paper, dict):
             return None
         logics = [item for item in paper.get('logics', []) if isinstance(item, dict)]
         lines = ['研究初稿，尚未独立复核：' + str(paper.get('title') or '研究报告')]
-        match = re.search(r'(?:策略逻辑|逻辑|策略)\s*([0-9一二三四五六七八九十]+)(?![0-9一二三四五六七八九十百千万])', message)
-        selected = None
-        if match:
-            number = match.group(1)
-            digits = dict(zip('一二三四五六七八九', range(1, 10)))
-            if number.isdecimal():
-                ordinal = int(number)
-            elif '十' in number and number.count('十') == 1:
-                tens, units = number.split('十')
-                ordinal = ((digits.get(tens, 1) if tens else 1) * 10 + digits.get(units, 0)
-                           if (not tens or tens in digits) and (not units or units in digits) else 0)
-            else:
-                ordinal = digits.get(number, 0)
-            if 1 <= ordinal <= len(logics):
-                selected = ordinal - 1
         def quote(index):
             item = logics[index]
             return '\n'.join(['策略逻辑' + str(index + 1) + '：' + str(item.get('title') or ''),
                 *[label + str(item[key]) for key, label in
                   [('analysis', '分析：'), ('implication', '判断：'), ('risk', '反证：')]
                   if isinstance(item.get(key), str) and item[key]]])
-        if selected is not None:
-            lines.append(quote(selected))
-        if logics:
-            lines.append('逻辑目录：' + '；'.join('逻辑' + str(i + 1) + '：' + str(item.get('title') or '')
-                     for i, item in enumerate(logics)))
         if paper.get('conclusion'):
             lines.append('核心结论：' + str(paper['conclusion']))
-        lines.extend(quote(i) for i in range(len(logics)) if i != selected)
+        lines.extend(quote(i) for i in range(len(logics)))
         return '\n'.join(lines)
 
-    def follow_up(self, ident, message, asynchronous=False, start=True):
+    @staticmethod
+    def _draft_conversation_summary(previous):
+        paper = previous.get('draft_report')
+        if not isinstance(paper, dict):
+            return None
+        lines = []
+        if isinstance(paper.get('conclusion'), str) and paper['conclusion']:
+            lines.append('核心结论：' + conversation_excerpt(paper['conclusion'], 430)['text'])
+        for index, item in enumerate(paper.get('logics', [])[:4], 1):
+            if not isinstance(item, dict):
+                continue
+            title = conversation_excerpt(str(item.get('title') or ''), 110)['text']
+            details = [label + conversation_excerpt(value, 135)['text'] for label, value in (
+                ('判断：', item.get('implication')), ('反证：', item.get('risk')))
+                if isinstance(value, str) and value]
+            if not details and isinstance(item.get('analysis'), str) and item['analysis']:
+                details.append(conversation_excerpt(item['analysis'], 110)['text'])
+            lines.append('逻辑'+str(index)+'：'+title+'。'+'；'.join(details))
+        return '\n'.join(lines) or None
+
+    def _conversation_lineage(self, previous):
+        """Walk exact saved versions in the originating account and thread."""
+        current = previous
+        thread = previous.get('thread_id', previous['id'])
+        owner = previous.get('owner_account')
+        seen = set()
+        for _ in range(CONVERSATION_ROUND_LIMIT):
+            if current['id'] in seen:
+                return
+            seen.add(current['id'])
+            yield current
+            pointer = current.get('conversation_parent')
+            binding = (current.get('conversation_context') or {}).get('parent_binding', {})
+            if not isinstance(pointer, dict) or not isinstance(binding, dict):
+                return
+            ident, version = pointer.get('task_id'), pointer.get('version')
+            if (not isinstance(ident, str) or type(version) is not int or version < 1 or ident != current.get('parent')
+                    or binding.get('task_id') != ident or binding.get('research_version') != version):
+                return
+            try:
+                ancestor = self.archive.get(ident, version, allow_missing=True)
+                if (ancestor is None or ancestor.get('thread_id', ident) != thread
+                        or ancestor.get('owner_account') != owner or ancestor.get('input_hash') != binding.get('input_hash')
+                        or (ancestor.get('delivery') or {}).get('digest') != binding.get('delivery_digest')):
+                    return
+                conversation_context(ancestor)
+            except ContractError:
+                return
+            current = ancestor
+
+    def _conversation_rounds(self, previous, ordinals, parent_context):
+        thread = previous.get('thread_id', previous['id'])
+
+        def is_root(task):
+            return task['id'] == thread and task.get('conversation_parent') is None
+
+        if is_root(previous):
+            position = 1
+        else:
+            position = parent_context.get('round_number') if parent_context and parent_context['version'] >= 3 else None
+        lineage = self._conversation_lineage(previous)
+        if position is None:
+            # Legacy tasks did not record their position. Establish it from
+            # the verified chain once, without interpreting display messages.
+            chain = list(lineage)
+            if not is_root(chain[-1]):
+                return None, {}
+            position = len(chain)
+            lineage = iter(chain)
+        requested = {ordinal for ordinal in ordinals if 1 <= ordinal <= position}
+        if not requested:
+            return position, {}
+        found = {}
+        for ordinal, task in zip(range(position, min(requested) - 1, -1), lineage):
+            stored = task.get('conversation_context') or {}
+            recorded = stored.get('round_number') if stored.get('version', 0) >= 3 else None
+            if (ordinal == 1) != is_root(task) or (recorded is not None and recorded != ordinal):
+                break
+            if ordinal in requested:
+                found[ordinal] = task
+        return position, found
+
+    def _follow_up_references(self, previous, message, parent_context):
+        subject_match = _ROUND_SUBJECT_REFERENCE.match(message)
+        subject_round = _reference_ordinal(subject_match[1]) if subject_match else None
+        report_request = message[subject_match.end():] if subject_match else message
+        selections = _conversation_references(report_request)
+        if subject_match:
+            selections = [(subject_round if ordinal is None else ordinal, indices) for ordinal, indices in selections]
+        retained = selections[:_FOCUSED_ROUND_LIMIT]
+        ordinals = [ordinal for ordinal, _ in retained if ordinal is not None]
+        if subject_match:
+            ordinals.append(subject_round)
+        position, sources = self._conversation_rounds(previous, ordinals, parent_context)
+        subject = None
+        if subject_match:
+            source = sources.get(subject_round)
+            if source is not None and source['input_hash'] != input_fingerprint(source):
+                source = None
+            subject = (subject_round, source, report_request.lstrip(' ，,。；;：:的'))
+        if not retained:
+            return position, None, subject
+        references = [self._conversation_report_focus(previous if ordinal is None else sources.get(ordinal),
+            ordinal, indices, len(retained)) for ordinal, indices in retained]
+        if len(references) == 1:
+            return position, references[0], subject
+        omitted = len(selections) - len(references)
+        statuses = {item['status'] for item in references}
+        status = 'unavailable' if statuses == {'unavailable'} else (
+            'located' if statuses == {'located'} and not omitted else 'partial')
+        focus = dict(status=status, references=references)
+        if omitted:
+            focus['omitted_round_count'] = omitted
+        return position, focus, subject
+
+    def _conversation_report_focus(self, source, ordinal, selected, reference_count):
+        indices = selected[:_FOCUSED_LOGIC_LIMIT]
+        focus = dict(status='unavailable', logic_indices=indices)
+        if ordinal is not None:
+            focus['round'] = ordinal
+        if len(selected) > len(indices):
+            focus['omitted_logic_count'] = len(selected) - len(indices)
+        if source is None:
+            return focus
+        try:
+            delivery = source.get('delivery') or {}
+            if delivery:
+                report = self.archive.report(source['id'], source['version'])
+                if report['digest'] != delivery.get('digest'):
+                    return focus
+                content = report['content']
+            else:
+                content = source
+        except ContractError:
+            return focus
+
+        def excerpt(text, size):
+            return conversation_excerpt(text, size // (reference_count * max(1, len(indices))),
+                                        include_hash=reference_count == 1)
+
+        focus['source'] = _conversation_binding(source)
+        draft = content.get('draft', content.get('draft_report', {}))
+        draft = draft if isinstance(draft, dict) else {}
+        if not indices:
+            answer = draft.get('conclusion') or '\n'.join(
+                item['answer'] for item in source.get('questions', [])
+                if isinstance(item.get('answer'), str) and item['answer'])
+            if isinstance(answer, str) and answer:
+                focus.update(status='located', conclusion=excerpt(answer, 1500))
+            return focus
+
+        items = draft.get('logics') or content.get('theses', [])
+        if not isinstance(items, list):
+            return focus
+        readings = []
+        for index in indices:
+            if not 1 <= index <= len(items) or not isinstance(items[index-1], dict):
+                continue
+            item = items[index-1]
+            argument = item['argument'] if isinstance(item.get('argument'), dict) else {}
+            tracking = item['tracking'] if isinstance(item.get('tracking'), dict) else {}
+            condition = '\n'.join(dict.fromkeys(value for value in (
+                argument.get('condition'), tracking.get('condition')) if isinstance(value, str) and value))
+            fields = (
+                ('title', item.get('title'), 240),
+                ('judgment', item.get('implication') or item.get('statement') or argument.get('claim'), 700),
+                ('risk', item.get('risk') or item.get('limitation'), 700),
+                ('condition', condition, 650),
+                ('analysis', item.get('analysis') or item.get('investment_meaning'), 900),
+            )
+            reading = dict(index=index, **{key: excerpt(text, size)
+                for key, text, size in fields if isinstance(text, str) and text})
+            # Each referenced logic can suggest fields to refresh. Its values
+            # and provenance stay attached to the original report.
+            if draft and delivery:
+                from .drafts import logic_basis
+                from .publication_content import draft_logic_reading
+                facts, _ = logic_basis(content, draft_logic_reading(item, draft.get('calculations', [])))
+                excluded = set(item.get('off_scope_data_refs', []))
+                pairs = dict.fromkeys((row['code'], row['field']) for row in facts
+                    if row['id'] not in excluded and isinstance(row.get('code'), str) and 0 < len(row['code']) <= 24
+                    and isinstance(row.get('field'), str) and 0 < len(row['field']) <= 64)
+                if pairs:
+                    reading['observed_metrics'] = [dict(subject=code, field=field) for code, field in list(pairs)[:6]]
+            readings.append(reading)
+        if readings:
+            focus.update(status='located' if len(readings) == len(selected) else 'partial', logics=readings)
+        return focus
+
+    def follow_up(self, ident, message, asynchronous=False, start=True, *, submission=None, expected_revision=None,
+                  admission=None):
         """A changed question is a related task, never an edit to a frozen result."""
         if not isinstance(start, bool):
             raise ContractError("追问启动方式必须明确指定")
         if not isinstance(message, str) or not message.strip() or len(message) > 20000:
             raise ContractError("请输入有效追问，最长20000字")
+        if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 1):
+            raise ContractError('追问须提供有效的原研究修订号')
         with self.lock:
             previous = self._get(ident)
-            conversation_context(previous)
+            if expected_revision is not None and previous['revision'] != expected_revision:
+                raise FollowupParentChanged('原研究已更新，请核对当前版本后重新发送。')
+            parent_context = conversation_context(previous)
             if previous["status"] == "运行中":
                 raise ContractError("当前研究仍在运行，请先停止或等待完成")
+            if self.run_pending(ident):
+                raise ContractError("旧批次仍在停止，请稍后追问")
             history = copy.deepcopy(previous.get("messages") or [self._message("user", previous["question"], previous)])
-            if len(history) >= 99:
+            if len(history) >= 2 * CONVERSATION_ROUND_LIMIT - 1:
                 raise ContractError("本对话已达到50轮，请新建研究；旧记录仍保留")
             conclusions = [f"{item.get('judgment', '证据不足')}：{item.get('statement', item.get('title', ''))}"
                            for item in previous["theses"]]
             if not conclusions:
-                draft_answer = self._draft_conversation_answer(previous, message.strip())
+                draft_answer = self._draft_conversation_answer(previous)
                 conclusions = ([draft_answer] if draft_answer else
                     [q["answer"] for q in previous["questions"] if q["status"] == "已回答" and q.get("answer")])
             gaps = ["未解决：" + item for item in previous["gaps"]]
             prior_answer = "\n".join(conclusions + gaps) or "本轮尚未形成研究结论。"
+            working_answer = self._draft_conversation_summary(previous) or prior_answer
             snapshot = self._message("assistant", prior_answer, previous)
             snapshot.update(status=previous["status"], delivery=copy.deepcopy(previous.get("delivery")))
             history.append(snapshot)
-            objects, conversation = self._follow_up_context(previous, message.strip(), prior_answer)
-            related = self._prepare_task(message.strip(), entry=previous["entry"], intent=previous["intent"],
-                                  objects=objects, limits=previous["ledger"]["limits"], parent=ident,
+            # Prepare the new task's policy before resolving the new message.
+            # Parent declarations keep their original grammar; the new message
+            # uses the same grammar that its acquisition will later consume.
+            # A new message has its own research obligation. The parent's
+            # opportunity/comparison/document-only intent must not constrain it.
+            related = self._prepare_task(message.strip(),
+                                  objects=[], limits=previous["ledger"]["limits"], parent=ident,
                                   cutoff=previous['cutoff'] if previous.get('research_mode') == 'historical' else None,
-                                  research_mode=previous.get("research_mode"))
+                                  research_mode=previous.get("research_mode"), submission=submission, inherited_cutoff=True)
+            position, focus, subject = self._follow_up_references(previous, scope_question(related), parent_context)
+            if position == CONVERSATION_ROUND_LIMIT:
+                raise ContractError("本对话已达到50轮，请新建研究；旧记录仍保留")
+            objects, entry, conversation = self._follow_up_context(previous, related, working_answer,
+                round_number=position + 1 if position is not None else None, focus=focus, subject=subject)
+            related['entry'] = entry
+            related["objects"] = objects
             related["conversation_context"] = conversation
+            related["original_input"]["entry"] = related["entry"]
             related["original_input"]["objects"] = copy.deepcopy(objects)
             related["original_input"]["conversation_context"] = copy.deepcopy(conversation)
-            related["input_hash"] = input_fingerprint(related)
-            related["nodes"] = self.plan(related)
             related.update(thread_id=previous.get("thread_id", ident),
-                           conversation_parent={"task_id": ident, "version": previous["version"],
+                           conversation_parent={"task_id": ident, "version": previous["version"], "revision": previous["revision"],
                                                 "delivery": copy.deepcopy(previous.get("delivery"))},
                            messages=history + [self._message("user", message.strip(), related)])
+            related["input_hash"] = input_fingerprint(related)
+            related["nodes"] = self.plan(related)
             if 'owner_account' in previous:
                 related['owner_account'] = previous['owner_account']
+            if admission is not None:
+                admission(related)
             self.archive.create_related(related, previous)
             # Prior conversation is readable context only, not verified evidence for this task.
             return self.start(related["id"], asynchronous=asynchronous) if start else related
 
-    @staticmethod
-    def _follow_up_context(previous, message, prior_answer):
-        """Carry only a direct parent snapshot and user-declared object scope.
+    def _follow_up_context(self, previous, related, prior_answer, *, round_number, focus=None, subject=None):
+        """Bind conversation lineage independently of the selected research scope.
 
-        A newly named code replaces inherited scope. An explicit change by name
+        A newly stated identifier replaces inherited scope. An explicit change by name
         clears old objects until the normal identity workflow resolves the name.
-        Assistant suggestions and arbitrary older messages never add objects.
+        An explicit return to a round uses that version's user scope only.
         """
-        code_pattern = r"(?<![A-Za-z0-9])(?:\d{6}\.(?:SH|SZ)|\d{4,5}\.HK)(?![A-Za-z0-9])"
-        current_codes = list(dict.fromkeys(re.findall(code_pattern, message)))
-        prior_objects = list(dict.fromkeys(previous["objects"] + re.findall(code_pattern, previous["question"])))
-        prior_codes = {code for text in prior_objects for code in re.findall(code_pattern, text)}
-        refers_back = bool(re.search(r"它|该(?:股|公司|基金|对象)|前者|后者|上述|之前|原来|这(?:只|些|两)", message))
-        comparison = bool(current_codes and re.search(r"比较|对比|相比", message)
-                          and (refers_back or re.search(r"加入|增加|再加", message)))
+        from .draft_sources import _unquoted_local_scope, local_scope_text
+        from .economic_sources import resolve_economic_followup_period
+        from .market_calendar import resolve_market_date_reference
+        from .market_series import is_latest_readout_followup, latest_followup_enabled, stated_latest_request
+
+        message = related['question']
+        subject_round, scope_task, scope_request = subject if subject else (None, previous, message)
+        scope_request = local_scope_text(scope_request).lstrip(' ，,。；;：:')
+        prior_question = scope_question(scope_task) if scope_task else ''
+        prior_objects, prior_codes, names, inherited = [], [], [], {}
+        latest_subject = {}
+        if scope_task:
+            prior_objects = list(dict.fromkeys(scope_task['objects'] +
+                [code for code, _, _ in _object_mentions(prior_question, scope_task)]))
+            prior_codes = list(dict.fromkeys(code for text in prior_objects
+                for code, _, _ in _object_mentions(text, scope_task)))
+            inherited = scope_task.get('conversation_context') or {}
+            names = _prior_name_queries(scope_task, inherited, prior_codes)
+            if not prior_codes and latest_followup_enabled(related):
+                latest_subject = stated_latest_request(scope_task) or {}
+                if latest_subject.get('name') and not names and not prior_objects:
+                    names = [latest_subject['name']]
+                    prior_objects = names.copy()
+        prior_identifiers = prior_codes + names
+        pair = _comparison_order(prior_question, prior_identifiers, scope_task, names)
+        if not pair and _distinct_comparison_pair(prior_identifiers):
+            saved = inherited.get('comparison_codes')
+            if isinstance(saved, list) and len(saved) == 2 and set(saved) == set(prior_identifiers):
+                pair = saved
+            elif inherited.get('scope_relation') == 'compare' and not names:
+                pair = prior_codes
+            else:
+                pair = _comparison_order((inherited.get('topic') or {}).get('text', ''), prior_identifiers, scope_task, names)
+        if user_scope := stated_subject_scope(related, names=[*names, *prior_objects], pair=pair):
+            related['subject_scope'] = user_scope
+        active_request = scope_question(related)
+        if user_scope:
+            # The historical-subject request is a suffix of the full message.
+            start = len(message) - len(subject[2]) if subject else 0
+            scope_request = local_scope_text(active_request[start:]).lstrip(' ，,。；;：:')
+        current_identifiers = list(dict.fromkeys(value for value, _, _ in _object_mentions(active_request, related, names)
+                                                 if subject_allowed(related, value)))
+        removed_subject = any(not subject_allowed(related, value) for value in prior_objects + prior_identifiers)
+        side = _comparison_side(scope_request) if _distinct_comparison_pair(pair) else None
+        refers_back = subject is not None or bool(_SUBJECT_REFERENCE.search(active_request))
+        comparison = bool(current_identifiers and _COMPARISON_WORDS.search(active_request)
+                          and (refers_back or re.search(r"加入|增加|再加", active_request)))
+        explicit_pair = [] if comparison else _comparison_order(active_request, current_identifiers, related, names)
+        selected = pair[_COMPARISON_SIDES.index(side)] if side and (comparison or not current_identifiers) else None
+        narrowed = selected
+        if not narrowed and not comparison and (
+                not refers_back or re.match(r'(?:请)?(?:单独|只看|仅研究)', scope_request)):
+            narrowed = _single_previous_object(active_request, current_identifiers, prior_identifiers)
         # Changing an analytical angle or moving to risk analysis is still a
-        # continuation. Only explicit object-switch wording drops old scope.
-        named_switch = re.search(r"(?:改看|改为研究|改为分析|改研究|改分析|换成|换为|转而研究|转而分析)(.+)", message)
-        changes_name = bool(named_switch and not re.match(r"(?:它|其|该|上述|这只)", named_switch.group(1)))
-        changed = bool(current_codes and (set(current_codes) - prior_codes or re.search(r"单独|只看|仅研究", message))) or changes_name
-        relation = "compare" if comparison else "replace" if changed else "continue"
+        # continuation. Explicit selections and subject switches set a new scope.
+        observation_edit = _observation_window_edit(scope_request, current_identifiers, side)
+        # Only a definite reference or a date edit activates an inherited
+        # name. A neutral intervening turn can keep it in reference context.
+        active_names = [name for name in names if name in current_identifiers]
+        recent_readout = latest_followup_enabled(related) and is_latest_readout_followup(scope_request)
+        if (not current_identifiers or comparison) and (subject or removed_subject or (
+                (refers_back or observation_edit or _field_only_followup(scope_request) or recent_readout) and
+                (len(prior_identifiers) == 1 or _PLURAL_REFERENCE.search(active_request)))):
+            active_names = names
+        prior_objects = list(dict.fromkeys([value for value in prior_objects if value not in names] + active_names))
+        named_switch = SUBJECT_SWITCH.search(_unquoted_local_scope(scope_request))
+        changes_name = bool(named_switch and not _SAME_SUBJECT.match(named_switch.group(1).lstrip())
+                            and observation_edit is None)
+        changed = bool(explicit_pair or narrowed or changes_name or current_identifiers and (
+            set(current_identifiers).difference(prior_identifiers) or re.search(r"单独|只看|仅研究", active_request)))
+        relation = 'compare' if comparison else 'replace' if changed or subject or removed_subject else 'continue'
         if comparison:
-            objects = list(dict.fromkeys(prior_objects + current_codes))
+            objects = list(dict.fromkeys(([selected] if selected else prior_objects) + current_identifiers))
+            pair = list(dict.fromkeys(([selected] if selected else pair or prior_identifiers) + current_identifiers))
         elif changed:
-            objects = current_codes
+            objects = [narrowed] if narrowed else current_identifiers
+            pair = explicit_pair
         else:
             objects = prior_objects
+        if scope_task and (relation != 'replace' or not changed or narrowed):
+            if scope := carried_exclusions(scope_task, related):
+                related['subject_scope'] = scope
+        if 'subject_scope' in related:
+            related['original_input']['subject_scope'] = copy.deepcopy(related['subject_scope'])
+        objects = [value for value in objects if subject_allowed(related, value)]
 
-        def excerpt(text, limit):
-            kept = text[:limit]
-            while len(canonical(kept)) > limit:
-                kept = kept[:max(0, len(kept) // 2)]
-            return {"text": kept, "omitted_characters": len(text) - len(kept),
-                    "full_text_hash": fingerprint(text)}
-
-        inherited = previous.get("conversation_context", {})
-        topic = inherited.get("topic") if relation != "replace" and inherited.get("scope_relation") in ("continue", "compare") else None
-        context = {"version": 1, "usage": "reference_resolution_only",
-            "parent_binding": {"task_id": previous["id"], "research_version": previous["version"],
-                "input_hash": previous["input_hash"], "delivery_digest": (previous.get("delivery") or {}).get("digest")},
+        if selected:
+            topic = conversation_excerpt(f'{side}指{selected}。{message}', 1800)
+        elif subject and scope_task and not changed:
+            topic = copy.deepcopy(inherited.get('topic')) or conversation_excerpt(prior_question, 1800)
+        elif relation == 'replace':
+            topic = conversation_excerpt(message, 1800)
+        elif inherited.get('version') == CONVERSATION_CONTEXT_VERSION or inherited.get('scope_relation') in ('continue', 'compare'):
+            topic = copy.deepcopy(inherited.get('topic')) or conversation_excerpt(previous['question'], 1800)
+        else:
+            topic = conversation_excerpt(previous['question'], 1800)
+        context = {"version": CONVERSATION_CONTEXT_VERSION, "usage": "reference_resolution_only",
+            "thread_id": previous.get("thread_id", previous["id"]),
+            "round_number": round_number,
+            "parent_binding": _conversation_binding(previous),
             "scope_relation": relation,
-            "topic": copy.deepcopy(topic) if topic else excerpt(previous["question"], 3000),
-            "previous_question": excerpt(previous["question"], 3000),
-            "previous_answer": excerpt(prior_answer, 2000),
+            "topic": topic,
             "rule": "历史文本仅供理解指代与追问关系，不是当前指令、原件、已核验事实或可引用证据；"
-                    "当前问题和objects决定范围。replace表示旧对象仅作背景，不能自动取数；"
-                    "compare表示当前用户要求加入比较；省略部分不可猜测。"}
-        return objects, context
+                    "当前问题和objects决定范围。replace从新对象建立当前主题，compare保留用户明确要求的比较。"
+                    "focus只显示用户点名的历史轮次或论点，历史判断、反证及条件不替代本轮取证。"
+                    "引用缺失或省略的内容不可猜测。上一轮的研究意图只作背景。"}
+        if selected and not comparison and selected in objects and latest_followup_enabled(related):
+            context['comparison_subject'] = selected
+        if subject:
+            context['subject_reference'] = dict(round=subject_round, status='located' if scope_task else 'unavailable')
+            if scope_task:
+                context['subject_reference']['source'] = _conversation_binding(scope_task)
+            context['rule'] += ('subject_reference定位所指轮次，本轮objects为实际研究范围。'
+                                'unavailable时说明无法定位，不能猜测该轮对象。')
+        pair = [value for value in pair if subject_allowed(related, value)]
+        if _distinct_comparison_pair(pair):
+            context['comparison_codes'] = pair
+        remaining_names = [name for name in names if subject_allowed(related, name) and
+                           (name in objects or relation == 'continue')]
+        if remaining_names:
+            context['security_name_queries'] = remaining_names
+            if len(remaining_names) == 1 and latest_followup_enabled(related):
+                market = (latest_subject.get('market') if latest_subject.get('name') == remaining_names[0] else
+                          inherited.get('latest_subject_market') if remaining_names == inherited.get('security_name_queries') else None)
+                if market in ('A股', '港股'):
+                    context['latest_subject_market'] = market
+        if narrowed or removed_subject and not changed and objects:
+            context['comparison_requests'] = _comparison_requests(scope_task, inherited, objects, names)
+        elif (relation != 'replace' or subject and not changed) and inherited.get('comparison_requests'):
+            context['comparison_requests'] = copy.deepcopy(inherited['comparison_requests'])
+        if relation == 'continue' or narrowed or subject and not changed or removed_subject and not changed:
+            observation_request = (conversation_excerpt(observation_edit, 500) if observation_edit else
+                                   copy.deepcopy(inherited.get('observation_request')))
+            if observation_request:
+                context['observation_request'] = observation_request
+                context['rule'] += ('observation_request记录用户最近一次明确给出的观察期间。'
+                    '当前问题明确指定的条件优先，其次采用这次修改，早于修改的主题或比较条件仅补充未指定部分。'
+                    '观察期间不改变研究截止时点。')
+        if relation != 'replace' and not narrowed and not subject and not removed_subject:
+            context['previous_question'] = conversation_excerpt(previous['question'], 1800)
+            if not focus:
+                context['previous_answer'] = conversation_excerpt(prior_answer, 2000)
+        market_window = resolve_market_date_reference(related, scope_task, objects, read_report=self.archive.report)
+        if market_window is not None:
+            context['market_date_reference'] = market_window
+            context['rule'] += ('market_date_reference只绑定日期，观测原值须在本轮取证。'
+                                '为空时说明需明确日期，不用整批行情代替所指日期区间。')
+        if (period := resolve_economic_followup_period(related, scope_task, objects)) is not None:
+            context['economic_period_reference'] = period
+            context.pop('previous_answer', None)
+            context['rule'] += ('economic_period_reference绑定同一统计指标的所问期间，数值须来自本轮。'
+                                'windows为空时请明确期间。')
+        if focus:
+            context['focus'] = focus
+            _fit_conversation_metrics(context)
+        entry = scope_task['entry'] if scope_task and not changed and not comparison else '混合'
+        return objects, entry, context
 
     def create_case(self, key):
         case = get_case(key)
@@ -641,7 +1440,7 @@ class ResearchAgent:
             conversation_context(task)
             if task["status"] not in ("待开始", "失败", "已取消") or task.get("delivery") or task.get("pending_content"):
                 raise ContractError("运行中或已冻结的研究不能改写计划，请停止后修订或建立关联研究")
-            if ident in self.workers and self.workers[ident].is_alive():
+            if self.run_pending(ident):
                 raise ContractError("旧批次仍在停止，不能修订计划")
             if expected_input_hash is not None and expected_input_hash != task["input_hash"]:
                 raise ContractError("计划修订输入已过期，请重新读取")
@@ -667,6 +1466,8 @@ class ResearchAgent:
 
     def _adopt_method_knowledge(self, task, *, query=None):
         """Retrieve required-question context, retaining every already adopted version."""
+        from .research_methods import method_selection
+        selected = method_selection(task)
         methods = [spec.get("method") for spec in task.get("calculation_specs", [])]
         # A declared obligation needs its definition and applicability limits
         # before inputs exist. Keyword ranking cannot replace that dependency.
@@ -679,31 +1480,34 @@ class ResearchAgent:
         revision = task_catalogue_revision(task)
         adopted = self.knowledge.read(task["entry"], task["question"] if query is None else query, methods,
             context={"intent": task["intent"], "questions": question_specs(task), CATALOGUE_POLICY: revision})
-        if not task.get("knowledge"):
-            task["knowledge"] = adopted
-        else:
-            self.knowledge.validate_package(task["knowledge"], revision=revision)
-            previous_hash = fingerprint(task["knowledge"])
+        previous = task.get("knowledge")
+        merged = adopted
+        if previous:
+            self.knowledge.validate_package(previous, revision=revision)
+            merged = copy.deepcopy(previous)
             for item in adopted["entries"]:
-                if item["id"] not in task["knowledge"]["index"]:
-                    task["knowledge"]["entries"].append(item)
-                    task["knowledge"]["index"][item["id"]] = item["version"]
+                if item["id"] not in merged["index"]:
+                    merged["entries"].append(item)
+                    merged["index"][item["id"]] = item["version"]
             # Retrieval metadata describes the current questions, not a silent
             # replacement of definitions adopted by an earlier checkpoint.
-            reasons = task["knowledge"].setdefault("selection_reasons", {})
+            reasons = merged.setdefault("selection_reasons", {})
             reasons.update(copy.deepcopy(adopted["selection_reasons"]))
             for key in ("query", "coverage", "unmatched", "unmatched_questions", "retrieval_context"):
-                task["knowledge"][key] = copy.deepcopy(adopted[key])
-            task["knowledge"]["excluded"] = [item for item in adopted["excluded"] if item["id"] not in task["knowledge"]["index"]]
-            self.knowledge.reconcile_coverage(task["knowledge"])
-            if previous_hash != fingerprint(task["knowledge"]):
-                for node in task["nodes"]:
-                    if node["id"] == "identity":
-                        node["status"] = "待执行"
-        self.knowledge.validate_package(task["knowledge"], revision=revision)
+                merged[key] = copy.deepcopy(adopted[key])
+            merged["excluded"] = [item for item in adopted["excluded"] if item["id"] not in merged["index"]]
+            self.knowledge.reconcile_coverage(merged)
+        self.knowledge.validate_package(merged, revision=revision)
         for item in task.get("calculations", []):
-            if item.get("method_binding") != self.knowledge.method_binding(task["knowledge"], item["method"]):
+            if item.get("method_binding") != self.knowledge.method_binding(merged, item["method"]):
                 raise ContractError("已有计算缺少锁定的方法版本，请主动更新，不静默迁移")
+        if previous and fingerprint(previous) != fingerprint(merged):
+            for node in task["nodes"]:
+                if node["id"] == "identity":
+                    node["status"] = "待执行"
+        task["knowledge"] = merged
+        if selected['methods']:
+            task['research_methods'] = selected
 
     @staticmethod
     def _validate_host_input(task, host_result):
@@ -713,6 +1517,9 @@ class ResearchAgent:
             raise ContractError("宿主研究产物不能包含凭据或无关私密字段")
         host_result = copy.deepcopy(host_result)
         if task.get('draft_first_version') == 1 and 'draft_report' in host_result:
+            if (host_result.get('draft_report') is None and task.get('draft_submissions')
+                    and 'data_requests' in host_result and not isinstance(host_result['data_requests'],list)):
+                raise ContractError('data_requests须为数组；已保存原文保留，未启动新的研究')
             # Per-request failures become draft workpaper notices. The host
             # does not have to satisfy the verified-analysis schema first.
             return host_result
@@ -757,6 +1564,42 @@ class ResearchAgent:
                 'objects','cutoff','research_mode','conversation_context','requested_theses')},
             questions=question_specs(task)))
 
+    def _standalone_definition_id(self, task):
+        if (task.get('draft_first_version') != 1 or task['version'] != 1 or task['batch'] != 0
+                or task['question_origin'] != 'default' or task.get('plan_version') != 1
+                or task['intent'] not in ('综合研究', '解释变化', '比较对象')
+                or task.get('parent') or task['objects'] or task['materials'] or task['source_records']
+                or task.get('pending_materials') or task.get('research_mode') == 'historical'):
+            return None
+        return self.knowledge.standalone_definition(task)
+
+    @staticmethod
+    def _has_host_input(task):
+        return task.get('run_mode') == 'host' and isinstance(task.get('host_result'), dict)
+
+    def can_run_without_model(self, task, *, incoming_attachments=False):
+        from .draft_sources import offline_requested
+        from .draft_workflow import direct_readout
+
+        if task.get('fixture') or self._has_host_input(task) or offline_requested(task['question']):
+            return True
+        if incoming_attachments or task.get('materials') or task.get('pending_materials'):
+            return False
+        return (definition_only(task) or self._standalone_definition_id(task) is not None
+                or direct_readout(task, policy_without_model=True) is not None)
+
+    def _adopt_standalone_definition(self, task):
+        """Resolve a new, unqualified first question without a paid planner."""
+        ident = self._standalone_definition_id(task)
+        if ident is None:
+            return
+        spec = dict(question_specs(task)[0], kind='fact', answer_scope=GENERAL_DEFINITION_SCOPE,
+                    knowledge_needs=[ident])
+        task['questions'] = normalize_questions([spec], task['question'], task['intent'])
+        task['questions'][0]['status'] = '待回答'
+        task['plan_version'] += 1
+        task['definition_projection_version'] = 1
+
     @staticmethod
     def _adopt_host_reading(task, reading, prior_scope, submitted_specs):
         """Reproduce an already validated reading under the adopted plan.
@@ -791,7 +1634,11 @@ class ResearchAgent:
             reader_version=replayed['reader_version'],source_content_unchanged=True,
             automatic_source_selection=False,budget_reset=False))
 
-    def start(self, ident, host_result=None, asynchronous=False, *, defer_delivery=False):
+    def start(self, ident, host_result=None, asynchronous=False, *, defer_delivery=False, retained_data_only=False,
+              admission=None):
+        from .draft_sources import local_sources_only, offline_requested
+
+        fresh_draft=isinstance(host_result,dict) and host_result.get('draft_report') is not None
         with self.lock:
             if self.runtime_closed:
                 raise ContractError('研究服务已停止，未派发任务；请重新打开App')
@@ -802,12 +1649,37 @@ class ResearchAgent:
             reading_scope = self._host_reading_scope(task)
             if not isinstance(defer_delivery, bool):
                 raise ContractError("宿主研究检查点选项必须为布尔值")
+            if type(retained_data_only) is not bool or (retained_data_only and (host_result is not None or defer_delivery)):
+                raise ContractError('使用现有资料出稿须单独执行')
             if task["status"] not in ("待开始", "失败", "已取消"):
                 raise ContractError("任务不能重复启动；已交付请主动更新")
-            if ident in self.workers and self.workers[ident].is_alive():
+            if self.run_pending(ident):
                 raise ContractError("旧批次仍在停止，请稍后恢复")
-            if task.get("pending_content"):
-                raise ContractError("仅保存失败，请重试保存，不重新研究")
+            content_pending = bool(task.get("pending_content"))
+            if not content_pending and host_result is None and task.get('draft_composition_binding'):
+                from .draft_workflow import has_composed_draft
+
+                content_pending = has_composed_draft(task)
+            submission_pending = False
+            if not content_pending and host_result is None and task.get('draft_submissions'):
+                from .draft_workflow import retained_submission
+                submission_pending = retained_submission(task) is not None
+            blocked = recovery_time_block(task, save_only=content_pending or submission_pending)
+            if blocked:
+                raise ExecutionTimeExhausted(blocked)
+            if content_pending:
+                raise ContractError("报告正文已保留，请重试保存，不重新研究")
+            if submission_pending:
+                raise ContractError('报告原文已保留，请重试保存，不重新研究')
+            if admission is not None:
+                admission(task)
+            local_draft = False
+            if retained_data_only or (self.offline and host_result is None and not defer_delivery
+                                      and task.get('run_mode') in ('model', 'direct', 'local_draft')):
+                from .draft_workflow import has_retained_draft_data
+                local_draft = has_retained_draft_data(task)
+                if retained_data_only and not local_draft:
+                    raise ContractError('当前版本没有可用于出稿的留存资料')
             if (self.require_argument_support and not task.get('fixture')
                     and task['intent'] != DOCUMENT_CONTENT_INTENT
                     and not argument_support.enabled(task)):
@@ -822,11 +1694,35 @@ class ResearchAgent:
                     if node.get('kind') in ('answer','thesis') or node['id'] in ('compose','render'):
                         node['status'] = '待执行'
             checkpoint = task.get("host_checkpoint")
-            if checkpoint and host_result is None and checkpoint.get("source_digest") != fingerprint(original_sources(task)):
+            if (checkpoint and host_result is None and not local_draft
+                    and checkpoint.get("source_digest") != fingerprint(original_sources(task))):
                 raise ContractError("研究检查点后新增原件须显式登记补证，不能直接沿用旧交付依赖")
+            if host_result is None and not task.get('host_result') and not local_draft and not defer_delivery:
+                self._adopt_standalone_definition(task)
+            concept_only = definition_only(task)
             if host_result is not None:
                 host_result = self._validate_host_input(task, host_result)
-            task["run_mode"] = "host" if host_result is not None or task.get("run_mode") == "host" else "model" if not task["fixture"] and self.model is not None and not self.offline else "offline"
+            resume_host = self._has_host_input(task)
+            if local_draft:
+                task['run_mode'] = 'local_draft'
+            elif concept_only and host_result is None and not task.get('host_result'):
+                task['run_mode'] = 'offline'
+            elif (host_result is None and not resume_host
+                  and offline_requested(task['question'])):
+                task['run_mode'] = 'offline'
+            elif host_result is not None or resume_host:
+                task['run_mode'] = 'host'
+            elif self.offline or task['fixture']:
+                task['run_mode'] = 'offline'
+            else:
+                from .draft_workflow import direct_readout
+
+                model_configured = self.model is not None and (
+                    not isinstance(self.model, ModelService) or self.model.configured())
+                if direct_readout(task, policy_without_model=not model_configured) is not None:
+                    task['run_mode'] = 'direct'
+                else:
+                    task['run_mode'] = 'model' if model_configured else 'offline'
             if defer_delivery and task["run_mode"] != "host":
                 raise ContractError("仅显式宿主研究可在交付前暂停，不改变App自动交付")
             task["defer_delivery"] = defer_delivery
@@ -869,16 +1765,15 @@ class ResearchAgent:
                         if node["id"] != "identity":
                             node.update(status="待执行", input_hash=task["input_hash"])
                 task["host_result"] = copy.deepcopy(host_result)
-            host_result = task.get("host_result")
+            local_question = task['run_mode'] == 'offline' and local_sources_only(task)
+            host_result = None if local_draft or local_question else task.get("host_result")
             # Upgrade an unfinished old checkpoint in place; frozen reports are never migrated.
             specs = normalize_questions(question_specs(task), task["question"], task["intent"])
             prior_questions = {q["id"]: q for q in task["questions"]}
             task["questions"] = [dict(prior_questions[q["id"]], **q) for q in specs]
             draft_submission = task.get('draft_first_version') == 1 and isinstance(host_result, dict) and 'draft_report' in host_result
-            if draft_submission:
-                # Acquisition batches have their own request fingerprints.
-                # They do not change the research question and must not expire
-                # the name/code mappings obtained by the previous host stage.
+            if local_draft or draft_submission or (local_question and task.get('draft_first_version') == 1):
+                # Keep the input specs that bind existing sources and identity mappings.
                 pass
             elif not task.get("fixture") and (task["run_mode"] != "model" or not task.get("reasoning_state", {}).get("plan")):
                 task["calculation_specs"] = copy.deepcopy((host_result or {}).get("calculations", []))
@@ -895,14 +1790,23 @@ class ResearchAgent:
             task["input_hash"] = input_fingerprint(task)
             self._adopt_method_knowledge(task)
             self._adopt_host_reading(task, host_reading, reading_scope, host_reading_specs)
-            host_result = task.get("host_result")
+            host_result = None if local_draft or local_question else task.get("host_result")
             planned = self.plan(task)
             existing = {n["id"]: n for n in task["nodes"]}
             task["nodes"] = [existing[n["id"]] if n["id"] in existing and existing[n["id"]]["input_hash"] == task["input_hash"]
                              and existing[n["id"]]["dependencies"] == n["dependencies"] else n for n in planned]
+            messages = task.get('messages') or []
+            if task['version'] == 1 and task['batch'] == 0 and task.get('materials') and messages:
+                message = messages[-1]
+                if message.get('role') == 'user' and message.get('task_id') == ident:
+                    names = self.archive.submitted_material_names(task)
+                    if names:
+                        message['attachments'] = names
             task["status"], task["error"] = "运行中", None
             task["batch"] += 1
-            task["revisions"].append({"action": "启动" if task["batch"] == 1 else "恢复", "batch": task["batch"], "time": now()})
+            task.pop('draft_composition_binding', None)
+            action = '现有资料出稿' if local_draft else '启动' if task['batch'] == 1 else '恢复'
+            task["revisions"].append({"action": action, "batch": task["batch"], "time": now(), "draft_report_supplied": fresh_draft})
             self.archive.save(task)
             batch = task["batch"]
             self._begin_run_control(ident, task["version"], batch)
@@ -926,9 +1830,17 @@ class ResearchAgent:
             if task["status"] != "运行中":
                 raise ContractError("只有运行中的任务可以取消")
             task["status"] = "已取消"
+            for node in task["nodes"]:
+                if node.get("status") == "运行中":
+                    node["status"] = "已取消"
             task["revisions"].append({"action": "取消", "batch": task["batch"], "time": now()})
             saved = self.archive.save(task)
-            self._finish_run_control(ident, task["version"], task["batch"])
+            # Stop dispatch immediately after commit. The run still owns its
+            # slot until its final checkpoint and ledger have settled.
+            with self.control_lock:
+                control = self.run_controls.get((ident, task["version"], task["batch"]))
+                if control is not None:
+                    control.set()
             return saved
 
     def _active(self, ident, batch):
@@ -942,45 +1854,45 @@ class ResearchAgent:
 
     def _run(self, ident, batch, host_result, version=None):
         started = time.monotonic()
-        accounted_start = 0
+        timer = None
         verification_token = None
         try:
             initial = self._get(ident)
             version = initial["version"] if version is None else version
             if initial["version"] != version or initial["batch"] != batch:
                 raise ContractError("请求所属研究版本或执行批次已过期")
-            accounted_start = initial["ledger"]["used"]["seconds"]
+            timer = _ExecutionTimer(started, initial["ledger"]["used"]["seconds"])
+            if not initial.get('defer_delivery'):
+                require_report_resources(self.resources)
+            from .draft_sources import local_sources_only
+            from .draft_workflow import direct_readout
             if initial.get('draft_first_version') == 1 and (
-                    initial.get('run_mode') == 'model' or isinstance(host_result, dict) and 'draft_report' in host_result):
+                    initial.get('run_mode') in ('model', 'direct', 'local_draft') or
+                    (initial.get('run_mode') == 'offline' and not definition_only(initial)
+                     and (local_sources_only(initial) or direct_readout(initial) is not None)) or
+                    isinstance(host_result, dict) and 'draft_report' in host_result):
                 from .draft_workflow import run
-                return run(self, ident, batch, host_result)
+                return run(self, ident, batch, host_result, timer=timer)
             from .material_parser import begin_verification
             verification_token = begin_verification(initial, self._check_run_control,
-                initial["ledger"]["limits"]["seconds"] - accounted_start)
-            if self._get(ident).get("run_mode") == "model":
+                initial["ledger"]["limits"]["seconds"] - initial["ledger"]["used"]["seconds"]
+                - timer.unrecorded(initial["ledger"]))
+            if initial.get("run_mode") == "model":
                 self._prepare_model_plan(ident, batch)
-                # ModelService already settles the preparation's network time.
-                spent = self._get(ident)["ledger"]["used"]["seconds"] - accounted_start
                 with self.lock:
                     prepared = self._active(ident, batch)
-                    charge(prepared["ledger"], "seconds", max(0, time.monotonic() - started - spent))
+                    timer.charge(prepared["ledger"])
                     self.archive.save(prepared)
-                started = time.monotonic()
             index = 0
             while index < len(self._get(ident)["nodes"]):
                 step = self._get(ident)["nodes"][index]
                 index += 1
                 if step["id"] == "compose":
-                    decision_started = time.monotonic()
-                    decision_used = self._get(ident)["ledger"]["used"]["seconds"]
                     changed = self._maybe_supplement(ident, batch)
                     with self.lock:
                         decided = self._active(ident, batch)
-                        settled = max(0, decided["ledger"]["used"]["seconds"] - decision_used)
-                        charge(decided["ledger"], "seconds", max(0, time.monotonic() - decision_started - settled), delivery=not changed)
+                        timer.charge(decided["ledger"], delivery=not changed)
                         self.archive.save(decided)
-                        accounted_start = decided["ledger"]["used"]["seconds"]
-                    started = time.monotonic()
                     if changed:
                         index = 0
                         continue
@@ -991,7 +1903,7 @@ class ResearchAgent:
                         checkpoint["host_checkpoint"] = {"stage": "待交付或定向补证", "input_hash": checkpoint["input_hash"],
                                                          "round": checkpoint["ledger"]["supplements"], "time": now(),
                                                          "source_digest": fingerprint(original_sources(checkpoint))}
-                        charge(checkpoint["ledger"], "seconds", max(0, time.monotonic() - started), delivery=True)
+                        timer.charge(checkpoint["ledger"], delivery=True)
                         self.archive.save(checkpoint)
                         return checkpoint
                 with self.lock:
@@ -1018,8 +1930,7 @@ class ResearchAgent:
                         for dependent in task["nodes"]:
                             if dependent["id"] in affected and dependent["id"] != node["id"]:
                                 dependent["status"] = "待执行"
-                    charge(task["ledger"], "seconds", .001, delivery=node["id"] in ("compose", "render"))
-                    accounted_start = task["ledger"]["used"]["seconds"]
+                    timer.charge(task["ledger"], minimum=.001, delivery=node["id"] in ("compose", "render"))
                     node["status"] = "运行中"
                     node["request"] = request(task, node["operation"], node_id=node["id"])
                     validate_request(node["request"], task)
@@ -1047,27 +1958,25 @@ class ResearchAgent:
                     validate_result(result_node["result"], outcome)
                     result_node.update(status=state, output_hash=fingerprint(artifacts))
                     self._reuse_unaffected_nodes(outcome)
-                    already_settled = max(0, outcome["ledger"]["used"]["seconds"] - accounted_start)
-                    elapsed = max(0, time.monotonic() - started - already_settled)
-                    charge(outcome["ledger"], "seconds", elapsed, delivery=node["id"] in ("compose", "render"))
-                    started = time.monotonic()
+                    timer.charge(outcome["ledger"], delivery=node["id"] in ("compose", "render"))
                     if node["id"] == "render":
                         content, html = outcome["pending_content"], outcome["pending_html"]
                         self.archive.save(outcome)  # durable save retry checkpoint before final transaction
-                        result = self.archive.deliver(outcome, content, html)
+                        result = self.archive.deliver(outcome, content, html, execution_timer=timer)
                         return result
                     self.archive.save(outcome)
             return self._get(ident)
         except Exception as error:
             with self.lock:
                 task = self._get(ident)
-                if task["version"] == version and task["batch"] == batch and task["status"] in ("运行中", "已取消"):
+                if timer is not None and task["version"] == version and task["batch"] == batch and task["status"] in ("运行中", "已取消"):
                     # A failed or cancelled in-flight operation still consumed time.
                     # Do not refund it by only retaining the previous checkpoint.
-                    already_settled = max(0, task["ledger"]["used"]["seconds"] - accounted_start)
-                    task["ledger"]["used"]["seconds"] += max(0, time.monotonic() - started - already_settled)
+                    timer.record(task["ledger"])
                 if task["version"] == version and task["status"] == "运行中" and task["batch"] == batch:
-                    task["status"], task["error"] = "失败", str(error) if isinstance(error, ContractError) else "执行或保存失败，请检查本地档案"
+                    task["status"] = "失败"
+                    blocked = recovery_time_block(task, save_only=bool(task.get("pending_content")))
+                    task["error"] = blocked or (str(error) if isinstance(error, ContractError) else "执行或保存失败，请检查本地档案")
                     for node in task["nodes"]:
                         if node["status"] == "运行中":
                             node.update(status="失败", error=task["error"])
@@ -1100,15 +2009,7 @@ class ResearchAgent:
                 return affected
             affected.update(added)
 
-    @staticmethod
-    def _branch_basis(task, node):
-        """Shared evidence nodes do not make unrelated question facts dependent."""
-        from .evidence import evidence_binding
-        selected = set(node["questions"])
-        return fingerprint({"questions": [q for q in task["questions"] if q["id"] in selected],
-            "evidence": [{"binding": evidence_binding(e), "version": e["content_version"]} for e in task["evidence"] if selected.intersection(e.get("question_ids", []))],
-            "calculations": [c for c in task["calculations"] if selected.intersection(c.get("question_ids", []))],
-            "theses": [t for t in task["theses"] if selected.intersection(t.get("question_ids", []))]})
+    _branch_basis = staticmethod(argument_support.branch_basis)
 
     def _reuse_unaffected_nodes(self, task):
         active = self._active_supplement(task)
@@ -1508,7 +2409,8 @@ class ResearchAgent:
         selected = [q for q in planned["questions"] if not active or q in active["affected_questions"]]
         if node == "identity":
             self.knowledge.validate_package(task["knowledge"])
-            task["identity_state"] = "合成身份已核验" if fixture else "待证据消歧；不按标的名称推定业务暴露"
+            task["identity_state"] = ("通用口径，无须核验标的" if definition_only(task) else
+                                      "合成身份已核验" if fixture else "待证据消歧；不按标的名称推定业务暴露")
         elif node == "evidence":
             candidates = fixture.get("evidence", []) if fixture else (host_result or {}).get("evidence", [])
             if not active:
@@ -1664,10 +2566,22 @@ class ResearchAgent:
                                     active['affected_questions'] if active else None,final_delivery=True)
                             else:
                                 answer = self._reason_on_verified_material(task, active["affected_questions"] if active else None)
+                        except TransportFailure as error:
+                            if error.code == 'transport_cancelled':
+                                raise
+                            self._check_run_control(task)
+                            output_rejected = True
+                            rejection_field = 'analysis.transport'
+                            answer = phase_output_example('analyze', task)
+                            if final_delivery:
+                                task['reasoning_state']['final_delivery'].update(status='未采用', failure_code=error.code)
+                            self._gap(task, '模型分析未完成，已保留可核对的依据，相关结论待补。',
+                                      active['affected_questions'] if active else selected, category='analysis_transport')
                         except (QueryReferenceFormatError, NumericSegmentFormatError, ModelCompletionError, ModelJSONFormatError) as error:
                             # Do not coerce malformed references or fabricate a
                             # repaired answer. Other verified work can still be
                             # delivered with this explicit gap and its ledger.
+                            self._check_run_control(task)
                             output_rejected = True
                             answer = phase_output_example('analyze', task)
                             known_format=self._completed_analysis_format_issue(task,
@@ -1691,6 +2605,8 @@ class ResearchAgent:
                                 gap = ("模型查询引用格式未通过" if isinstance(error, QueryReferenceFormatError)
                                        else "模型数字片段格式未通过")
                             if output_rejected:
+                                if final_delivery:
+                                    task['reasoning_state']['final_delivery']['status'] = '未采用'
                                 self._gap(task, gap + "，未采用本次回答；保留已核验证据与计算，交付缺口报告。",
                                           active["affected_questions"] if active else selected)
                     else:
@@ -1745,11 +2661,12 @@ class ResearchAgent:
             task["gaps"] = list(dict.fromkeys(task["gaps"]))
         elif node == "compose":
             self._record_version_changes(task, fixture)
-            from .reports import compose
+            from .reports import clear_pending_html, compose
             task["pending_content"] = compose(task)
+            clear_pending_html(task)
         elif node == "render":
-            from .reports import render
-            task["pending_html"] = render(task["pending_content"], self.resources)
+            from .reports import render, stage_pending_html
+            stage_pending_html(task, render(task["pending_content"], self.resources))
         return task
 
     def _save_model_checkpoint(self, task):
@@ -1779,7 +2696,7 @@ class ResearchAgent:
             if (task.get('run_mode') != 'host' or task.get('delivery') or task.get('pending_content')
                     or task['status'] not in ('待开始','已取消','失败') or not argument_support.enabled(task)):
                 raise ContractError('宿主只能复核已停止且尚未交付的研究检查点')
-            if ident in self.workers and self.workers[ident].is_alive():
+            if self.run_pending(ident):
                 raise ContractError('旧执行仍在停止，未采用复核结果')
             proposal = task.get('host_result', {})
             request = argument_support.review_request(task, proposal)
@@ -1851,17 +2768,26 @@ class ResearchAgent:
                     if delivery or task['reasoning_state'].get('final_delivery', {}).get('reason') == 'argument_support':
                         task['reasoning_state']['final_delivery']['status'] = '已提交' if record is not None else '未采用'
                 self._save_model_checkpoint(task)
-        if record is None:
-            self._gap(task, '论证复核未完成，未采用未经复核的研究回答与判断。', selected)
-            return
         targets = {item['id']: item for item in request['targets']}
+        review_questions = {ident for target in targets.values() for ident in target['question_ids']}
+        if record is None:
+            pending = [ident for ident in selected if ident in review_questions]
+            if pending:
+                self._gap(task, _ARGUMENT_GAP_TEXT['argument_review_pending'], pending,
+                          category='argument_review_pending')
+            return
+        self._resolve_argument_gap(task, 'argument_review_pending', review_questions,
+                                   '当前分析已有对应的论证复核回执')
         by_question = {q['id']: q for q in task['questions']}
         from .review_answer_choices import effective_assessments
         affected = list(dict.fromkeys(ident for item in effective_assessments(request, record['result']) if not item['supported']
             for ident in targets[item['target_id']]['question_ids']
             if item['target_id'].startswith('answer:') or by_question[ident]['kind'] not in DIRECT_KINDS))
+        self._resolve_argument_gap(task, 'argument_claims_withheld', review_questions.difference(affected),
+                                   '当前复核已认可这些问题的相关陈述')
         if affected:
-            self._gap(task, '部分陈述缺少足够依据，未采用对应回答或论点；已核验原值和计算保留。', affected)
+            self._gap(task, _ARGUMENT_GAP_TEXT['argument_claims_withheld'], affected,
+                      category='argument_claims_withheld')
 
     def _revise_reviewed_writing(self, task, proposal, selected):
         """One same-evidence revision, then a new independent content review.
@@ -2306,15 +3232,19 @@ class ResearchAgent:
 
     def _resubmit_analysis_once(self,task,proposal,review,selected=None,*,format_issue=None):
         """One shared correction slot for numerical or known JSON rejection."""
-        if not self._final_analysis_available(task):return proposal
-        state = task.setdefault('reasoning_state', {})
         reserved = not argument_support.enabled(task)
-        if not reserved:
+        state = task.get('reasoning_state', {})
+        if reserved:
+            if not self._final_analysis_available(task):
+                return proposal
+        else:
             # Reviewed research needs one further call after the correction.
             # Never spend that last call on prose which then cannot be reviewed.
             remaining = task['ledger']['limits']['model_calls'] - task['ledger']['used']['model_calls']
-            if remaining < 2 or not self._reasoning_available(task) or state.get('numeric_resubmission'):
+            if (remaining < 2 or not self._reasoning_available(task) or 'numeric_resubmission' in state
+                    or state.get('final_delivery', {}).get('status') in ('已派发', '已提交', '未采用')):
                 return proposal
+        state = task.setdefault('reasoning_state', {})
         state.setdefault('rejected_analysis_submissions', []).append({
             'task_id':task['id'], 'research_version':task['version'], 'batch':task['batch'],
             'input_hash':task['input_hash'], 'proposal':copy.deepcopy(proposal),
@@ -2333,7 +3263,11 @@ class ResearchAgent:
             result = self._reason_on_verified_material(task, selected, final_delivery=reserved)
             state[state_key]['status'] = '已提交'
             return result
-        except (QueryReferenceFormatError, NumericSegmentFormatError, ModelCompletionError, ModelJSONFormatError):
+        except (TransportFailure, QueryReferenceFormatError, NumericSegmentFormatError, ModelCompletionError, ModelJSONFormatError) as error:
+            if isinstance(error, TransportFailure):
+                if error.code == 'transport_cancelled':
+                    raise
+                state[state_key]['failure_code'] = error.code
             state[state_key]['status'] = '未采用'
             self._save_model_checkpoint(task)
             return proposal
@@ -2508,6 +3442,15 @@ class ResearchAgent:
                             "reader_version": reader_version_for(task) if selected_originals else 1}
         if task.get("calculation_specs") or any(question.get("method_needs") for question in task["questions"]):
             extraction_input["calculation_input_contract"] = calculation_input_requirements(task)
+        # Only the newly supported market-indicator inputs expire their old
+        # extraction checkpoint. Unrelated quotes and frozen deliveries keep
+        # their existing keys, and the spent-call ledger remains authoritative.
+        visible_sources = {view['id'] for view in views}
+        if any(record.get('id') in visible_sources and record.get('source') == 'tinyshare'
+               and record.get('operation') == 'daily_basic'
+               and current_snapshot_reference(task, record) is not None
+               for record in task.get('source_records', [])):
+            extraction_input['current_market_observation_version'] = CURRENT_MARKET_OBSERVATION_VERSION
         # Re-read unfinished financial extractions once under the new literal
         # amount policy. Do not expire unrelated API/non-financial checkpoints
         # or rewrite a frozen report. The original ledger is still enforced.
@@ -2560,7 +3503,10 @@ class ResearchAgent:
                 or self._required_numeric_completion_available(task,task['host_result'])):
             return task["host_result"]
         recovery = state.get('extraction_submission_recovery', {})
-        if (recovery.get('input_digest') == digest and recovery.get('status') in ('已派发', '未采用')):
+        # A submitted recovery reply can be saved before validation finishes.
+        # Only the extraction checkpoint above authorizes reusing its proposal.
+        if (not cached_extraction and recovery.get('input_digest') == digest
+                and recovery.get('status') in ('已派发', '已提交', '未采用')):
             self._gap(task, '本轮提取重新提交未形成可采用结果，保留原件和已派发用量，不重复提交。',
                       [q['id'] for q in task['questions']], category='evidence_extraction')
             return dict(task['host_result'], evidence_specs=[])
@@ -3100,7 +4046,7 @@ class ResearchAgent:
         return task['host_result']
 
     @staticmethod
-    def _validated_data_needs(task, needs):
+    def _validated_data_needs(task, needs, *, first_report=False):
         """Validate detached batch syntax and currently known source authority.
 
         A malformed later entry must not consume an earlier valid request.
@@ -3118,16 +4064,25 @@ class ResearchAgent:
         for need in needs:
             if not isinstance(need, dict):
                 raise ContractError("数据需求须为字段记录")
-            if set(need) - {"id", "source", "operation", "parameters", "question_ids", "selection_reason", "reading_queries", "catalogue_alternative_ref"}:
+            if set(need) - {"id", "source", "operation", "parameters", "question_ids", "selection_reason", "reading_queries", "catalogue_alternative_ref", "observation_scope"}:
                 raise ContractError("数据需求含未登记字段；凭据不能进入任务")
+            source = need.get("source", "ifind")
+            if first_report:
+                from .draft_sources import validate_stated_source
+
+                from .market_series import validate_dated_nav_request
+
+                validate_stated_source(task, source)
+                validate_dated_nav_request(task, need)
             from .source_reader import validate_acquisition_reading_queries
             validate_acquisition_reading_queries(task,need)
+            from .market_series import validate_observation_scope
+            validate_observation_scope(task,need)
             ident, selected = need.get("id"), need.get("question_ids")
             from .planning import IDENTIFIER
             if not isinstance(ident, str) or not IDENTIFIER.fullmatch(ident) or ident in seen or not isinstance(selected, list) or not selected or not all(isinstance(x, str) and x in questions for x in selected):
                 raise ContractError("数据需求标识或对应研究问题无效")
             seen.add(ident)
-            source = need.get("source", "ifind")
             if source != "ifind" and (not isinstance(need.get("selection_reason"), str) or not need["selection_reason"].strip()):
                 raise ContractError("采用iFinD以外的来源必须记录原因，不静默换源")
             operation, params = need.get("operation"), need.get("parameters")
@@ -3136,7 +4091,7 @@ class ResearchAgent:
             # Only a validated earlier lookup allows syntax-only inspection of
             # dependent requests; normal requests retain the full scope check.
             params = validate_source_request(task, source, operation, params,
-                                             require_identity=not identity_pending)
+                                             require_identity=not identity_pending, defer_account_policy=first_report)
             from .financial_sources import validate_financial_acquisition_role
             validate_financial_acquisition_role(task,need)
             from .source_requirements import validate_choice
@@ -3159,8 +4114,28 @@ class ResearchAgent:
                 identity_pending = True
         return validated
 
-    def _acquire_sources(self, task, needs, *, metadata_dependency=False, yield_on_readable_financial=False):
+    def _acquire_draft_account_policy(self, task, question_ids):
+        """Resolve the prerequisite once for a validated draft request."""
+        from .financial_sources import has_account_policy
+
+        request = dict(source='ifind', operation='get_limit_policy', parameters={})
+        previous = task.get('source_attempts', {}).get(fingerprint(request))
+        if previous and not (previous.get('status') == '待响应' and previous.get('batch') != task['batch']):
+            raise ContractError('本版账号策略尚不可用，依赖它的请求未派发。')
+        ledger = task['ledger']
+        required = 2 + self.collector.ifind_authentication_cost(self.source_credentials.get('ifind', {}))
+        if ledger['limits']['data_requests'] - ledger['used']['data_requests'] < required:
+            raise ContractError('剩余取数预算不足以完成账号策略及业务请求，该请求未派发。')
+        self._acquire_sources(task, [dict(request, id='draft_account_policy', question_ids=list(question_ids),
+            selection_reason='获取本次业务请求所需的iFinD账号策略。')])
+        if not has_account_policy(task):
+            raise ContractError('未取得本任务有效账号策略，依赖它的请求未派发。')
+
+    def _acquire_sources(self, task, needs, *, metadata_dependency=False, yield_on_readable_financial=False,
+                         first_report=False):
         """Execute a preflighted batch after checking each resolved dependency."""
+        from .evidence import calendar_query_reference
+
         if yield_on_readable_financial:
             from .financial_sources import progressive_financial_source_ready
             # Validate the task policy before any provider I/O. This option is
@@ -3176,7 +4151,25 @@ class ResearchAgent:
             else:
                 self._gap(task, message, selected)
 
-        prepared = self._validated_data_needs(task, needs)
+        def reuse_record(record, need, selected):
+            # Every reuse path carries its own purpose before the legacy aliases
+            # are extended. Neither the original nor its acquisition is changed.
+            record_request_purpose(record, need, selected)
+            record['data_need_ids'] = list(dict.fromkeys(record.get('data_need_ids', []) + [need['id']]))
+            record['question_ids'] = list(dict.fromkeys(record.get('question_ids', []) + selected))
+            self._journal(task)
+
+        from .draft_sources import (
+            ECONOMIC_REFRESH_OPERATIONS, MARKET_REFRESH_OPERATIONS, ORIGINAL_DOWNLOAD_OPERATIONS,
+            HistoricalOriginalUnavailable, economic_refresh_enabled, historical_originals_local_only, market_refresh_enabled,
+            local_sources_only, pdf_download_disabled,
+        )
+        from .financial_sources import IFIND_POLICY_DEPENDENT_OPERATIONS, has_account_policy
+        refresh_market = first_report and market_refresh_enabled(task)
+        refresh_economic = first_report and economic_refresh_enabled(task)
+        skip_pdf = pdf_download_disabled(task)
+        retained_only = local_sources_only(task)
+        prepared = self._validated_data_needs(task, needs, first_report=first_report)
         from .source_requirements import register
         if register(task,[need for need,source,operation,params in prepared]):
             self._save_model_checkpoint(task)
@@ -3195,17 +4188,25 @@ class ResearchAgent:
             processed_count = index + 1
             ident, selected = need["id"], need["question_ids"]
             from .evidence import validate_source_request
+            deferred_policy = (first_report and source == 'ifind' and operation in IFIND_POLICY_DEPENDENT_OPERATIONS
+                               and not has_account_policy(task))
+            if deferred_policy and not retained_only:
+                self._acquire_draft_account_policy(task, selected)
             try:
                 # Recheck actual retained mappings before cache aliases,
                 # checkpoints, budget journal entries or provider I/O.
                 params = validate_source_request(task, source, operation, params)
             except ContractError as error:
+                if deferred_policy:
+                    raise  # The draft records the rejected request and continues its independent work.
                 issue(f"数据需求{ident}：请求依赖尚未核验，未派发。{error}", selected)
                 continue
             expected = fingerprint({"source": source, "operation": operation, "parameters": params})
             records = task.setdefault("source_records", [])
+            pdf_original = False
             if source == 'ifind' and operation == 'filing_original':
                 from .evidence import filing_selection_identity
+                pdf_original = True
                 identity = filing_selection_identity(task, params)
                 cached_original = next((x for x in records if x.get('kind') == 'filing'
                     and x.get('operation') == 'filing_original' and x.get('task_id') == task['id']
@@ -3213,13 +4214,12 @@ class ResearchAgent:
                     and fingerprint(x.get('snapshot')) == x.get('hash')
                     and filing_selection_identity(task, x['parameters']) == identity), None)
                 if cached_original is not None:
-                    cached_original['data_need_ids'] = list(dict.fromkeys(cached_original.get('data_need_ids', []) + [ident]))
-                    cached_original['question_ids'] = list(dict.fromkeys(cached_original.get('question_ids', []) + selected))
-                    self._journal(task)
+                    reuse_record(cached_original, need, selected)
                     continue
             if source == 'official' and operation == 'release_original':
                 from .official_sources import validate_request, validate_original
                 selected_release=validate_request(task,operation,params)
+                pdf_original = selected_release.get('format') == 'pdf'
                 cached_official=next((x for x in records if x.get('source')=='official'
                     and x.get('operation')=='release_original' and x.get('task_id')==task['id']
                     and x.get('research_version')==task['version'] and x.get('status')=='成功待核验'
@@ -3227,25 +4227,47 @@ class ResearchAgent:
                     and fingerprint(x.get('snapshot'))==x.get('snapshot_hash')),None)
                 if cached_official is not None:
                     validate_original(task,cached_official)
-                    cached_official['data_need_ids']=list(dict.fromkeys(cached_official.get('data_need_ids',[])+[ident]))
-                    cached_official['question_ids']=list(dict.fromkeys(cached_official.get('question_ids',[])+selected))
-                    self._journal(task)
+                    reuse_record(cached_official, need, selected)
                     continue
+            identity_ids=None
+            if source=='ifind' and operation=='get_thscode':
+                from .evidence import retained_identity_queries
+                identity_ids={row['artifact_id'] for row in retained_identity_queries(task)}
+            calendar_query = (source, operation) == ('ifind', 'get_trade_dates')
+            current_query_required = (calendar_query or source + '.' + operation in IFIND_METADATA_REGISTRY
+                                      or (source, operation) == ('official', 'index_catalog'))
+            query_proof = calendar_query_reference if calendar_query else current_query_reference
             cached = next((x for x in records if x.get("kind") in ("api", "filing") and x.get("request_hash") == expected and
+                           (identity_ids is None or x.get('id') in identity_ids) and
                            x.get("task_id") == task["id"] and x.get("research_version") == task["version"] and
                            x.get("status") == "成功待核验" and fingerprint(x.get("snapshot")) == x.get("hash") and
                            (task.get("research_mode") != "current" or x.get("kind") != "api" or
                             x.get("source", "") + "." + x.get("operation", "") not in FIELD_REGISTRY or
                             current_snapshot_reference(task, x) is not None)
-                           and (x.get('source', '')+'.'+x.get('operation', '') not in IFIND_METADATA_REGISTRY
-                                or current_query_reference(task, x) is not None)), None)
+                           and (not refresh_market or source != 'ifind' or operation not in MARKET_REFRESH_OPERATIONS
+                                or current_query_reference(task, x) is not None)
+                           and (not refresh_economic or source != 'ifind' or operation not in ECONOMIC_REFRESH_OPERATIONS
+                                or current_query_reference(task, x) is not None)
+                           and (not current_query_required or query_proof(task, x) is not None)), None)
             if cached:
                 # Aliases are explicit references, not repeated independent evidence.
-                record_request_purpose(cached, need, selected)
-                cached["data_need_ids"] = list(dict.fromkeys(cached.get("data_need_ids", []) + [ident]))
-                cached["question_ids"] = list(dict.fromkeys(cached.get("question_ids", []) + selected))
-                self._journal(task)
+                reuse_record(cached, need, selected)
                 continue
+            if retained_only:
+                message = '本次仅使用现有资料，未派发外部取数请求。'
+                if first_report:
+                    raise ContractError(message)
+                issue(f'数据需求{ident}：{message}', selected)
+                continue
+            if skip_pdf and pdf_original:
+                message = '本次研究要求不下载PDF，未派发PDF原件请求。'
+                if first_report:
+                    raise ContractError(message)
+                issue(f'数据需求{ident}：{message}', selected)
+                continue
+            if (first_report and (source, operation) in ORIGINAL_DOWNLOAD_OPERATIONS
+                    and historical_originals_local_only(task)):
+                raise HistoricalOriginalUnavailable('已过历史研究截止时点，新增下载无法证明当时版本，原件请求未派发。')
             if supplement_request_blocked(task, source, selected):
                 self._gap(task, f"数据需求{ident}：来源或对应问题已遇到授权权限失败；保留已有证据与用量，不继续派发或换源规避。", selected)
                 continue
@@ -3259,37 +4281,61 @@ class ResearchAgent:
             previous = attempted.get(expected, {})
             retry_discarded = (previous.get("status") == "响应已返回但取消丢弃" and previous.get("discarded_batch") != task["batch"]
                                and len(dispatches) < 3)
-            if (expected in attempted or dispatches) and not retry_discarded:
+            resume_unstarted = False
+            if previous.get('status') == '待响应' and type(previous.get('batch')) is int and previous['batch'] < task['batch']:
+                offset = previous.get('dispatch_offset')
+                ledger_events = task['ledger']['dispatches']
+                if type(offset) is int and 0 <= offset <= len(ledger_events) and previous.get('prior_dispatches') == len(dispatches):
+                    # A prerequisite (authentication, issuer lookup, etc.)
+                    # can be dispatched before the main request is registered.
+                    resume_unstarted = not any(event.get('kind') == 'data_requests' and event.get('batch') == previous['batch']
+                                               for event in ledger_events[offset:])
+                elif 'dispatch_offset' not in previous:
+                    # Preserve the pre-existing account-policy recovery for old tasks.
+                    resume_unstarted = source == 'ifind' and operation == 'get_limit_policy' and not dispatches
+            official_recovery=None
+            if (source=='official' and operation=='release_catalog' and previous
+                    and previous.get('batch')!=task['batch']):
+                from .announcement_sources import catalogue_recovery
+                official_recovery=catalogue_recovery(task,params,main_dispatched=bool(dispatches))
+            if (expected in attempted or dispatches) and not (retry_discarded or resume_unstarted) and official_recovery is None:
                 issue(f"数据需求{ident}：本版本已经尝试，未获可复用响应；保留用量，不重复派发。", selected)
                 continue
+            recovery_reason = '首次登记'
+            if official_recovery:
+                recovery_reason = '用户恢复任务，继续已留存官方响应，不重复已完成请求'
+            elif retry_discarded:
+                recovery_reason = '用户恢复已取消任务；前次响应已返回但被丢弃，在同一请求三次总上限内重新取数'
+            elif resume_unstarted:
+                recovery_reason = '前一批已登记取数需求，尚未派发，恢复时继续'
             try:
                 attempted[expected] = {"id": ident, "source": source, "operation": operation, "status": "待响应", "time": now(),
                     "batch": task["batch"], "prior_dispatches": len(dispatches),
-                    "recovery_reason": "用户恢复已取消任务；前次响应已返回但被丢弃，在同一请求三次总上限内重新取数" if retry_discarded else "首次登记"}
+                    "dispatch_offset": len(task["ledger"]["dispatches"]),
+                    "recovery_reason": recovery_reason,
+                    "pending_purpose": {key: copy.deepcopy(need[key])
+                        for key in ("id", "question_ids", "selection_reason", "observation_scope") if key in need}}
                 if source == 'ifind' and operation == 'filing_original':
                     attempted[expected]['original_identity'] = identity
                 self._save_model_checkpoint(task)
-                raw = self.collector.external(task, source, operation, params, self.source_credentials.get(source, {}))
-                raw.update(data_need_ids=[ident], question_ids=list(selected), selection_reason=need.get("selection_reason", "优先iFinD"))
-                record_request_purpose(raw, need, selected)
-                existing = next((item for item in records if item["id"] == raw["id"]), None)
-                if existing is None:
-                    records.append(raw)
-                else:
-                    existing.update(raw)
-                attempted[expected]["status"] = "已留存"
-                if operation == "get_thscode":
-                    mappings = identity_resolutions(task)
-                    task["identity_state"] = "；".join(
-                        str(item.get("query", "输入")) + "：" + item["status"] +
-                        ("→" + ",".join(item["codes"]) if item["status"] == "代码映射已核验" else "") for item in mappings)
-                    if any(item["status"] == "代码映射已核验" for item in mappings):
-                        task["identity_state"] += "；证券类型、业务暴露及历史身份仍需另行核验"
+                # A complete saved directory is local input, even if external
+                # access has since been disabled. It never reserves another send.
+                raw=(self.collector._recover_official_catalogue(task,params)
+                     if source=='official' and operation=='release_catalog' else None)
+                if raw is None:
+                    raw = self.collector.external(task, source, operation, params, self.source_credentials.get(source, {}))
+                if attempted[expected]["status"] != "已留存":
+                    self._retain_acquired_source(task, raw, need, attempted[expected])
                 if raw["status"] != "成功待核验":
-                    issue(f"数据需求{ident}：{raw['status']}，不自动扩大时点或换源。", selected)
+                    from .evidence import filing_directory_result
+
+                    directory = filing_directory_result(task) if operation == 'report_query' else None
+                    if not directory or directory['status'] != 'empty' or directory['source_ref'] != raw['id']:
+                        issue(f"数据需求{ident}：{raw['status']}，不自动扩大时点或换源。", selected)
                 self._journal(task)  # response checkpoint precedes any interpretation
             except ContractError as error:
                 attempted[expected]["status"] = "失败或中断"
+                attempted[expected].pop("pending_purpose", None)
                 issue(f"数据需求{ident}：{error}", selected)
                 # Cancellation and stale batches stop the whole run. Missing or
                 # unavailable independent data leaves other questions executable.
@@ -3362,6 +4408,27 @@ class ResearchAgent:
         task['optional_findings'] = list(dict.fromkeys(message for message in task.get('optional_findings', []) if message not in removed))
         task['gap_records'] = retained
         task.setdefault('resolved_gap_records', []).extend(resolved)
+
+    @staticmethod
+    def _resolve_argument_gap(task, category, question_ids, reason):
+        """Resolve a verified review stage separately from question completeness."""
+        scope = set(question_ids)
+        retained, resolved = [], []
+        for record in task.get('gap_records', []):
+            selected = set(record.get('question_ids', []))
+            stage = record.get('category')
+            # Unfinished tasks from older versions kept these fixed stage
+            # messages without metadata. Other text is never reclassified.
+            owned = stage is None or (stage == category and record.get('task_id') == task['id']
+                and type(record.get('research_version')) is int and record['research_version'] == task['version'])
+            if owned and record.get('message') == _ARGUMENT_GAP_TEXT[category] and selected and selected <= scope:
+                resolved.append(dict(copy.deepcopy(record), resolution=dict(task_id=task['id'],
+                    research_version=task['version'], batch=task['batch'], input_hash=task['input_hash'],
+                    reason=reason)))
+            else:
+                retained.append(record)
+        if resolved:
+            ResearchAgent._archive_gap_resolutions(task, retained, resolved)
 
     def _resolve_current_gaps(self, task):
         """Current unresolved state is not an append-only history of failures.
@@ -3450,7 +4517,8 @@ class ResearchAgent:
                     q.pop(field, None)
                 if q['id'] in proposed_answers and q['id'] not in answers:
                     q['status'] = '未回答'
-                    self._gap(task, '本问题的回答未通过论证复核，未采用该陈述；原始资料与登记计算保留。', [q['id']])
+                    self._gap(task, _ARGUMENT_GAP_TEXT['argument_answer_withheld'], [q['id']],
+                              category='argument_answer_withheld')
                     continue
             answer = answers.get(q["id"], {})
             if q.get('answer_scope') == 'general_definition':
@@ -3563,6 +4631,8 @@ class ResearchAgent:
                 q.update(status="已回答" if ready else "未回答", answer=bound["fields"]["answer"], refs=list(dict.fromkeys(refs)),
                          calculation_refs=list(dict.fromkeys(calc_refs)), numeric_integrity=bound["record"])
                 if argument_support.enabled(task):
+                    self._resolve_argument_gap(task, 'argument_answer_withheld', [q['id']],
+                                               '已保留通过复核的陈述')
                     q['research_coverage'] = copy.deepcopy(completeness)
                     if completeness['status'] in ('requires_evidence', 'requires_revision'):
                         q['status'] = '未回答'
@@ -3730,11 +4800,16 @@ class ResearchAgent:
             task['judgment_reviews'], task['judgment_review_pending'] = judgment_review.evaluate(task)
             if task['judgment_review_pending']:
                 task['gaps'].append('原判断尚未完成事实、机制、预期差与价格的分项复核。')
-        from .reports import build_version_changes
+        from .reports import DRAFT_VERSION_CHANGES_CONTRACT, build_version_changes
+        no_new_evidence = '主动更新未取得新时点证据；记录变化不代表机制或价格判断已兑现。'
+        draft = isinstance(task.get('draft_report'), dict)
+        if draft:
+            task['version_changes_contract'] = DRAFT_VERSION_CHANGES_CONTRACT
+            task['gaps'] = [gap for gap in task['gaps'] if gap != no_new_evidence]
         task["changes"] = build_version_changes(task, self.archive.report(task["id"], task["update_from"]["version"]))
         task["version_changes_contract"] = task["changes"]["contract_version"]
-        if fixture or not task["changes"]["added"] and not task["changes"]["revised"]:
-            task["gaps"].append("主动更新未取得新时点证据；记录变化不代表机制或价格判断已兑现。")
+        if not draft and (fixture or not task["changes"]["added"] and not task["changes"]["revised"]):
+            task["gaps"].append(no_new_evidence)
 
     @staticmethod
     def _reasoning_evidence(task, selected=None):
@@ -4069,23 +5144,112 @@ class ResearchAgent:
             stress_calc["dependency_hash"] = calculation_dependency_hash(stress_calc)
             task["calculations"].append(stress_calc)
 
-    def retry_save(self, ident):
+    def retry_save(self, ident, *, admission=None):
+        """Finish retained prose, presentation and saving without restarting research."""
         with self.lock:
             task = self._get(ident)
-            if task["status"] != "失败" or not task.get("pending_content") or not task.get("pending_html"):
+            if admission is not None:
+                admission(task)
+            if self.runtime_closed:
+                raise ContractError("研究服务已停止，请重新打开App后重试保存")
+            if task["status"] not in ("失败", "已取消"):
                 raise ContractError("无可重试的保存检查点")
+            if self.run_pending(ident):
+                raise ContractError("旧批次仍在停止，请稍后重试保存")
+            run_identity = ident, task["version"], task["batch"]
+            self._begin_run_control(*run_identity)
+        try:
+            return self._save_retained_report(task)
+        finally:
+            # Status readers use this lock to pair a Store revision with the
+            # run slot. Release the slot only after its last write has settled.
+            with self.lock:
+                self._finish_run_control(*run_identity)
+
+    def _save_retained_report(self, task):
+        # Composition and rendering use this task snapshot. Archive writes
+        # check its revision so a newer edit cannot be overwritten.
+        submission = None
+        if not task.get('pending_content'):
+            from .draft_workflow import has_composed_draft, retained_submission
+
+            if not has_composed_draft(task):
+                submission = retained_submission(task)
+                if submission is None:
+                    raise ContractError("无可重试的保存检查点")
+        blocked = recovery_time_block(task, save_only=True)
+        if blocked:
+            raise ExecutionTimeExhausted(blocked)
+        timer = _ExecutionTimer(time.monotonic(), task["ledger"]["used"]["seconds"])
+        from .reports import clear_pending_html, compose, pending_html_sha256, render, stage_pending_html
+        phase = 'validate'
+        try:
             self.knowledge.validate_package(task["knowledge"])
             for item in task["calculations"]:
                 if item.get("method_binding") != self.knowledge.method_binding(task["knowledge"], item["method"]):
                     raise ContractError("保存依赖中的方法版本已失效，请建立关联研究")
-            from .reports import compose
-            if fingerprint(compose(task)) != fingerprint(task["pending_content"]):
+            pending_digest = fingerprint(task['pending_content']) if task.get('pending_content') else None
+            if pending_digest is not None and fingerprint(compose(task)) != pending_digest:
                 raise ContractError("待保存报告与当前核验依赖不一致，不能交付旧检查点")
-            charge(task["ledger"], "seconds", .001, delivery=True)
-            # Freeze only a durable checkpoint. Preserve the save attempt's
-            # accounting even if the delivery transaction fails again.
+            timer.charge(task["ledger"], delivery=True, minimum=MINIMUM_SAVE_SECONDS)
+            phase = 'save'
             self.archive.save(task)
-            return self.archive.deliver(task, task["pending_content"], task["pending_html"])
+            if pending_digest is None:
+                phase = 'compose'
+                require_report_resources(self.resources)
+                if submission is not None:
+                    from .draft_workflow import restore_report
+
+                    restore_report(self, task, submission, timer=timer)
+                node = next((row for row in task['nodes'] if row['id'] == 'compose'), None)
+                if node is not None:
+                    node['status'] = '成功'
+                    node.pop('error', None)
+                task['pending_content'] = compose(task)
+                clear_pending_html(task)
+                phase = 'save'
+                timer.record(task["ledger"])
+                self.archive.save(task)
+            if pending_digest is None or pending_html_sha256(task, pending_digest) is None:
+                phase = 'render'
+                require_report_resources(self.resources)
+                stage_pending_html(task, render(task['pending_content'], self.resources))
+                node = next((row for row in task['nodes'] if row['id'] == 'render'), None)
+                if node is not None:
+                    state = ('部分成功' if any(q['required'] and q['status'] == '未回答'
+                        and q['id'] in node.get('questions', []) for q in task['questions']) else '成功')
+                    if task['pending_content'].get('report_kind') != 'research_draft':
+                        artifacts = self._artifact_manifest(task, 'render')
+                        node['result'] = module_result(task, node['operation'], artifacts, state, node_id='render')
+                        validate_result(node['result'], task)
+                        node['output_hash'] = fingerprint(artifacts)
+                    node['status'] = state
+                    node.pop('error', None)
+                phase = 'save'
+                timer.record(task["ledger"])
+                self.archive.save(task)
+            return self.archive.deliver(task, task['pending_content'], task['pending_html'], execution_timer=timer)
+        except Exception as error:
+            timer.record(task["ledger"])
+            blocked = recovery_time_block(task, save_only=True)
+            if phase == 'validate' and not blocked:
+                raise
+            task['status'] = '失败'
+            task['error'] = blocked or {'compose':'报告正文整理失败，请重试保存。',
+                'render':'报告页面生成失败，请重试保存。'}.get(phase,'报告尚未保存，请重试保存。')
+            if phase in ('compose','render'):
+                clear_pending_html(task)
+                for node in task['nodes']:
+                    if node['id'] == phase:
+                        node.update(status='失败', error=task['error'])
+                        node.pop('result', None); node.pop('output_hash', None)
+            try:
+                self.archive.save(task)
+            except Exception:
+                pass  # A broken Store cannot overwrite its last durable checkpoint.
+            if blocked:
+                raise ExecutionTimeExhausted(blocked) from error
+            raise
 
     def review_baseline(self, task):
         """Frozen prior judgments are context, never current evidence approvals."""
@@ -4108,6 +5272,8 @@ class ResearchAgent:
         conversation_context(old)
         if not old.get('delivery') or old['status'] not in ('已完成', '部分完成'):
             raise ContractError('只有已保存交付可以主动更新')
+        if self.run_pending(old['id']):
+            raise ContractError('旧批次仍在停止，请稍后更新')
         explicitly_dated = cutoff is not None
         cutoff = cutoff or now()
         if timepoint(cutoff) <= timepoint(old['cutoff']):
@@ -4116,31 +5282,67 @@ class ResearchAgent:
         new.update(version=old['version'] + 1, batch=0, cutoff=cutoff, status='待开始', delivery=None,
             error=None, ledger=budget(old['ledger']['limits']), evidence=[], calculations=[], theses=[],
             gaps=[], tracking=[], optional_findings=[], next_thesis_id=1)
-        if 'research_mode' in new:
-            new['research_mode'] = 'historical' if explicitly_dated else old['research_mode']
+        if explicitly_dated and ('research_mode' in new or new.get('draft_first_version') == 1):
+            new['research_mode'] = 'historical'
         new['materials'] += new.pop('pending_materials', [])
         new.setdefault('source_records', []).extend(new.pop('pending_source_records', []))
         for item in new['materials'] + new['source_records']:
             if item.get('kind') in ('material', 'api', 'filing'):
+                if item.get('task_id')==old['id'] and item.get('research_version')==old['version']:
+                    item.setdefault('retained_from_version',old['version'])
                 item['research_version'] = new['version']
-        for key in ('pending_content', 'pending_html', 'host_result', 'knowledge', 'supplement_history',
+        for key in ('pending_content', 'pending_html', 'pending_html_binding', 'host_result', 'knowledge', 'supplement_history',
                     'supplement_decisions', 'supplement_decision', 'supplement_stop_reason', 'source_attempts',
                     'gap_records', 'reasoning_state', 'source_readings', 'host_checkpoint', 'defer_delivery',
                     'changes', 'version_changes_contract', 'resolved_gap_records', 'judgment_review_contract',
                     'judgment_review_baseline', 'judgment_review_proposals', 'judgment_reviews', 'judgment_review_pending',
-                    'catalogue_alternative_requests', 'draft_report', 'draft_observations', 'draft_notices', 'draft_submissions'):
+                    'catalogue_alternative_requests', 'draft_report', 'draft_composition_binding',
+                    'draft_observations', 'draft_notices', 'draft_submissions',
+                    'official_response_checkpoints'):
             new.pop(key, None)
         new.pop('argument_support_reviews', None)
         new['questions'] = [dict(question, status='待回答') for question in normalize_questions(
             question_specs(new), new['question'], new['intent'])]
         if new.get('draft_first_version') == 1:
             self._apply_draft_policies(new)
-        new['input_hash'] = input_fingerprint(new)
-        new['nodes'] = self.plan(new)
+        if not new.get('fixture'):
+            from .numeric_integrity import ORIGINAL_QUANTITY_QUALIFIER_POLICY, ORIGINAL_QUANTITY_QUALIFIER_VERSION
+            new[ORIGINAL_QUANTITY_QUALIFIER_POLICY] = ORIGINAL_QUANTITY_QUALIFIER_VERSION
+            self._apply_official_source_policies(new)
+        prior_report = self.archive.report(old['id'], old['version'])
+        if (prior_report['digest'] != old['delivery']['digest']
+                or fingerprint(prior_report['content']) != prior_report['digest']):
+            raise ContractError('原报告与冻结哈希不一致，未发起主动更新')
         new['update_from'] = dict(version=old['version'], digest=old['delivery']['digest'],
             conditions=copy.deepcopy(old['tracking']), knowledge_versions=old.get('knowledge', {}).get('index', {}),
             reason='用户主动复核新时点，历史交付不覆盖；新研究重新采用适用知识')
-        original = judgment_review.baseline(self.archive.report(old['id'], old['version']))
+        if new.get('draft_tracking_version') == 1:
+            from .drafts import draft_conditions
+            new['update_from']['draft_conditions'] = draft_conditions(prior_report['content'])
+        from .draft_version import comparison_enabled, report_comparison_basis
+        if comparison_enabled(new):
+            new['update_from']['report_comparison_basis'] = report_comparison_basis(prior_report['content'])
+        from .draft_sources import (economic_refresh_enabled, financial_refresh_enabled, market_refresh_enabled,
+                                    retained_economic_refreshes, retained_financial_refreshes, retained_market_refreshes)
+        if market_refresh_enabled(new):
+            refreshes = retained_market_refreshes(old, prior_report['content'])
+            if refreshes:
+                new['update_from']['market_refreshes'] = refreshes
+        if financial_refresh_enabled(new):
+            refreshes = retained_financial_refreshes(old, prior_report['content'],
+                lambda version: self.archive.get(old['id'], version, allow_missing=True))
+            if refreshes:
+                new['update_from']['financial_refreshes'] = refreshes
+        if economic_refresh_enabled(new):
+            refreshes = retained_economic_refreshes(old, prior_report['content'],
+                lambda version: self.archive.get(old['id'], version, allow_missing=True))
+            if refreshes:
+                new['update_from']['economic_refreshes'] = refreshes
+        # Parent prose is part of the new input. Set it before hashing/planning,
+        # including a third update whose copied task still references version 1.
+        new['input_hash'] = input_fingerprint(new)
+        new['nodes'] = self.plan(new)
+        original = judgment_review.baseline(prior_report)
         if original['anchors']:
             new.update(judgment_review_contract=judgment_review.VERSION, judgment_review_baseline=original,
                        judgment_review_proposals=[], judgment_reviews=[], judgment_review_pending=[])
@@ -4154,11 +5356,13 @@ class ResearchAgent:
             self.archive.save(new)
             return new
 
-    def update(self, ident, cutoff=None, asynchronous=False, host_result=None):
+    def update(self, ident, cutoff=None, asynchronous=False, host_result=None, *, admission=None):
         with self.lock:
             new = self._updated_task(self._get(ident), cutoff)
             if host_result is not None:
                 host_result = self._validate_host_input(new, host_result)
+            if admission is not None:
+                admission(new)
             self.archive.save(new)
             return self.start(ident, host_result, asynchronous)
 
@@ -4173,7 +5377,12 @@ class ResearchAgent:
         """Shared host/App reader, with no model, provider or approval side effect."""
         with self.lock:
             task = self._get(ident)
-            bundle = read_sources(task, requests, expected_binding)
+        bundle = read_sources(task, requests, expected_binding)
+        with self.lock:
+            current = self._get(ident)
+            if current["revision"] != task["revision"]:
+                raise ContractError("读取期间任务已更新，请从最新原件目录重新读取")
+            task = current
             if task["status"] != "运行中" and not task.get("delivery") and not task.get("pending_content"):
                 readings = task.setdefault("source_readings", [])
                 if not any(r["reading_hash"] == bundle["reading_hash"] for r in readings):
@@ -4185,14 +5394,22 @@ class ResearchAgent:
                     self.archive.save(task)
             return bundle
 
-    def add_material(self, ident, name, payload, *, expected_version=None):
+    def add_material(self, ident, name, payload, *, expected_version=None, expected_revision=None, return_record=False):
+        task, material = self._attach_material(ident, name, payload, expected_version, expected_revision)
+        return material if return_record else task
+
+    def _attach_material(self, ident, name, payload, expected_version, expected_revision=None):
         if expected_version is not None and (type(expected_version) is not int or expected_version < 1):
             raise ContractError("材料保存需要有效的研究版本")
+        if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 1):
+            raise ContractError("材料保存需要有效的任务修订")
         with self.lock:
             original_task = self._get(ident)
+            if expected_revision is not None and original_task["revision"] != expected_revision:
+                raise ContractError("材料选择已变化，请读取当前任务后重试上传")
             if expected_version is not None and (original_task["version"] != expected_version or original_task["status"] == "运行中"):
                 raise ContractError("任务版本或运行状态已改变，未重新解析原件")
-            self.archive.retain_original(original_task, "material", name, payload)
+            original_id = self.archive.retain_original(original_task, "material", name, payload)
         parsed = self.material_parser.parse(name, payload) if self.material_parser else extract_material(name, payload)
         with self.lock:
             task = self._get(ident)
@@ -4202,8 +5419,27 @@ class ResearchAgent:
                 raise ContractError("解析期间任务已开始运行，原件保留但未改写运行依赖")
             # Uploaded materials remain unverified; no hidden approval is implied.
             record = material_record(task, parsed, payload)
-            if any(x.get("id") == record["id"] for x in task["materials"] + task.get("pending_materials", [])):
-                return task
+            filename = Path(name).name
+            exclusions = task.get("material_exclusions", [])
+            matching = [row for row in exclusions if row["name"] == filename and row["sha256"] == record["hash"]]
+            if any(row["revision"] > original_task["revision"] for row in matching):
+                raise ContractError("文件在上传期间已移出本次研究，原件保留，未采用正文")
+            reselected = bool(matching) and not task.get("delivery")
+            if reselected:
+                task["material_exclusions"] = [row for row in exclusions if row not in matching]
+                task["revisions"].append(dict(action="重新加入材料", name=filename, hash=record["hash"], time=now()))
+            materials = task["materials"] + task.get("pending_materials", [])
+            existing = next((item for item in materials if item.get("id") == record["id"]), None)
+            if existing is not None:
+                self.archive.link_material_copy(task, original_id, existing["id"])
+                return (self.archive.save(task) if reselected else task), existing
+            for item in materials:
+                snapshot = item.get("snapshot")
+                if (item.get("kind") == "material" and item.get("task_id") == task["id"]
+                        and item.get("research_version") == task["version"] and item.get("hash") == record["hash"]
+                        and isinstance(snapshot, dict) and dict(snapshot, name=record["name"]) == record["snapshot"]):
+                    self.archive.link_material_copy(task, original_id, item["id"])
+                    return (self.archive.save(task) if reselected else task), item
             task["materials"].append(record)
             task["revisions"].append({"action": "补充原问题材料", "hash": parsed["hash"], "time": now(),
                                       "impact": "待核验，不自动改变已交付版本"})
@@ -4212,6 +5448,55 @@ class ResearchAgent:
                 task.setdefault("pending_materials", []).append(task["materials"].pop())
             elif task["status"] != "运行中":
                 self._invalidate_sources(task)
+            return self.archive.save(task), record
+
+    def remove_material(self, ident, name, digest, *, expected_version, expected_revision, retained_files=None):
+        """Exclude a composer file before first execution; retain its original bytes.
+
+        The file key also fences uploads whose response was lost or whose parser
+        is still running. Another explicitly retained filename may reference the
+        same deduplicated content. Neither removal nor reselection resets usage.
+        """
+        if (not isinstance(name, str) or not name or Path(name).name != name
+                or not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or type(expected_version) is not int or expected_version < 1
+                or type(expected_revision) is not int or expected_revision < 1):
+            raise ContractError("移除材料需要有效文件身份、版本和任务修订")
+        retained_files = [] if retained_files is None else retained_files
+        if (not isinstance(retained_files, list)
+                or any(not isinstance(row, dict) or set(row) != {"name", "sha256"}
+                    or not isinstance(row["name"], str) or not row["name"] or Path(row["name"]).name != row["name"]
+                    or not isinstance(row["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", row["sha256"])
+                    for row in retained_files)):
+            raise ContractError("保留材料列表无效")
+        selected = {(row["name"], row["sha256"]) for row in retained_files}
+        with self.lock:
+            task = self._get(ident)
+            if task["version"] != expected_version or task["revision"] != expected_revision:
+                raise ContractError("任务或材料已变化，请读取当前状态后重试移除")
+            if (task["status"] != "待开始" or task["batch"] != 0 or task.get("delivery")
+                    or task.get("pending_content") or task.get("host_checkpoint")
+                    or any(task.get(key) for key in ("evidence", "calculations", "theses", "draft_report", "draft_submissions"))
+                    or any(value for value in task["ledger"]["used"].values())):
+                raise ContractError("研究已开始，不能移除已采用材料；原任务和报告保持不变")
+            if (name, digest) in selected:
+                return task  # Another queued copy of the same file is still selected.
+            originals = self.archive.retained_originals(task)
+            linked = {row["artifact_id"] for row in originals
+                if row["kind"] == "material" and (row["name"], row["sha256"]) == (name, digest) and row.get("artifact_id")}
+            targets = {row["id"] for row in task["materials"]
+                if row["hash"] == digest and (row["name"] == name or row["id"] in linked)}
+            retained = {row["artifact_id"] for row in originals
+                if (row["name"], row["sha256"]) in selected and row.get("artifact_id")}
+            removed = targets - retained
+            task["materials"] = [row for row in task["materials"] if row["id"] not in removed]
+            exclusions = [row for row in task.get("material_exclusions", [])
+                if (row["name"], row["sha256"]) != (name, digest)]
+            exclusions.append(dict(name=name, sha256=digest, revision=task["revision"] + 1, time=now()))
+            task["material_exclusions"] = exclusions
+            task["revisions"].append(dict(action="移除启动前材料", name=name, hash=digest,
+                removed_artifact_ids=sorted(removed), time=now(), impact="不采用该上传文件，原件保留，用量不变"))
+            self._invalidate_sources(task)
             return self.archive.save(task)
 
     def add_snapshot(self, ident, source, operation, parameters, response):
@@ -4239,6 +5524,27 @@ class ResearchAgent:
             records = task.get("source_records", []) + task.get("pending_source_records", [])
             return self._save_source(task, filing_record(task, directory, name, payload, records, _parsed=parsed))
 
+    @staticmethod
+    def _restore_original_purposes(task, record):
+        """Recover only current, explicitly planned reasons for this exact send."""
+        candidates = list(task.get('data_need_specs', []))
+        binding = dict(task_id=task['id'], research_version=task['version'], input_hash=task.get('input_hash'))
+        for attempt in task.get('draft_source_attempts', []):
+            if isinstance(attempt, dict) and attempt.get('binding') == binding:
+                candidates.append(attempt.get('encoded'))
+        questions = {row['id'] for row in task.get('questions', [])}
+        for need in candidates:
+            if (not isinstance(need, dict) or not isinstance(need.get('id'), str) or not need['id']
+                    or any(need.get(key) != record.get(key) for key in ('source', 'operation', 'parameters'))
+                    or not isinstance(need.get('question_ids'), list) or not need['question_ids']
+                    or not all(isinstance(ident, str) and ident in questions for ident in need['question_ids'])):
+                continue
+            selected = list(dict.fromkeys(need['question_ids']))
+            record['data_need_ids'] = list(dict.fromkeys(record.get('data_need_ids', []) + [need['id']]))
+            record['question_ids'] = list(dict.fromkeys(record.get('question_ids', []) + selected))
+            record_request_purpose(record, need, selected)
+        return record
+
     def retry_original(self, ident, original_id):
         """Explicit local retry, never a new download, model call or approval."""
         with self.lock:
@@ -4246,6 +5552,92 @@ class ResearchAgent:
             if task["status"] == "运行中":
                 raise ContractError("研究仍在运行，请停止后重新解析原件")
             original, payload = self.archive.original(task, original_id)
+            recovery = original_download_recovery(task, original)
+            retained = next((row for row in self.archive.retained_originals(task) if row["id"] == original_id), {})
+            if retained.get("excluded_before_start"):
+                raise ContractError("该文件已移出本次研究；需要重新采用时请重新添加材料")
+            records = task.get("source_records", []) + task.get("pending_source_records", [])
+            downloaded = []
+            for row in records:
+                if original["kind"] == "material":
+                    matches = (row.get("source") == "official" and row.get("operation") == "release_original"
+                        and row.get("name") == original["name"] and row.get("hash") == original["sha256"])
+                else:
+                    matches = (row.get("kind") == "filing" and row.get("source") == "ifind"
+                        and row.get("operation") == "filing_original"
+                        and row.get("directory") == original.get("directory")
+                        and row.get("snapshot", {}).get("material", {}).get("hash") == original["sha256"])
+                if matches:
+                    downloaded.append(row)
+            linked = [row for row in downloaded if row.get("id") == retained.get("artifact_id")]
+            previous = linked[0] if len(linked) == 1 else downloaded[0] if len(downloaded) == 1 else None
+        if recovery is not None:
+            from .evidence import official_material_record
+
+            name = original['name']
+            parsed = self.material_parser.parse(name, payload) if self.material_parser else extract_material(name, payload)
+            with self.lock:
+                current = self._get(ident)
+                if current['version'] != task['version'] or current['status'] == '运行中':
+                    raise ContractError('解析期间研究版本或运行状态已变化，未采用新摘录')
+                retained_original, raw = self.archive.original(current, original_id)
+                if raw != payload or original_download_recovery(current, retained_original) != recovery:
+                    raise ContractError('原件下载记录已变化，未采用新摘录')
+                receipt = recovery['receipt']
+                if receipt['source'] == 'ifind':
+                    records = current.get('source_records', []) + current.get('pending_source_records', [])
+                    record = filing_record(current, recovery['directory'], name, payload, records, _parsed=parsed)
+                else:
+                    record = official_material_record(current, parsed, payload, receipt['parameters'],
+                                                      recovery['origin'], receipt['obtained_at'])
+                material = record['snapshot'].get('material', record['snapshot'])
+                record.update(source=receipt['source'], operation=receipt['operation'],
+                    parameters=copy.deepcopy(receipt['parameters']), request_hash=receipt['request_hash'],
+                    obtained_at=receipt['obtained_at'], download_receipt=copy.deepcopy(receipt),
+                    status='成功待核验' if material.get('status') == '已解析' else '解析受限',
+                    local_reparse=dict(version=2, original_id=original_id, reparsed_at=now()))
+                if previous is not None:
+                    records = current.get('source_records', []) + current.get('pending_source_records', [])
+                    if any(row == previous for row in records):
+                        for field in ('data_need_ids', 'question_ids', 'request_purposes', 'selection_reason'):
+                            if field in previous:
+                                record[field] = copy.deepcopy(previous[field])
+                self._restore_original_purposes(current, record)
+                return self._save_source(current, record)
+        if previous is not None:
+            from .evidence import official_material_record
+            from .official_sources import validate_original
+
+            if previous["kind"] == "material":
+                validate_original(task, previous)
+            else:
+                if validate_filing_original_request(task, previous["parameters"]) != previous["directory"]:
+                    raise ContractError("原件关联已变化，未采用新摘录")
+            name = original["name"]
+            parsed = self.material_parser.parse(name, payload) if self.material_parser else extract_material(name, payload)
+            with self.lock:
+                current = self._get(ident)
+                if current["version"] != task["version"] or current["status"] == "运行中":
+                    raise ContractError("解析期间研究版本或运行状态已变化，未采用新摘录")
+                records = current.get("source_records", []) + current.get("pending_source_records", [])
+                if not any(row == previous for row in records):
+                    raise ContractError("原件关联已变化，未采用新摘录")
+                if previous["kind"] == "material":
+                    validate_original(current, previous)
+                    record = official_material_record(current, parsed, payload, previous["parameters"],
+                        previous["snapshot"]["official_origin"], previous["obtained_at"])
+                else:
+                    record = filing_record(current, previous["directory"], name, payload, records, _parsed=parsed)
+                for field in ("source", "operation", "parameters", "request_hash", "obtained_at",
+                              "data_need_ids", "question_ids", "request_purposes", "selection_reason"):
+                    if field in previous:
+                        record[field] = copy.deepcopy(previous[field])
+                material = record['snapshot'].get('material', record['snapshot'])
+                record['status'] = '成功待核验' if material.get('status') == '已解析' else '解析受限'
+                record["local_reparse"] = dict(version=1, original_id=original_id,
+                    previous_artifact_id=previous["id"],
+                    previous_snapshot_hash=previous.get("snapshot_hash", previous.get("hash")), reparsed_at=now())
+                return self._save_source(current, record)
         # Parsing must not hold the task lock: cancellation and task reads remain
         # available. Recheck the captured version before and after local parsing.
         if original["kind"] == "material":
@@ -4255,11 +5647,11 @@ class ResearchAgent:
     def _save_source(self, task, record):
         if task["status"] == "运行中":
             raise ContractError("取证输入须在执行前或任务停止后补充，不能改写运行中的依赖")
-        field = "pending_source_records" if task.get("delivery") else "source_records"
-        records = task.setdefault(field, [])
-        if any(x["id"] == record["id"] for x in records):
+        retained = task.get("source_records", []) + task.get("pending_source_records", [])
+        if any(row["id"] == record["id"] for row in retained):
             return task
-        records.append(record)
+        field = "pending_source_records" if task.get("delivery") else "source_records"
+        task.setdefault(field, []).append(record)
         if not task.get("delivery"):
             self._invalidate_sources(task)
         task["revisions"].append({"action": "补充原始来源", "artifact_id": record["id"], "hash": record.get("snapshot_hash", record["hash"]),
@@ -4278,14 +5670,36 @@ class ResearchAgent:
                 node["status"] = "待执行"
 
     def recover_interrupted(self):
-        for task in self.archive.list():
-            if task["status"] == "运行中":
-                task.update(status="失败", error="上次运行中断，检查点已保留；恢复继承原时点和用量")
-                self.archive.save(task)
+        unreadable = {}
+        for summary in self.archive.list_workspace(unreadable=unreadable):
+            if summary.get('status') != '运行中':
+                continue
+            # Read the complete current task before changing any checkpoint.
+            # Unselected stopped studies need no source inflation at startup.
+            try:
+                self.recover_interrupted_task(summary['id'])
+            except ArchiveRecordError:
+                unreadable[summary['id']] = summary['revision']
+        return unreadable
+
+    def recover_interrupted_task(self, ident):
+        """Reopen a checkpoint after the caller has obtained its execution lease."""
+        with self.lock:
+            task = self._get(ident)
+            if task['status'] != '运行中' or self.runtime_closed or self.run_pending(ident):
+                return task
+            task.update(status="失败", error="上次运行中断，检查点已保留；恢复继承原时点和用量")
+            for node in task['nodes']:
+                if node.get('status') == '运行中':
+                    node.update(status='失败', error=task['error'])
+            return self.archive.save(task)
 
     def export(self, ident, version=None):
-        task = self._get(ident)
-        return self.archive.report(ident, version or task["version"])
+        if version is None:
+            version = self._get(ident)["version"]
+        if type(version) is not int or version < 1:
+            raise ContractError("报告版本无效")
+        return self.archive.report(ident, version)
 
     def submit(self, ident, module_request, result):
         """Shared App/Skill binding check for externally produced module artifacts."""
