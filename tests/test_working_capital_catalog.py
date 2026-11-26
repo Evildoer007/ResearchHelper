@@ -11,6 +11,7 @@ from tests import test_fixed_financial_reuse as reuse
 from researchhelper import ifind_financial_catalog as catalog
 from researchhelper.draft_sources import observations,writing_context
 from researchhelper.draft_analysis import analyze
+from researchhelper.contracts import canonical
 from researchhelper.financial_sources import basic_financial_definitions,metadata_request_shapes
 from researchhelper.draft_workflow import _write
 from researchhelper.draft_visuals import comparison_figures,comparison_table
@@ -118,9 +119,17 @@ class BalanceSemanticsTests(unittest.TestCase):
         self.assertEqual(len(figures[0]['data_refs']),6)
         self.assertEqual(comparison_table(content)['observations'],6)
 
-    def test_prior_actual_calculations_and_observations_are_unchanged(self):
+    def test_legacy_financial_readings_keep_their_inputs_and_published_amounts(self):
+        from tests.test_draft_observation_order import assert_calculation_meaning
+
         path=ROOT/'result/acceptance/one-sentence-research-vgjkyxq9/task.json'
         task=json.loads(path.read_text());facts=observations(task)
-        self.assertEqual(analyze(task,facts)['results'],task['draft_report']['calculations'])
-        self.assertEqual(len(task['draft_report']['calculations']),11)
+        self.assertEqual(facts, task['draft_report']['facts'])
+        before = canonical(task['draft_report'])
+        frozen = task['draft_report']['calculations']
+        fresh = analyze(task, facts)['results']
+        assert_calculation_meaning(self, fresh, frozen)
+        self.assertEqual([(row['value'], row['display']) for row in fresh],
+                         [(row['value'], row['display']) for row in frozen])
+        self.assertEqual(canonical(task['draft_report']), before)
         self.assertFalse(any('period_kind' in row for row in facts))
