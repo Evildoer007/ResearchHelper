@@ -5,7 +5,10 @@ output; unsupported buying claims remain opposed, not invented opportunities.
 The existing positive valuation fixture remains a separate acceptance case.
 """
 import copy
-import importlib.util
+import hashlib
+import inspect
+import json
+import subprocess
 from pathlib import Path
 import socket
 import sys
@@ -17,6 +20,7 @@ from researchhelper.archive import ResearchArchive
 from researchhelper.contracts import DOCUMENT_CONTENT_INTENT, ENTRIES, INTENTS, evidence_requirements
 from researchhelper.engine import ResearchAgent
 from researchhelper.planning import research_brief
+from tests.skill_fixture_support import build_skill_fixture
 
 ROOT = Path(__file__).resolve().parents[2]
 CUTOFF = "2026-07-20T18:00:00+08:00"
@@ -64,6 +68,29 @@ def specification(entry, intent):
                 theses=[] if comparative else [thesis])
 
 
+def review_fixed_case(agent, task, case):
+    """Explicit host verdicts for the declared synthetic statements only."""
+    request = agent.argument_review_inputs(task['id'])['request']
+    expected = {'answer:' + key + '.answer': answer['answer'] for key, answer in case['answers'].items()}
+    for index, thesis in enumerate(case['theses']):
+        for field in ('title', 'investment_meaning', 'limitation'):
+            expected['thesis:' + str(index) + '.' + field] = thesis[field]
+    assert {target['id']: target['text'] for target in request['targets']} == expected
+    assert {item['text'] for item in task['evidence']} == set(case['statements'])
+    assert all(item['source_receipt']['component'] == 'EvidenceCollector' and
+               item['applicability_receipt']['component'] == 'ResearchAnalyzer' for item in task['evidence'])
+    reviews = []
+    for target in request['targets']:
+        assert set(target['evidence_refs']) == {'original_a', 'original_b'}
+        reviews.append(dict(target_id=target['id'], segments=[dict(text=target['text'],
+            verdict='supported', basis_refs=['evidence:original_a', 'evidence:original_b'],
+            explanation='固定合成开发样本明确列示两项条件及相反渠道；只核对已声明的测试判断，不代表真实金融质量。')]))
+    submission = dict(version=request['version'], review_hash=request['review_hash'], reviews=reviews,
+        questions=[dict(question_id=ident, status='answered', missing_evidence=[],
+            reason='只回答两份固定合成原件及其明示限制，不给真实证券推荐。') for ident in case['answers']])
+    agent.submit_argument_review(task['id'], submission)
+
+
 def execute(agent, case):
     """Run through normal materials and two-class verification, no raw approvals."""
     task = agent.create(case["question"], entry=case["entry"], intent=case["intent"], objects=case["objects"],
@@ -87,8 +114,10 @@ def execute(agent, case):
                                       conditions=["仅用于合成材料的声明、差异和适用限制"],
                                       reason="逐字原件与公开时点匹配，开发样本不对应真实证券", evidence_need_ids=need_ids)))
     brief = research_brief(task)
-    result = agent.start(task["id"], dict(evidence_specs=specs, answers=case["answers"], theses=case["theses"]))
-    return result, brief
+    staged = agent.start(task["id"], dict(evidence_specs=specs, answers=case["answers"], theses=case["theses"]), defer_delivery=True)
+    assert staged['status'] == '待开始' and not staged.get('delivery'), staged.get('gaps')
+    review_fixed_case(agent, staged, case)
+    return agent.start(task['id']), brief
 
 
 def semantic_projection(task):
@@ -100,61 +129,93 @@ def semantic_projection(task):
 
 class ResearchWorkflowMatrixTests(unittest.TestCase):
     def setUp(self):
-        directory = tempfile.TemporaryDirectory(prefix="research-matrix-", dir=ROOT / "result/acceptance")
+        directory = tempfile.TemporaryDirectory(prefix="research-matrix-")
         self.addCleanup(directory.cleanup)
-        self.directory = Path(directory.name)
-        self.agent = ResearchAgent(ResearchArchive(self.directory / "app"), ROOT, offline=True)
+        self.directory = Path(directory.name).resolve()
+        self.agent = ResearchAgent(ResearchArchive(self.directory / "app"), ROOT, offline=True, require_argument_support=True)
+        self.addCleanup(self.agent.close_runtime)
         denied = patch.object(socket.socket, "connect", side_effect=AssertionError("No external calls"))
         denied.start()
         self.addCleanup(denied.stop)
 
     def test_forty_actual_archived_host_workflows_and_source_skill_parity(self):
-        original_paths = list(sys.path)
-        self.addCleanup(lambda: sys.path.__setitem__(slice(None), original_paths))
-        # The source guide folder is not an installed Skill: rendering assets
-        # are assembled by the builder. Use its genuine disposable layout,
-        # without changing the project installation or patching render paths.
-        builder_spec = importlib.util.spec_from_file_location("matrix_skill_builder", ROOT / "packaging/assemble_release.py")
-        builder = importlib.util.module_from_spec(builder_spec)
-        builder_spec.loader.exec_module(builder)
-        builder.OUTPUT = self.directory / "skill-candidate"
-        builder.OUTPUT.mkdir()
-        builder.skill(install=False)
-        spec = importlib.util.spec_from_file_location("matrix_source_skill", builder.OUTPUT / "researchhelper/core/session.py")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        session = module.Session(self.directory / "skill-project")
-        self.assertIsNone(session.agent.model)
-        combinations = []
-        for entry in ENTRIES:
-            for intent in INTENTS:
-                if intent == DOCUMENT_CONTENT_INTENT:
-                    continue
-                with self.subTest(entry=entry, intent=intent):
-                    case = specification(entry, intent)
-                    before = copy.deepcopy(case)
-                    actual, brief = execute(self.agent, case)
-                    hosted, hosted_brief = execute(session.agent, case)
-                    self.assertEqual(actual["status"], "已完成", actual.get("error"))
-                    self.assertEqual(hosted["status"], "已完成", hosted.get("error"))
-                    self.assertEqual(case, before)
-                    self.assertEqual(semantic_projection(actual), semantic_projection(hosted))
-                    self.assertEqual(brief["entry_focus"], hosted_brief["entry_focus"])
-                    self.assertEqual(next(q for q in actual["questions"] if q["id"] == "extension")["status"], "未回答")
-                    self.assertEqual(len(actual["theses"]), 0 if intent == "比较对象" else 1)
-                    for agent, task in ((self.agent, actual), (session.agent, hosted)):
-                        self.assertTrue(task["synthetic"])
-                        self.assertEqual(task["ledger"]["used"]["model_calls"], 0)
-                        self.assertEqual(task["ledger"]["used"]["data_requests"], 0)
-                        report = agent.export(task["id"])
-                        self.assertIn(case["finding"], report["html"])
-                        for statement in case["statements"]:
-                            self.assertIn(statement, report["html"])
-                        recovered = ResearchAgent(ResearchArchive(agent.archive.root), ROOT, offline=True)
-                        self.assertEqual(semantic_projection(recovered.archive.get(task["id"])), semantic_projection(task))
-                    combinations.append((entry, intent))
-        self.assertEqual(len(combinations), 40)
-        self.assertEqual(len(set(combinations)), 40)
+        from lxml import html
+        cases = [specification(entry, intent) for entry in ENTRIES for intent in INTENTS if intent != DOCUMENT_CONTENT_INTENT]
+        self.assertEqual(len(cases), 40)
+        installation = self.directory / 'installation'
+        build_skill_fixture(installation)
+        def hashes():
+            return {str(p.relative_to(installation)): hashlib.sha256(p.read_bytes()).hexdigest()
+                    for p in installation.rglob('*') if p.is_file()}
+        before = hashes()
+        program = '\n'.join([
+            'import copy,importlib.util,json,sys',
+            'from pathlib import Path',
+            'from lxml import html',
+            'installation,project=map(Path,sys.argv[1:]);sys.path.insert(0,str(installation))',
+            "spec=importlib.util.spec_from_file_location('matrix_skill',installation/'core/session.py')",
+            'module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)',
+            'from researchhelper.contracts import evidence_requirements,fingerprint',
+            'from researchhelper.planning import research_brief',
+            'from researchhelper.archive import ResearchArchive',
+            'import researchhelper.engine',
+            'assert Path(researchhelper.engine.__file__).resolve().is_relative_to(installation)',
+            'CUTOFF='+repr(CUTOFF), 'PUBLICATION='+repr(PUBLICATION),
+            inspect.getsource(review_fixed_case), inspect.getsource(execute), inspect.getsource(semantic_projection),
+            "session=module.Session(project);records=[];assert session.agent.model is None",
+            'try:',
+            ' for case in json.loads(sys.stdin.read()):',
+            '  untouched=copy.deepcopy(case);task,brief=execute(session.agent,case)',
+            "  assert task['status']=='已完成',task.get('gaps')",
+            '  assert case==untouched',
+            "  assert task['ledger']['used']['model_calls']==task['ledger']['used']['data_requests']==0",
+            "  assert len(task['argument_support_reviews'])==1",
+            "  saved=copy.deepcopy(session.agent.export(task['id']))",
+            "  target=session.export(task['id']);assert target.is_file() and target.with_suffix('.json').is_file()",
+            "  paper=html.document_fromstring(target.read_text()).find('.//main').text_content()",
+            "  assert case['finding'] in paper and all(statement in paper for statement in case['statements'])",
+            "  assert session.agent.export(task['id'])==saved",
+            "  assert semantic_projection(ResearchArchive(session.archive.root).get(task['id']))==semantic_projection(task)",
+            "  records.append(dict(projection=semantic_projection(task),focus=brief['entry_focus'],content_hash=fingerprint(saved['content'])))",
+            ' print(json.dumps(records,ensure_ascii=False))',
+            'finally:session.agent.close_runtime()'])
+        script = self.directory / 'check-skill.py';script.write_text(program)
+        policy='(version 1)(allow default)(deny network*)'
+        for path in (ROOT, ROOT.parent/'OptionHelper', ROOT.parent/'DataFetcher', Path.home()/'Library/Application Support/ResearchHelper'):
+            policy+='(deny file-read* file-write* (subpath '+json.dumps(str(path))+'))'
+        policy+='(deny file-write* (subpath '+json.dumps(str(installation))+'))'
+        process = subprocess.run(['/usr/bin/sandbox-exec','-p',policy,sys.executable,'-I','-B',str(script),
+            str(installation),str(self.directory/'skill-project')], input=json.dumps(cases,ensure_ascii=False),
+            cwd=self.directory,text=True,capture_output=True,timeout=120)
+        self.assertEqual(process.returncode,0,process.stderr[-2500:])
+        hosted=json.loads(process.stdout);self.assertEqual(len(hosted),40);self.assertEqual(hashes(),before)
+        combinations=[];proof=[]
+        for case,remote in zip(cases,hosted):
+            with self.subTest(entry=case['entry'],intent=case['intent']):
+                untouched=copy.deepcopy(case);actual,brief=execute(self.agent,case)
+                self.assertEqual(actual['status'],'已完成',actual.get('gaps'))
+                self.assertEqual(case,untouched)
+                self.assertEqual(semantic_projection(actual),remote['projection'])
+                self.assertEqual(brief['entry_focus'],remote['focus'])
+                self.assertEqual(next(q for q in actual['questions'] if q['id']=='extension')['status'],'未回答')
+                self.assertEqual(len(actual['theses']),0 if case['intent']=='比较对象' else 1)
+                self.assertEqual(len(actual['argument_support_reviews']),1)
+                self.assertTrue(actual['synthetic'])
+                self.assertEqual(actual['ledger']['used']['model_calls'],0)
+                self.assertEqual(actual['ledger']['used']['data_requests'],0)
+                report=self.agent.export(actual['id']);paper=html.document_fromstring(report['html']).find('.//main').text_content()
+                self.assertIn(case['finding'],paper)
+                for statement in case['statements']:self.assertIn(statement,paper)
+                recovered=ResearchAgent(ResearchArchive(self.agent.archive.root),ROOT,offline=True)
+                try:self.assertEqual(semantic_projection(recovered.archive.get(actual['id'])),semantic_projection(actual))
+                finally:recovered.close_runtime()
+                combinations.append((case['entry'],case['intent']))
+                proof.append(dict(entry=case['entry'],intent=case['intent'],source=semantic_projection(actual),
+                    skill=remote['projection'],skill_content_hash=remote['content_hash']))
+        self.assertEqual(len(combinations),40);self.assertEqual(len(set(combinations)),40)
+        self.matrix_receipt=dict(status='passed',cases=proof,skill_installation_unchanged=True,
+            source_repository_denied_in_skill=True,model_calls=0,real_supplier_calls=0,financial_quality_verified=False)
+
 
 
 if __name__ == "__main__":
