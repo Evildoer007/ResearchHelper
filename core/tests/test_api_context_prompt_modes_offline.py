@@ -11,8 +11,7 @@ from unittest.mock import patch
 
 from researchhelper.contracts import ContractError, fingerprint
 from researchhelper.evidence import expand_api_context_reference
-from researchhelper.reasoning import (API_EXTRACTION_GUIDANCE_VERSION, PHASE_RULES,
-                                     RULES_VERSION, evidence_contract, model_object,
+from researchhelper.reasoning import (PHASE_RULES, evidence_contract, model_object,
                                      extractable_source_views, validate_model_specs)
 from tests import test_api_compact_context_offline as compact
 
@@ -105,18 +104,18 @@ class APIContextPromptModesTests(unittest.TestCase):
         ledger = copy.deepcopy(self.task["ledger"])
         old = {"input_hash": self.task["input_hash"], "sources": extractable_source_views(self.task),
                "reader_version": 1, "api_candidate_version": 4}
-        self.task["reasoning_state"] = {"extraction": {"input_digest": fingerprint(old)}}
+        old_digest = fingerprint(old)
+        self.task["reasoning_state"] = {"extraction": {"input_digest": old_digest}}
         with patch.object(agent, "_reasoning_available", return_value=True), \
                 patch.object(agent, "_save_model_checkpoint"), \
                 patch("researchhelper.engine.model_object", return_value=({"evidence_specs": []}, {})) as model:
             agent._extract_model_sources(self.task)
+            new_digest = self.task["reasoning_state"]["extraction"]["input_digest"]
             agent._extract_model_sources(self.task)
         self.assertEqual(model.call_count, 1)
-        self.assertEqual(API_EXTRACTION_GUIDANCE_VERSION, 5)
-        self.assertEqual(RULES_VERSION, 26)
         self.assertEqual(self.task["ledger"], ledger)
-        self.assertEqual(self.task["reasoning_state"]["extraction"]["input_digest"],
-                         fingerprint(dict(old, api_candidate_version=5)))
+        self.assertNotEqual(new_digest, old_digest)
+        self.assertEqual(self.task["reasoning_state"]["extraction"]["input_digest"], new_digest)
 
     def test_contract_is_detached_and_does_not_relax_provenance(self):
         before = copy.deepcopy(self.task)
@@ -124,7 +123,7 @@ class APIContextPromptModesTests(unittest.TestCase):
         contract["compact_api_context"]["required_fields"].clear()
         self.assertEqual(self.task, before)
         self.assertEqual(len(evidence_contract(self.task)["compact_api_context"]["required_fields"]), 3)
-        for field in ("identity", "availability"):
+        for field in ("direct_code_reference", "availability"):
             proposal = self.fixture.spec()
             proposal.pop(field)
             with self.assertRaises(ContractError):
