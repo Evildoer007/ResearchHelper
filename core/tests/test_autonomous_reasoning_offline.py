@@ -39,6 +39,14 @@ class FabricatedModel:
         answer = answer(payload) if callable(answer) else answer
         if not isinstance(answer, str):
             answer = json.dumps(answer, ensure_ascii=False)
+        if payload.get("stream") is True:
+            chunk = {"id": "synthetic-stream", "model": payload["model"],
+                     "choices": [{"index": 0, "delta": {"role": "assistant", "content": answer},
+                                  "finish_reason": "stop"}]}
+            response = io.BytesIO(b"data: " + json.dumps(chunk, ensure_ascii=False).encode()
+                                  + b"\n\ndata: [DONE]\n\n")
+            response.headers = {"Content-Type": "text/event-stream; charset=utf-8"}
+            return response
         return io.BytesIO(json.dumps({"model": "fabricated-fixture-model", "choices": [{"message": {"content": answer}}],
                                      "usage": {"fixture": True}}).encode())
 
@@ -198,13 +206,15 @@ class AutonomousReasoningTests(unittest.TestCase):
         self.assertEqual(final["ledger"]["used"]["model_calls"], 0)
         self.assertIsNotNone(final["delivery"])
 
-    def test_three_model_call_budget_keeps_extracted_evidence_but_not_fake_answer(self):
+    def test_three_call_budget_retains_evidence_when_final_analysis_has_no_answer(self):
         task = self.policy(limits={"model_calls": 3})
-        final, model = self.run_model(task, [self.plan(task), {"evidence_specs": [self.policy_spec(task)]}])
+        final, model = self.run_model(task, [self.plan(task), {"evidence_specs": [self.policy_spec(task)]},
+                                             {"answers": {}, "theses": []}])
         self.assertEqual(final["status"], "部分完成", final.get("error"))
         self.assertEqual(len(final["evidence"]), 1)
         self.assertEqual(final["questions"][0]["status"], "未回答")
-        self.assertEqual(len(model.requests), 2)
+        self.assertEqual(len(model.requests), 3)
+        self.assertIsNotNone(final["delivery"])
         self.assertEqual(final["ledger"]["reserve"]["model_calls"], 1)
 
     def test_offline_agent_does_not_use_even_a_configured_transport(self):
@@ -263,18 +273,21 @@ class AutonomousReasoningTests(unittest.TestCase):
                              {"questions", "data_requests", "calculations"})
         self.assertEqual(task["ledger"]["used"]["model_calls"], 0)
 
-    def test_plan_and_original_extraction_checkpoint_reused_after_analysis_interrupt(self):
+    def test_invalid_analysis_saves_evidence_report_without_silent_restart(self):
         task = self.policy()
-        interrupted, model = self.run_model(task, [self.plan(task), {"evidence_specs": [self.policy_spec(task)]}, "not-json"])
-        self.assertEqual(interrupted["status"], "失败")
-        self.assertEqual(interrupted["ledger"]["used"]["model_calls"], 3)
-        final, resumed = self.run_model(task, [self.answer()])
-        self.assertEqual(final["status"], "已完成", final.get("error"))
-        self.assertEqual(final["batch"], 2)
-        self.assertEqual(final["cutoff"], task["cutoff"])
-        self.assertEqual(final["ledger"]["used"]["model_calls"], 4)
-        self.assertEqual(len(resumed.requests), 1)
-        self.assertEqual(final["reasoning_state"]["analysis"]["receipt"]["phase"], "analyze")
+        final, model = self.run_model(task, [self.plan(task),
+            {"evidence_specs": [self.policy_spec(task)]}, "not-json"])
+        self.assertEqual(final["status"], "部分完成")
+        self.assertEqual(final["ledger"]["used"]["model_calls"], 3)
+        self.assertEqual(len(final["evidence"]), 1)
+        self.assertIsNotNone(final["delivery"])
+        frozen = self.agent.archive.report(task["id"], final["version"])
+        with patch("researchhelper.model.urllib.request.urlopen") as transport:
+            with self.assertRaisesRegex(ContractError, "任务不能重复启动"):
+                self.agent.start(task["id"])
+            transport.assert_not_called()
+        self.assertEqual(self.agent.archive.report(task["id"], final["version"]), frozen)
+        self.assertEqual(len(model.requests), 3)
 
     def test_optional_unverifiable_publication_does_not_destroy_core_factual_answer(self):
         task = self.policy()
@@ -292,29 +305,41 @@ class AutonomousReasoningTests(unittest.TestCase):
         self.assertEqual(len(final["rejected_evidence"]), 1)
         self.assertEqual(len(model.requests), 3)
 
-    def test_real_registered_fee_calculation_between_originals_not_llm_arithmetic(self):
-        task = self.agent.create("比较材料示例ETF甲与乙的年度费用差", entry="ETF", intent="比较对象", cutoff=CUTOFF,
-                                 objects=["材料示例ETF甲", "材料示例ETF乙"])
-        text = "发布日期：2026年7月19日。\n\n材料示例ETF甲年度费用0.15%/年。\n\n材料示例ETF乙年度费用0.20%/年。"
-        task = self.agent.add_material(task["id"], "fees.txt", text.encode())
+    def test_registered_annual_management_fee_difference_uses_originals(self):
+        question = "比较材料示例ETF甲与乙的年度管理费差"
+        task = self.agent.create(question, entry="ETF", intent="比较对象", cutoff=CUTOFF,
+            objects=["材料示例ETF甲", "材料示例ETF乙"], questions=[dict(id="q1", question=question,
+                kind="comparison", method_needs=["fee_difference_v2"])])
+        paragraphs = ["发布日期：2026年7月19日。"] + [
+            f"材料示例ETF{label}，A类份额，适用日期2026-07-20，按基金资产净值计提的年管理费率为{value:.2f}%/年。"
+            for label, value in (("甲", .15), ("乙", .20))]
+        task = self.agent.add_material(task["id"], "fees.txt", "\n\n".join(paragraphs).encode())
         record = task["materials"][0]
-        proposed = self.plan(task, kind="comparison")
-        proposed["questions"][0]["method_needs"] = ["fee_difference_v1"]
-        proposed["calculations"] = [{"id": "fee_comparison", "method": "fee_difference_v1", "question_ids": ["q1"],
-            "inputs": {"fee_a": "fee_a", "fee_b": "fee_b"}, "parameters": {"unit": "%/年"}, "assumptions": {}}]
+        parameters = dict(unit="%/年", fee_kind="management_fee", period="2026-07-20")
+        proposed = self.plan(task, kind="comparison", calculations=[dict(id="fee_comparison",
+            method="fee_difference_v2", question_ids=["q1"], inputs=dict(fee_a="fee_a", fee_b="fee_b"),
+            parameters=parameters, assumptions={})])
+        proposed["questions"][0]["method_needs"] = ["fee_difference_v2"]
         specifications = []
-        for ident, label, value, part in (("fee_a", "甲", .15, "段落2"), ("fee_b", "乙", .20, "段落3")):
-            spec = self.policy_spec(self.policy())
-            spec.update(id=ident, artifact_id=record["id"], object="材料示例ETF" + label, record_locator={"part": part},
-                        text=f"材料示例ETF{label}年度费用{value:.2f}%/年。", period="年度规则", nature="合同政策条款",
-                        raw_value=value, value=value, unit="%/年", raw_unit="%/年", raw_token=f"{value:.2f}", conversion_factor=1)
-            spec["publication"]["basis_ref"].update(artifact_id=record["id"], snapshot_hash=record["snapshot_hash"], part="段落1")
-            spec["review"]["conditions"] = ["同一年度及计费基础，只比较费用，不等同实际收益差"]
-            specifications.append(spec)
-        answer = {"answers": {"q1": {"answer": "甲年度费用低0.05个百分点，不代表实际收益更高。",
-                                      "refs": ["fee_a", "fee_b"], "calculation_refs": ["fee_comparison"]}}, "theses": []}
+        for index, (ident, label, value) in enumerate((("fee_a", "甲", .15), ("fee_b", "乙", .20)), 1):
+            anchor = dict(kind="material", artifact_id=record["id"], snapshot_hash=record["snapshot_hash"],
+                part="段落"+str(index+1), quote=paragraphs[index])
+            calculation_context = dict(fund_id="材料示例ETF"+label, share_class="A类份额", period="2026-07-20",
+                fee_basis="net_assets", rate_period="annual", metric="management_fee")
+            specifications.append(dict(id=ident, artifact_id=record["id"], object="材料示例ETF"+label,
+                record_locator=dict(part=anchor["part"]), text=paragraphs[index], period="2026-07-20",
+                nature="合同政策条款", unit="%/年", raw_unit="%/年", raw_value=value, value=value,
+                raw_token=f"{value:.2f}", conversion_factor=1, question_ids=["q1"], published_at="2026-07-19",
+                publication=dict(at="2026-07-19", precision="日", timezone="Asia/Shanghai", certainty="已确认",
+                    basis="合成原件明确公布日", basis_ref=dict(anchor, part="段落1", quote=paragraphs[0])),
+                calculation_context=calculation_context,
+                calculation_context_basis={field: copy.deepcopy(anchor) for field in calculation_context},
+                review=dict(question_ids=["q1"], allowed_natures=["合同政策条款"],
+                    conditions=["同一期间、同类单项管理费及净资产计费基础"], reason="不等同实际收益差")))
+        answer = dict(answers={"q1": dict(answer="甲年度管理费低0.05个百分点，不代表实际收益更高。",
+            refs=["fee_a", "fee_b"], calculation_refs=["fee_comparison"])}, theses=[])
         final, model = self.run_model(task, [proposed, {"evidence_specs": specifications}, answer])
-        self.assertEqual(final["status"], "已完成", final.get("error"))
+        self.assertEqual(final["status"], "已完成", dict(error=final.get("error"), gaps=final["gaps"], rejected=final["rejected_evidence"]))
         self.assertAlmostEqual(final["calculations"][0]["output"]["value"], -.05)
         self.assertEqual(final["theses"], [])
         self.assertEqual(len(model.requests), 3)
@@ -360,4 +385,5 @@ class AutonomousReasoningTests(unittest.TestCase):
             final = self.agent.start(task["id"])
         serialized = json.dumps(final, ensure_ascii=False)
         self.assertNotIn("fabricated-only-credential", serialized)
-        self.assertIn("已移除敏感值", serialized)
+        self.assertEqual(final["ledger"]["dispatches"][-1]["failure_code"], "private_content")
+        self.assertEqual(final["ledger"]["used"]["model_calls"], 1)
