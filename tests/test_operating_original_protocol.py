@@ -60,8 +60,17 @@ class OperatingOriginalProtocolTests(unittest.TestCase):
         wire=provider_request_schema(self.task,schema,ORIGINAL_SPAN_PROTOCOL)
         self.assertLessEqual(len(canonical(shown))+len(canonical(wire)),MAX_CONTEXT_CHARACTERS)
         for original,projected in zip(self.views,shown['untrusted_sources']):
-            parts=([dict(zip(projected['part_columns'],row)) for row in projected['parts']]
-                   if 'part_columns' in projected else projected['parts'])
+            encoded=projected['parts']
+            if isinstance(encoded,dict):
+                self.assertEqual(set(encoded),{'layouts','rows'})
+                parts=[]
+                for row in encoded['rows']:
+                    fields=encoded['layouts'][row[0]]
+                    self.assertEqual(len(fields),len(row)-1)
+                    parts.append(dict(zip(fields,row[1:])))
+            else:
+                parts=([dict(zip(projected['part_columns'],row)) for row in encoded]
+                       if 'part_columns' in projected else encoded)
             self.assertEqual(len(parts),len(original['parts']))
             for old,new in zip(original['parts'],parts):
                 text=''.join(line[1] for line in new['indexed_lines'])
@@ -86,7 +95,19 @@ class OperatingOriginalProtocolTests(unittest.TestCase):
             instructions='\n'.join(m['content'] for m in messages[:-1])
             calls.append(instructions)
             self.assertNotIn('question_ids、period、observation_anchor',instructions)
-            self.assertIn('本次每种kind的选择项只允许以下字段',instructions)
+            self.assertIn('source_refs和kind',instructions)
+            from researchhelper.output_schema import selection_field_guide
+            schema=original_span_output_schema(task,views)
+            branches=list(schema['properties'].get('selections',{}).get('items',{}).get('anyOf',[]))
+            requirements=schema['properties'].get('requirements') or schema['properties'].get('numeric_requirements')
+            if requirements:
+                for slot in requirements['properties'].values():
+                    for option in slot['anyOf']:
+                        if 'items' in option['properties']:
+                            branches.extend(option['properties']['items']['items']['anyOf'])
+            self.assertTrue(branches)
+            for branch in branches:
+                self.assertIn(canonical(selection_field_guide(branch)),instructions)
             self.assertIn('temporal_reference',instructions)
             raise RuntimeError('offline_wire_capture_only')
         model=SimpleNamespace(supports_structured_analysis=lambda:True,supports_financial_references=lambda:True,
