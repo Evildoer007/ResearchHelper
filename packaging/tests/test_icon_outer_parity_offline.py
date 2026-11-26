@@ -1,4 +1,4 @@
-"""Independent exact outer-frame acceptance; center artwork remains ResearchHelper."""
+"""The latest supplied center retains the Helper family outer tile and safe area."""
 import hashlib
 import json
 import math
@@ -46,16 +46,15 @@ class IconOuterParityTests(unittest.TestCase):
         self.assertEqual([structure(rect) for rect in research.findall(NS + "rect")],
                          [structure(rect) for rect in reference.findall(NS + "rect")])
 
-    def test_center_is_exact_approved_demo_mark_and_matches_reference_size(self):
-        text = (ROOT / "products/app/frontend/app-icon.svg").read_text()
-        brand = (ROOT / "products/app/frontend/brand.svg").read_text()
-        marker = 'viewBox="0 0 40 40">'
-        self.assertEqual(text.split(marker, 1)[1].split('</svg>', 1)[0],
-                         brand.split(marker, 1)[1].split('</svg>', 1)[0])
-        center = ET.fromstring(text).find(NS + "svg")
-        self.assertAlmostEqual(float(center.get("x")) + float(center.get("width"))/2, 512)
-        self.assertAlmostEqual(float(center.get("y")) + float(center.get("height"))/2, 512)
-        self.assertAlmostEqual(float(center.get("width")) * 19/40, 303.6)
+    def test_center_preserves_the_supplied_mark_and_family_dimensions(self):
+        research = ET.fromstring((ROOT / "products/app/frontend/app-icon.svg").read_text())
+        brand = ET.fromstring((ROOT / "products/app/frontend/brand.svg").read_text())
+        center = research.find(NS + "g")
+        drawing = [node for node in brand if node.tag in {NS + "circle", NS + "path"}]
+        self.assertEqual([structure(node) for node in center], [structure(node) for node in drawing])
+        self.assertEqual(center.get("transform"), "translate(208.4 208.4) scale(2.371875)")
+        self.assertAlmostEqual(208.4 + 128 * 2.371875, 512)
+        self.assertAlmostEqual(128 * 2.371875, 303.6)
 
     def test_all_nine_rendered_outer_frames_are_pixel_identical(self):
         render = json.loads((OUTPUT / "render.json").read_text())
